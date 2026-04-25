@@ -11,7 +11,7 @@
   --color-card-border: rgba(155, 140, 206, 0.2);
   --glow-shadow: 0 0 20px rgba(155, 140, 206, 0.3);
   --transition-speed: 0.3s;
-  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 * {
@@ -54,9 +54,16 @@ h1, h2, h3 {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(10, 15, 29, 0.8);
-  backdrop-filter: blur(10px);
+  background: transparent;
   z-index: 1000;
+  border-bottom: 1px solid transparent;
+  transition: all var(--transition-speed);
+}
+
+.header.scrolled {
+  background: rgba(10, 15, 29, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -161,10 +168,11 @@ section {
 }
 
 .btn {
-  padding: 14px 28px;
+  padding: 16px 32px;
   border-radius: 30px;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.5px;
   cursor: pointer;
   transition: all var(--transition-speed);
   border: none;
@@ -208,8 +216,8 @@ section {
   width: 300px;
   height: 300px;
   background: var(--color-primary);
-  filter: blur(100px);
-  opacity: 0.2;
+  filter: blur(120px);
+  opacity: 0.08;
   border-radius: 50%;
   z-index: 0;
 }
@@ -276,15 +284,21 @@ section {
 }
 
 .feature-icon {
-  font-size: 40px;
   margin-bottom: 20px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 80px;
   height: 80px;
-  line-height: 80px;
-  background: rgba(155, 140, 206, 0.1);
+  background: rgba(155, 140, 206, 0.08);
   border-radius: 50%;
   color: var(--color-primary);
+}
+
+.feature-icon svg {
+  width: 36px;
+  height: 36px;
+  fill: currentColor;
 }
 
 .feature-card h3 {
