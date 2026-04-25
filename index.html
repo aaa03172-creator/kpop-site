@@ -1,77 +1,124 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dreamframe - Your Memories, Alive</title>
-  <link rel="stylesheet" href="styles.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DreamFrame - 프리미엄 스마트 수면 마스크</title>
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-  <!-- Global Nav Bar -->
-  <nav class="global-nav">
-    <div class="global-nav-content">
-      <a href="#">Dreamframe</a>
-      <a href="#">Features</a>
-      <a href="#">Tech Specs</a>
-      <a href="#">Gallery</a>
-      <a href="#">Buy</a>
-    </div>
-  </nav>
+    <!-- Header & Navigation -->
+    <header class="header">
+        <div class="logo">DreamFrame</div>
+        <nav>
+            <ul class="nav-links">
+                <li><a href="#home">홈페이지</a></li>
+                <li><a href="#product">제품</a></li>
+                <li><a href="#story">스토리</a></li>
+                <li><a href="#contact">문의</a></li>
+            </ul>
+        </nav>
+        <div class="nav-right">
+            <a href="en.html" class="lang-link">English</a>
+            <div class="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </header>
 
-  <!-- Hero Tile (White) -->
-  <section class="tile tile-white">
-    <h1 class="hero-headline">Dreamframe</h1>
-    <p class="lead">Every memory, vividly alive.</p>
-    
-    <div class="cta-group">
-      <a href="#" class="btn-primary">Learn more</a>
-      <a href="#" class="btn-secondary">Buy now</a>
-    </div>
+    <!-- Hero Section -->
+    <section id="home" class="hero">
+        <div class="hero-content">
+            <h1 class="hero-title">당신의 꿈을 기록하는<br>가장 조용한 기술</h1>
+            <p class="hero-subtitle">DreamFrame은 수면 중의 감각과 패턴을 분석해 꿈의 흐름을 시각화하는 프리미엄 스마트 수면 마스크입니다.</p>
+            <div class="cta-group">
+                <a href="#product" class="btn btn-primary">제품 살펴보기</a>
+                <a href="#story" class="btn btn-secondary">스토리 보기</a>
+            </div>
+        </div>
+        <div class="hero-image-wrapper">
+            <img src="assets/dreamframe-mask.png" alt="DreamFrame 프리미엄 수면 마스크" class="hero-image">
+        </div>
+    </section>
 
-    <!-- Product Render placeholder -->
-    <div class="product-render" style="width: 600px; height: 400px; background: linear-gradient(135deg, #f5f5f7, #e0e0e0); border-radius: 18px; margin-top: 64px; display: flex; align-items: center; justify-content: center; color: #1d1d1f; box-shadow: 0px 5px 30px 0px rgba(0, 0, 0, 0.22);">
-      [ 3D Render: Dreamframe Display ]
-    </div>
-  </section>
+    <!-- Product Intro Section -->
+    <section id="product" class="product-intro">
+        <h2 class="section-title">최상의 웰니스를 위한 혁신</h2>
+        <p class="section-desc">
+            DreamFrame은 단순한 안대가 아닙니다. 최고급 메모리폼 소재로 편안한 착용감을 제공하며, 
+            내장된 첨단 센서가 수면 주기와 뇌파의 흐름을 분석하여 당신이 밤새 여행한 꿈의 기록을 
+            안전하게 보관하고 분석합니다.
+        </p>
+        
+        <!-- Features Grid -->
+        <div class="features-grid">
+            <!-- Card 1 -->
+            <div class="feature-card">
+                <div class="feature-icon">✨</div>
+                <h3>Dream Capture</h3>
+                <p>수면 중 발생하는 뇌파를 정밀하게 추적하여 꿈의 흐름을 데이터로 안전하게 기록합니다.</p>
+            </div>
+            <!-- Card 2 -->
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>Sleep Insight</h3>
+                <p>깊은 수면, 얕은 수면, 렘(REM) 수면의 패턴을 분석하여 최적의 수면 솔루션을 제공합니다.</p>
+            </div>
+            <!-- Card 3 -->
+            <div class="feature-card">
+                <div class="feature-icon">☁️</div>
+                <h3>Soft Memory Foam</h3>
+                <p>얼굴 굴곡에 완벽히 밀착되는 프리미엄 메모리폼이 빛을 100% 차단하며 피부 자극을 최소화합니다.</p>
+            </div>
+            <!-- Card 4 -->
+            <div class="feature-card">
+                <div class="feature-icon">🌅</div>
+                <h3>Ambient Sync</h3>
+                <p>기상 시간에 맞춰 마스크 내부에 은은한 빛을 발산하여 가장 자연스럽고 상쾌한 기상을 돕습니다.</p>
+            </div>
+        </div>
+    </section>
 
-  <!-- Product Tile (Dark) -->
-  <section class="tile tile-dark">
-    <h2 class="tile-headline">AI-Powered Curation</h2>
-    <p class="lead">Your best moments, automatically selected.</p>
-    
-    <div class="cta-group">
-      <a href="#" class="btn-link">Explore AI features ></a>
-    </div>
+    <!-- Story Section -->
+    <section id="story" class="story">
+        <h2 class="section-title">우리의 스토리</h2>
+        <div class="story-content">
+            <p>우리는 일생의 3분의 1을 잠을 자며 보냅니다. 하지만 그 시간 동안 우리가 어떤 세상을 여행하는지 기억하는 사람은 많지 않습니다.</p>
+            <p>DreamFrame은 이 미지의 영역을 탐험하고자 하는 열망에서 시작되었습니다. 단순한 휴식을 넘어, 수면을 내면의 무의식과 소통하고 나를 더 깊이 이해하는 시간으로 바꾸는 경험.</p>
+            <p>기술과 감성이 결합된 가장 프라이빗하고 조용한 공간, DreamFrame이 당신의 밤을 새로운 차원의 웰니스로 안내합니다.</p>
+        </div>
+    </section>
 
-    <div class="product-render" style="width: 800px; height: 450px; background: #000; border-radius: 18px; margin-top: 64px; display: flex; align-items: center; justify-content: center; color: #fff; box-shadow: 0px 5px 30px 0px rgba(0, 0, 0, 0.4);">
-      [ 3D Render: Dreamframe UI in Dark Room ]
-    </div>
-  </section>
+    <!-- Contact Section -->
+    <section id="contact" class="contact">
+        <h2 class="section-title">문의하기</h2>
+        <p class="section-desc">DreamFrame에 대한 궁금한 점이 있으신가요? 언제든 남겨주세요.</p>
+        
+        <form id="contact-form" class="contact-form">
+            <div class="form-group">
+                <input type="text" id="name" placeholder="이름" required>
+            </div>
+            <div class="form-group">
+                <input type="email" id="email" placeholder="이메일" required>
+            </div>
+            <div class="form-group">
+                <textarea id="message" placeholder="문의 내용" required></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%;">메시지 보내기</button>
+            <div id="form-message"></div>
+        </form>
+    </section>
 
-  <!-- Product Tile (Light / Parchment) -->
-  <section class="tile tile-light">
-    <h2 class="tile-headline">Seamless Integration</h2>
-    <p class="lead">Syncs with all your devices effortlessly.</p>
-    
-    <div class="cta-group">
-      <a href="#" class="btn-primary">See compatibility</a>
-    </div>
+    <!-- Footer -->
+    <footer>
+        <div class="footer-logo">DreamFrame</div>
+        <p>Premium Sleep Technology</p>
+        <p>&copy; 2026 DreamFrame. All rights reserved.</p>
+    </footer>
 
-    <div class="product-render" style="width: 500px; height: 500px; background: #fff; border-radius: 18px; margin-top: 64px; display: flex; align-items: center; justify-content: center; color: #1d1d1f; box-shadow: 0px 5px 30px 0px rgba(0, 0, 0, 0.22);">
-      [ 3D Render: Dreamframe App on Smartphone ]
-    </div>
-  </section>
-
-  <!-- Footer -->
-  <footer>
-    <div class="footer-content">
-      <p>1. Requires an active Wi-Fi connection for automatic syncing.</p>
-      <p>2. Dreamframe App is available on iOS 15 and Android 12 or later.</p>
-      <hr style="border: 0; border-top: 1px solid rgba(0,0,0,0.1); margin: 20px 0;">
-      <p>Copyright © 2026 Dreamframe Inc. All rights reserved.</p>
-    </div>
-  </footer>
-
+    <script src="js/main.js"></script>
 </body>
 </html>
