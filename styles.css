@@ -1,0 +1,220 @@
+/* Apple Design System */
+
+:root {
+  /* Colors */
+  --action-blue: #0066cc;
+  --focus-blue: #0071e3;
+  --near-black: #1d1d1f;
+  --sky-link-blue: #2997ff;
+  --pure-white: #ffffff;
+  --parchment: #f5f5f7;
+  --near-black-tile-1: #272729;
+  --paper-white: #ffffff;
+  
+  /* Fonts */
+  --sf-pro-display: "SF Pro Display", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --sf-pro-text: "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --system-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--system-font);
+  background-color: var(--pure-white);
+  color: var(--near-black);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.47;
+  font-size: 17px;
+}
+
+/* Typography */
+h1.hero-headline {
+  font-family: var(--sf-pro-display);
+  font-size: 56px;
+  font-weight: 600;
+  line-height: 1.07;
+  letter-spacing: -0.28px;
+}
+
+h2.tile-headline {
+  font-family: var(--sf-pro-display);
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.10;
+}
+
+p.lead {
+  font-family: var(--sf-pro-display);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.14;
+  letter-spacing: 0.196px;
+  margin-top: 16px;
+  margin-bottom: 24px;
+}
+
+/* Global Nav */
+.global-nav {
+  background-color: #000000;
+  height: 44px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0 20px;
+}
+
+.global-nav-content {
+  width: 100%;
+  max-width: 980px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.global-nav a {
+  color: var(--paper-white);
+  font-family: var(--sf-pro-text);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: -0.12px;
+  text-decoration: none;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.global-nav a:hover {
+  opacity: 1;
+}
+
+/* Tiles */
+.tile {
+  width: 100%;
+  padding: 64px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.tile-light {
+  background-color: var(--parchment);
+  color: var(--near-black);
+}
+
+.tile-dark {
+  background-color: var(--near-black-tile-1);
+  color: var(--paper-white);
+}
+
+.tile-white {
+  background-color: var(--pure-white);
+  color: var(--near-black);
+}
+
+/* Buttons */
+.cta-group {
+  display: flex;
+  gap: 16px;
+  margin-top: 16px;
+  justify-content: center;
+}
+
+.btn-primary {
+  background-color: var(--action-blue);
+  color: var(--paper-white);
+  font-family: var(--sf-pro-text);
+  font-size: 17px;
+  font-weight: 400;
+  border: none;
+  border-radius: 980px;
+  padding: 11px 22px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: transform 0.2s, background-color 0.2s;
+}
+
+.btn-primary:hover {
+  background-color: #0077ed;
+}
+
+.btn-primary:active {
+  transform: scale(0.95);
+}
+
+.btn-primary:focus-visible {
+  outline: 2px solid var(--focus-blue);
+  outline-offset: 2px;
+}
+
+.btn-secondary {
+  background-color: transparent;
+  color: var(--action-blue);
+  font-family: var(--sf-pro-text);
+  font-size: 17px;
+  font-weight: 400;
+  border: 1px solid var(--action-blue);
+  border-radius: 980px;
+  padding: 10px 22px; /* 1px less to account for border */
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: transform 0.2s;
+}
+
+.btn-secondary:hover {
+  background-color: var(--action-blue);
+  color: var(--paper-white);
+}
+
+.btn-secondary:active {
+  transform: scale(0.95);
+}
+
+.btn-link {
+  color: var(--action-blue);
+  text-decoration: none;
+  font-family: var(--sf-pro-text);
+  font-size: 17px;
+  font-weight: 400;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+/* Images & Shadow */
+.product-render {
+  margin-top: 48px;
+  max-width: 100%;
+  height: auto;
+  /* Level 3 Shadow for resting products */
+  box-shadow: 0px 5px 30px 0px rgba(0, 0, 0, 0.22);
+}
+
+.product-render.no-shadow {
+  box-shadow: none;
+}
+
+/* Footer */
+footer {
+  background-color: var(--parchment);
+  padding: 64px 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.footer-content {
+  width: 100%;
+  max-width: 980px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 2.41; /* Apple's relaxed leading for footer */
+  color: rgba(0, 0, 0, 0.48);
+}
