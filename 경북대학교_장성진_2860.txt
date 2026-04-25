@@ -1,10 +1,10 @@
 [실습 제출]
-대학교: 
-성명: 
-핸드폰 뒷4자리: 
+대학교: 경북대학교
+성명: 장성진
+핸드폰 뒷4자리: 2860
 
 배포된 도메인 주소:
-https://여기에-배포주소를-입력하세요
+https://https://aaa03172-creator.github.io/kpop-site/
 
 프로젝트명:
 DreamFrame Landing Page
