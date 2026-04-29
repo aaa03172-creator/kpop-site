@@ -135,18 +135,18 @@
       "reviewReason": "Fixture represents a high-confidence configured strain alias.",
       "notes": [
         {
-          "raw": "MT318 R'",
-          "meaning": "Mouse MT318, right ear notch",
+          "raw": "MT321 R'",
+          "meaning": "Mouse MT321, right ear notch",
           "strike": "none"
         },
         {
-          "raw": "MT319 L'",
-          "meaning": "Mouse MT319, left ear notch",
+          "raw": "MT322 L'",
+          "meaning": "Mouse MT322, left ear notch",
           "strike": "none"
         },
         {
-          "raw": "MT320 R'L'",
-          "meaning": "Mouse MT320, both ears notched; moved out on reviewed card",
+          "raw": "MT323 R'L'",
+          "meaning": "Mouse MT323, both ears notched; moved out on reviewed card",
           "strike": "single"
         }
       ],
@@ -154,6 +154,35 @@
         "Create or update card snapshot from parsed fixture.",
         "Attach note lines as structured evidence.",
         "Keep export traceability to fixture source."
+      ]
+    },
+    {
+      "id": "FIXTURE-DUPLICATE-ACTIVE",
+      "uploaded": "Fixture import",
+      "type": "Separated",
+      "rawStrain": "ApoM Tg/Tg",
+      "matchedStrain": "ApoM Tg/Tg",
+      "dobRaw": "25.10.20",
+      "dobNormalized": "2025-10-20",
+      "mouseCount": "1 total",
+      "confidence": 94,
+      "status": "auto",
+      "issue": "Fixture auto-filled by policy",
+      "severity": "Low",
+      "reviewField": "mouseId",
+      "currentValue": "MT318",
+      "suggestedValue": "MT318",
+      "reviewReason": "Fixture intentionally duplicates an active seed mouse ID.",
+      "notes": [
+        {
+          "raw": "MT318 R'",
+          "meaning": "Mouse MT318, right ear notch",
+          "strike": "none"
+        }
+      ],
+      "actions": [
+        "Import as parsed result.",
+        "Run duplicate active mouse validation before canonical candidate creation."
       ]
     }
   ]

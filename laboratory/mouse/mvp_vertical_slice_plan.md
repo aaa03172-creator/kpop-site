@@ -185,6 +185,12 @@ Current fixture file:
 
 - `fixtures/sample_parse_results.json`: parsed/intermediate result fixture that can be imported through the prototype's `Import Parse JSON` button.
 - The prototype also includes a `Load Sample Fixture` button that loads equivalent embedded parsed/intermediate records without using the file picker.
+- The fixture includes a count mismatch case where the sex/count field indicates more animals than active mouse note lines. The prototype should route this to review and must not create canonical candidate rows from that fixture until reviewed.
+
+Current verification command:
+
+- `npm test` runs the Playwright-backed MVP smoke test in `scripts/verify-mvp.js`.
+- The smoke test clears local prototype session state, imports the parsed fixture, verifies review routing, applies one reviewed correction, verifies dismissed items do not become canonical candidates, uploads a local source photo, checks reload persistence, and generates a separation CSV preview with blocked rows preserved in the export log.
 
 ## UI Acceptance Checklist
 
