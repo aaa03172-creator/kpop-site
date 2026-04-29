@@ -89,6 +89,16 @@ async function main() {
   await page.getByRole("button", { name: "Colony Records" }).click();
   assert((await page.locator("#recordRows tr").filter({ hasText: "Reviewed configured value" }).count()) >= 1, "Reviewed record candidate missing.");
 
+  await page.getByRole("button", { name: "Review Queue" }).click();
+  await page.locator("#reviewRows tr").first().click();
+  const dismissedSource = await page.locator("#drawerTitle").textContent();
+  await page.getByRole("button", { name: "Dismiss With Reason" }).click();
+  await page.getByRole("button", { name: "Colony Records" }).click();
+  assert(
+    (await page.locator("#recordRows tr").filter({ hasText: dismissedSource }).count()) === 0,
+    "Dismissed review item leaked into canonical candidates."
+  );
+
   await page.getByRole("button", { name: "Photo Inbox" }).click();
   await page.setInputFiles("#photoInput", uploadPath);
   await page.waitForFunction(() => document.querySelector("#reviewSummary").textContent.includes("pending"));
