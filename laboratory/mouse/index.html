@@ -1652,6 +1652,37 @@
       return "bad";
     }
 
+    function extractMouseDisplayId(rawNoteLine) {
+      const match = String(rawNoteLine || "").match(/\b[A-Za-z]{0,4}\d+[A-Za-z0-9-]*\b/);
+      return match ? match[0] : "";
+    }
+
+    function noteStatus(note) {
+      if (note.strike === "double") return "Dead candidate";
+      if (note.strike === "single") return "Moved candidate";
+      if (note.strike === "none") return "Active candidate";
+      return "Review needed";
+    }
+
+    function canonicalCandidateRows() {
+      return photos
+        .filter((photo) => photo.type === "Separated" && photo.status === "auto")
+        .flatMap((photo) => photo.notes.map((note, index) => {
+          const mouseDisplayId = extractMouseDisplayId(note.raw);
+          if (!mouseDisplayId) return null;
+          return [
+            mouseDisplayId,
+            photo.matchedStrain,
+            "From note",
+            photo.dobNormalized,
+            "Pending genotype",
+            noteStatus(note),
+            `${photo.id} / note line ${index + 1}`
+          ];
+        }))
+        .filter(Boolean);
+    }
+
     function renderMetrics() {
       const uploaded = photos.length;
       const auto = photos.filter((photo) => photo.status === "auto").length;
@@ -1721,23 +1752,7 @@
     }
 
     function renderRecords() {
-      const baselineRecords = [
-        ["MT318", "ApoM Tg/Tg", "M", "2025-10-20 to 2025-10-28", "Tg/Tg", "Active", "IMG-8924 / note line 1"],
-        ["MT319", "ApoM Tg/Tg", "F", "2025-10-20 to 2025-10-28", "Pending review", "Awaiting Geno", "IMG-8924 / note line 2"],
-        ["GH70", "GH line", "M", "2025-12-01", "Unknown", "Conflict", "IMG-8926 / parent ID"]
-      ];
-      const reviewedUploads = photos
-        .filter((photo) => photo.id.startsWith("UPLOAD-") && photo.status === "auto")
-        .map((photo) => [
-          photo.id,
-          photo.matchedStrain,
-          "Review-derived",
-          photo.dobNormalized,
-          "Pending genotype",
-          "Accepted snapshot",
-          `${photo.id} / reviewed source photo`
-        ]);
-      const records = baselineRecords.concat(reviewedUploads);
+      const records = canonicalCandidateRows();
       document.getElementById("recordRows").innerHTML = records.map((record) => `
         <tr>
           <td class="mono">${escapeHtml(record[0])}</td>
@@ -1748,7 +1763,11 @@
           <td>${escapeHtml(record[5])}</td>
           <td>${escapeHtml(record[6])}</td>
         </tr>
-      `).join("");
+      `).join("") || `
+        <tr>
+          <td colspan="7">No reviewed mouse candidates yet.</td>
+        </tr>
+      `;
     }
 
     function renderExports() {

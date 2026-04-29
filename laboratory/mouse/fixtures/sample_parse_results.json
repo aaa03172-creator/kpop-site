@@ -104,6 +104,11 @@
           "raw": "MT319 L'",
           "meaning": "Mouse MT319, left ear notch",
           "strike": "none"
+        },
+        {
+          "raw": "MT320 R'L'",
+          "meaning": "Mouse MT320, both ears notched; moved out on reviewed card",
+          "strike": "single"
         }
       ],
       "actions": [
