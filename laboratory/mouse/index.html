@@ -1862,6 +1862,10 @@
         .filter(Boolean);
     }
 
+    function blockedExportItems() {
+      return photos.filter((photo) => photo.status === "review" || photo.status === "conflict");
+    }
+
     function renderMetrics() {
       const uploaded = photos.length;
       const auto = photos.filter((photo) => photo.status === "auto").length;
@@ -1909,7 +1913,7 @@
     }
 
     function renderReviewRows() {
-      const reviewItems = photos.filter((photo) => photo.status === "review" || photo.status === "conflict");
+      const reviewItems = blockedExportItems();
       document.getElementById("reviewSummary").textContent = `${reviewItems.length} pending review items`;
       document.getElementById("reviewImpact").textContent = `${reviewItems.length} export block${reviewItems.length === 1 ? "" : "s"} from review/conflict items`;
       document.getElementById("reviewRows").innerHTML = reviewItems.map((photo) => `
@@ -1953,7 +1957,8 @@
     function renderExports() {
       const separationReady = photos.filter((photo) => photo.type === "Separated" && photo.status === "auto").length;
       const animalsheetReady = photos.filter((photo) => photo.type === "Mating" && photo.status === "auto").length;
-      const blocked = photos.filter((photo) => photo.status === "review" || photo.status === "conflict").length;
+      const blockedItems = blockedExportItems();
+      const blocked = blockedItems.length;
       const rows = [
         ["Separation workbook CSV", "Accepted canonical structured state", separationReady, blocked, "Source photo + parsed note line per row"],
         ["Animalsheet preview", "Accepted mating/litter events", animalsheetReady, blocked, "Parent IDs and litter notes remain linked"],
@@ -1977,6 +1982,26 @@
           <td>${escapeHtml(entry.result)}</td>
         </tr>
       `).join("");
+      document.getElementById("blockedExportRows").innerHTML = blockedItems.map((photo) => `
+        <tr data-id="${escapeHtml(photo.id)}">
+          <td class="mono">${escapeHtml(photo.id)}</td>
+          <td><span class="status ${statusClasses[photo.status]}">${statusLabels[photo.status]}</span></td>
+          <td>${escapeHtml(photo.issue)}</td>
+          <td>${escapeHtml(photo.currentValue)}</td>
+          <td>${escapeHtml(photo.reviewReason)}</td>
+        </tr>
+      `).join("") || `
+        <tr>
+          <td colspan="5">No blocked export rows.</td>
+        </tr>
+      `;
+      document.querySelectorAll("#blockedExportRows tr[data-id]").forEach((row) => {
+        row.addEventListener("click", () => {
+          selectedId = row.dataset.id;
+          setView("review");
+          renderAll();
+        });
+      });
     }
 
     function renderCardImage(photo) {
@@ -2154,7 +2179,7 @@
     }
 
     function generateSeparationCsv() {
-      const blocked = photos.filter((photo) => photo.status === "review" || photo.status === "conflict").length;
+      const blocked = blockedExportItems().length;
       const rows = photos
         .filter((photo) => photo.type === "Separated" && photo.status === "auto")
         .map((photo) => [

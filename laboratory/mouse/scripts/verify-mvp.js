@@ -111,12 +111,34 @@ async function main() {
   await page.waitForFunction(() => document.querySelector("#reviewSummary").textContent.includes("pending"));
   assert((await page.locator("#inboxRows tr").filter({ hasText: "UPLOAD-" }).count()) === 1, "Uploaded source photo row missing.");
 
+  await page.reload();
+  await page.waitForSelector("#inboxRows tr");
+  assert((await page.locator("#inboxRows tr").filter({ hasText: "UPLOAD-" }).count()) === 1, "Local source photo session did not persist after reload.");
+  assert((await page.locator("#inboxRows tr").filter({ hasText: "FIXTURE-AUTO-SEPARATED" }).count()) === 1, "Imported parse fixture did not persist after reload.");
+
+  await page.getByRole("button", { name: "Exports" }).click();
+  const blockedDetailRows = page.locator("#blockedExportRows tr[data-id]");
+  assert(
+    (await blockedDetailRows.count()) >= 1,
+    "Blocked export detail rows missing."
+  );
+  const blockedSource = await blockedDetailRows.first().locator("td").first().textContent();
+  await blockedDetailRows.first().click();
+  assert((await page.locator("#drawerTitle").textContent()) === blockedSource, "Blocked export row did not open review evidence.");
   await page.getByRole("button", { name: "Exports" }).click();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
     page.getByRole("button", { name: "Generate Separation CSV" }).click()
   ]);
   assert(download.suggestedFilename() === "separation_export_preview.csv", "Unexpected export filename.");
+  assert(
+    (await page.locator("#exportLogRows tr").filter({ hasText: "Preview generated" }).count()) >= 1,
+    "Export attempt log did not record the generated preview."
+  );
+  assert(
+    (await page.locator("#exportLogRows tr").filter({ hasText: "blocked rows excluded" }).count()) >= 1,
+    "Export log did not preserve blocked-row context."
+  );
 
   assert(!browserErrors.length, `Browser errors: ${browserErrors.join(" | ")}`);
   await browser.close();
