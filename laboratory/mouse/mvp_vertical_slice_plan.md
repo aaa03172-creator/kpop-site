@@ -190,7 +190,7 @@ Current fixture file:
 Current verification command:
 
 - `npm test` runs the Playwright-backed MVP smoke test in `scripts/verify-mvp.js`.
-- The smoke test clears local prototype session state, imports the parsed fixture, verifies review routing, applies one reviewed correction, verifies dismissed items do not become canonical candidates, uploads a local source photo, checks reload persistence, and generates a separation CSV preview with blocked rows preserved in the export log.
+- The smoke test clears local prototype session state, imports the parsed fixture, verifies review routing, blocks duplicate active mouse approval until movement review, applies one reviewed correction, verifies dismissed items do not become canonical candidates, uploads a local source photo, checks reload persistence, and generates a separation CSV preview with blocked rows preserved in the export log.
 
 ## UI Acceptance Checklist
 
