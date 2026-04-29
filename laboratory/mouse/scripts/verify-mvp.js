@@ -74,6 +74,10 @@ async function main() {
   assert((await page.locator("#inboxRows tr").filter({ hasText: "FIXTURE-LOW-STRAIN" }).count()) === 1, "Fixture import row missing.");
   assert((await page.locator("#reviewRows tr").filter({ hasText: "FIXTURE-MATING-CONFLICT" }).count()) === 1, "Fixture conflict row missing.");
 
+  await page.getByRole("button", { name: "Colony Records" }).click();
+  assert((await page.locator("#recordRows tr").filter({ hasText: "MT318" }).count()) >= 1, "Auto fixture mouse candidate missing.");
+  assert((await page.locator("#recordRows tr").filter({ hasText: "Moved candidate" }).count()) >= 1, "Strike-through candidate status missing.");
+
   await page.getByRole("button", { name: "Review Queue" }).click();
   await page.locator("#reviewRows tr").first().click();
   const beforeReviewCount = await page.locator("#reviewRows tr").count();
@@ -81,6 +85,9 @@ async function main() {
   await page.getByRole("button", { name: "Apply Reviewed Changes" }).click();
   await page.waitForTimeout(50);
   assert((await page.locator("#reviewRows tr").count()) === beforeReviewCount - 1, "Reviewed correction did not leave the queue.");
+
+  await page.getByRole("button", { name: "Colony Records" }).click();
+  assert((await page.locator("#recordRows tr").filter({ hasText: "Reviewed configured value" }).count()) >= 1, "Reviewed record candidate missing.");
 
   await page.getByRole("button", { name: "Photo Inbox" }).click();
   await page.setInputFiles("#photoInput", uploadPath);

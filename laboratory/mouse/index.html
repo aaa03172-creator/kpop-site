@@ -384,6 +384,40 @@
       flex-shrink: 0;
     }
 
+    .quick-start {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+      gap: 12px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdff;
+      flex-shrink: 0;
+    }
+
+    .quick-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 6px;
+      background: var(--surface);
+      padding: 10px 12px;
+      min-width: 0;
+    }
+
+    .quick-card strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .quick-card span {
+      display: block;
+      margin-top: 2px;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
     .filters {
       display: flex;
       align-items: center;
@@ -976,6 +1010,10 @@
         grid-template-columns: repeat(2, minmax(120px, 1fr));
       }
 
+      .quick-start {
+        grid-template-columns: 1fr;
+      }
+
       .search {
         display: none;
       }
@@ -1059,6 +1097,23 @@
               </select>
             </div>
             <span class="muted" id="resultCount"></span>
+          </div>
+
+          <div class="quick-start" aria-label="Quick workflow actions">
+            <div class="quick-card">
+              <div>
+                <strong>Fastest test path</strong>
+                <span>Load fixture parse results, open review, apply a correction, then check export blocks.</span>
+              </div>
+              <button class="small-button" type="button" id="loadSampleInline">Load Sample</button>
+            </div>
+            <div class="quick-card">
+              <div>
+                <strong>Boundary check</strong>
+                <span>Imported JSON stays parsed/intermediate until review or explicit auto-fill policy.</span>
+              </div>
+              <span class="layer-chip">Non-canonical</span>
+            </div>
           </div>
 
           <div class="table-wrap">
@@ -2066,6 +2121,7 @@
     document.getElementById("uploadButton").addEventListener("click", () => document.getElementById("photoInput").click());
     document.getElementById("photoInput").addEventListener("change", handlePhotoUpload);
     document.getElementById("loadSampleButton").addEventListener("click", loadSampleFixture);
+    document.getElementById("loadSampleInline").addEventListener("click", loadSampleFixture);
     document.getElementById("importParseButton").addEventListener("click", () => document.getElementById("parseInput").click());
     document.getElementById("parseInput").addEventListener("change", handleParseImport);
     document.getElementById("generateExport").addEventListener("click", generateSeparationCsv);
