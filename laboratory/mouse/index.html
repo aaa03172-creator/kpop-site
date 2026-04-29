@@ -838,6 +838,22 @@
       gap: 8px;
     }
 
+    .reason-box {
+      display: grid;
+      gap: 4px;
+    }
+
+    .reason-box textarea {
+      min-height: 58px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      padding: 7px 8px;
+      color: var(--ink);
+      outline: none;
+    }
+
     .mini-label {
       color: var(--quiet);
       font-size: 10px;
@@ -1059,6 +1075,7 @@
           <button class="small-button" type="button" id="prdLink">PRD</button>
           <button class="small-button" type="button" id="loadSampleButton">Load Sample Fixture</button>
           <button class="small-button" type="button" id="importParseButton">Import Parse JSON</button>
+          <button class="small-button" type="button" id="resetSessionButton">Reset Local</button>
           <button class="primary-button" type="button" id="uploadButton">Upload Photos</button>
           <input class="hidden-file" id="photoInput" type="file" accept="image/*" multiple>
           <input class="hidden-file" id="parseInput" type="file" accept="application/json,.json">
@@ -1306,6 +1323,10 @@
                   <input id="afterValue" type="text" value="">
                 </div>
               </div>
+              <div class="reason-box">
+                <span class="mini-label">Dismiss reason</span>
+                <textarea id="dismissReason" placeholder="Required when dismissing a review item"></textarea>
+              </div>
             </section>
 
             <section class="panel">
@@ -1482,6 +1503,7 @@
     let statusFilter = "all";
     let typeFilter = "all";
     let generatedRecordSequence = 0;
+    const storageKey = "mouse-colony-lims-mvp-session-v1";
     const actionLogEntries = [
       "Session opened: raw source photos loaded.",
       "No destructive overwrite permitted without review."
@@ -1911,6 +1933,7 @@
       document.getElementById("reviewReason").textContent = photo.reviewReason;
       document.getElementById("beforeValue").textContent = photo.currentValue;
       document.getElementById("afterValue").value = photo.suggestedValue;
+      document.getElementById("dismissReason").value = photo.dismissReason || "";
       document.getElementById("reviewBox").style.display = photo.status === "auto" ? "none" : "grid";
 
       document.getElementById("noteList").innerHTML = photo.notes.length
@@ -2082,10 +2105,16 @@
         showToast("No review issue to dismiss for this source photo.");
         return;
       }
+      const reason = document.getElementById("dismissReason").value.trim();
+      if (!reason) {
+        showToast("Enter a dismiss reason before removing this review item.");
+        return;
+      }
       photo.issue = "Dismissed with reason";
       photo.status = "dismissed";
-      photo.reviewReason = "Dismissed review items remain non-canonical and are excluded from export.";
-      actionLogEntries.push(`Review item dismissed for ${photo.id}; reason required in production workflow.`);
+      photo.dismissReason = reason;
+      photo.reviewReason = `Dismissed review item remains non-canonical and is excluded from export. Reason: ${reason}`;
+      actionLogEntries.push(`Review item dismissed for ${photo.id}: "${reason}".`);
       renderAll();
       showToast("Review item dismissed without creating canonical records.");
     }

@@ -92,6 +92,13 @@ async function main() {
   await page.getByRole("button", { name: "Review Queue" }).click();
   await page.locator("#reviewRows tr").first().click();
   const dismissedSource = await page.locator("#drawerTitle").textContent();
+  const dismissCountBeforeReason = await page.locator("#reviewRows tr").count();
+  await page.getByRole("button", { name: "Dismiss With Reason" }).click();
+  assert(
+    (await page.locator("#reviewRows tr").count()) === dismissCountBeforeReason,
+    "Dismissed review item without a required reason."
+  );
+  await page.locator("#dismissReason").fill("Not actionable for this MVP slice");
   await page.getByRole("button", { name: "Dismiss With Reason" }).click();
   await page.getByRole("button", { name: "Colony Records" }).click();
   assert(
