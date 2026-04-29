@@ -42,6 +42,16 @@ If the layer is ambiguous, default to non-canonical until the PRD or another ado
 - Add abstractions only when they clarify the domain model or reduce meaningful duplication.
 - Keep changes scoped to the current PRD and adopted project documents.
 
+## Git And Worktree Hygiene
+- Before development changes, check the current branch and worktree status.
+- Do not develop directly on `main` or another shared default branch when a task-specific branch is appropriate.
+- For new implementation work, create or switch to a `codex/<task-name>` branch automatically unless the user requests a specific branch.
+- If already on a relevant `codex/` branch, continue there instead of creating unnecessary branch sprawl.
+- Stage only files that belong to the current task. Do not use broad `git add .` when unrelated files are present.
+- Leave unrelated user files and untracked local artifacts untouched.
+- Keep generated folders and verification artifacts such as `node_modules/`, screenshots, logs, and temporary files out of commits unless explicitly adopted as source.
+- Before commit or push, run the relevant verification command and confirm there are no unintended unstaged changes.
+
 ## UI And Workflow Guidance
 - Do not replace the lab's handwritten cage-card workflow in the initial product direction.
 - Prioritize upload, review, correction, and Excel export flows over broad dashboard decoration.
