@@ -562,6 +562,11 @@
       color: var(--muted);
     }
 
+    .status.dismissed {
+      background: #edf0f1;
+      color: var(--quiet);
+    }
+
     .layer-chip {
       display: inline-flex;
       align-items: center;
@@ -1088,6 +1093,7 @@
                 <option value="conflict">Conflict</option>
                 <option value="auto">Auto-filled</option>
                 <option value="processing">Processing</option>
+                <option value="dismissed">Dismissed</option>
               </select>
               <select id="typeFilter" aria-label="Card type filter">
                 <option value="all">All card types</option>
@@ -1485,14 +1491,16 @@
       auto: "Auto-filled",
       review: "Needs Review",
       conflict: "Conflict",
-      processing: "Processing"
+      processing: "Processing",
+      dismissed: "Dismissed"
     };
 
     const statusClasses = {
       auto: "auto",
       review: "review",
       conflict: "conflict",
-      processing: "processing"
+      processing: "processing",
+      dismissed: "dismissed"
     };
 
     const sampleParseFixtureRecords = [
@@ -2075,10 +2083,11 @@
         return;
       }
       photo.issue = "Dismissed with reason";
-      photo.status = "auto";
+      photo.status = "dismissed";
+      photo.reviewReason = "Dismissed review items remain non-canonical and are excluded from export.";
       actionLogEntries.push(`Review item dismissed for ${photo.id}; reason required in production workflow.`);
       renderAll();
-      showToast("Review item dismissed; production flow should require a reason.");
+      showToast("Review item dismissed without creating canonical records.");
     }
 
     function selectNextItem() {
