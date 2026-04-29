@@ -63,6 +63,8 @@ async function main() {
   });
 
   await page.goto(fileUrl(pagePath));
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
   await page.waitForSelector("#inboxRows tr");
 
   assert((await page.locator("#inboxRows tr").count()) >= 5, "Seed inbox rows did not render.");
@@ -73,10 +75,15 @@ async function main() {
   await page.waitForSelector("#reviewRows tr");
   assert((await page.locator("#inboxRows tr").filter({ hasText: "FIXTURE-LOW-STRAIN" }).count()) === 1, "Fixture import row missing.");
   assert((await page.locator("#reviewRows tr").filter({ hasText: "FIXTURE-MATING-CONFLICT" }).count()) === 1, "Fixture conflict row missing.");
+  assert((await page.locator("#reviewRows tr").filter({ hasText: "Count mismatch" }).count()) >= 1, "Count mismatch validation did not create a review item.");
 
   await page.getByRole("button", { name: "Colony Records" }).click();
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("#recordRows tr")].some((row) => row.textContent.includes("Moved candidate"))
+  );
   assert((await page.locator("#recordRows tr").filter({ hasText: "MT318" }).count()) >= 1, "Auto fixture mouse candidate missing.");
   assert((await page.locator("#recordRows tr").filter({ hasText: "Moved candidate" }).count()) >= 1, "Strike-through candidate status missing.");
+  assert((await page.locator("#recordRows tr").filter({ hasText: "MT401" }).count()) === 0, "Count mismatch fixture leaked into canonical candidates.");
 
   await page.getByRole("button", { name: "Review Queue" }).click();
   await page.locator("#reviewRows tr").first().click();

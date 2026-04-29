@@ -1396,7 +1396,7 @@
         matchedStrain: "ApoM Tg/Tg",
         dobRaw: "25.10.20-28",
         dobNormalized: "2025-10-20 to 2025-10-28",
-        mouseCount: "2M, 1F / 3",
+        mouseCount: "2 active / 2",
         confidence: 96,
         status: "auto",
         issue: "None",
@@ -1759,7 +1759,7 @@
       const confidence = Number(record.confidence ?? 0);
       const status = record.status || (confidence >= 90 ? "auto" : "review");
       const id = record.id || formatImportedParseId(index);
-      return {
+      return validateParsedRecord({
         id,
         uploaded: record.uploaded || `Imported ${todayLabel()}`,
         type: record.type || "Separated",
@@ -1783,7 +1783,7 @@
           "Keep raw and normalized values separate.",
           "Route uncertain values to review before canonical updates."
         ]
-      };
+      });
     }
 
     function completeLocalParse(photo) {
@@ -1802,6 +1802,80 @@
         { raw: "Note area requires manual review", meaning: "Source photo retained; parsed line is not trusted", strike: "unclear" }
       ];
       photo.actions.push("Create review item instead of updating canonical colony state.");
+    }
+
+    function expectedMouseCount(mouseCountText) {
+      const totalMatch = String(mouseCountText || "").match(/\b(\d+)\s*(?:total|mice|mouse)\b/i);
+      if (totalMatch) return Number(totalMatch[1]);
+      const slashMatch = String(mouseCountText || "").match(/\/\s*(\d+)\b/);
+      if (slashMatch) return Number(slashMatch[1]);
+      return null;
+    }
+
+    function activeNoteLineCount(notes) {
+      return (notes || []).filter((note) => note.strike === "none" && extractMouseDisplayId(note.raw)).length;
+    }
+
+    function validateParsedRecord(photo) {
+      if (photo.type !== "Separated") return photo;
+      const expectedCount = expectedMouseCount(photo.mouseCount);
+      if (expectedCount === null) return photo;
+      const activeCount = activeNoteLineCount(photo.notes);
+      if (!activeCount || expectedCount === activeCount) return photo;
+
+      photo.status = "review";
+      photo.issue = "Count mismatch";
+      photo.severity = photo.severity === "High" ? "High" : "Medium";
+      photo.reviewField = "mouseCount";
+      photo.currentValue = photo.mouseCount;
+      photo.suggestedValue = `${activeCount} active note line${activeCount === 1 ? "" : "s"}`;
+      photo.reviewReason = `Sex/count field indicates ${expectedCount}, but ${activeCount} active mouse note line${activeCount === 1 ? "" : "s"} were parsed.`;
+      photo.actions = (photo.actions || []).concat("Create review item for count mismatch before export or canonical candidate creation.");
+      return photo;
+    }
+
+    function activeMouseIds(photo) {
+      if (photo.type !== "Separated") return [];
+      return (photo.notes || [])
+        .filter((note) => note.strike === "none")
+        .map((note) => extractMouseDisplayId(note.raw))
+        .filter(Boolean);
+    }
+
+    function markDuplicateMouseReview(photo, mouseId, otherSourceId) {
+      photo.status = "conflict";
+      photo.issue = "Duplicate active mouse";
+      photo.severity = "High";
+      photo.reviewField = "mouseId";
+      photo.currentValue = `${mouseId} active in ${photo.id}`;
+      photo.suggestedValue = `Review movement before accepting ${mouseId}`;
+      photo.reviewReason = `Mouse ${mouseId} appears active in both ${photo.id} and ${otherSourceId}.`;
+      photo.actions = (photo.actions || []).concat(`Create high-severity duplicate active mouse review for ${mouseId}.`);
+    }
+
+    function validateDuplicateActiveMice(scopePhotos) {
+      const activeByMouse = new Map();
+      photos
+        .filter((photo) => photo.status === "auto" && photo.type === "Separated")
+        .forEach((photo) => {
+          activeMouseIds(photo).forEach((mouseId) => {
+            if (!activeByMouse.has(mouseId)) {
+              activeByMouse.set(mouseId, []);
+            }
+            activeByMouse.get(mouseId).push(photo);
+          });
+        });
+
+      activeByMouse.forEach((sources, mouseId) => {
+        if (sources.length < 2) return;
+        sources.forEach((photo) => {
+          if (!scopePhotos.includes(photo)) return;
+          const other = sources.find((source) => source.id !== photo.id);
+          if (other) {
+            markDuplicateMouseReview(photo, mouseId, other.id);
+          }
+        });
+      });
     }
 
     function selectedPhoto() {
@@ -2148,6 +2222,7 @@
           }
           const imported = records.map((record, index) => buildImportedParseRecord(record, index, file.name));
           photos.unshift(...imported);
+          validateDuplicateActiveMice(imported);
           selectedId = imported[0].id;
           setView(imported.some((photo) => photo.status === "review" || photo.status === "conflict") ? "review" : "inbox");
           actionLogEntries.push(`Imported ${imported.length} parsed fixture record${imported.length === 1 ? "" : "s"} from ${file.name}.`);
@@ -2166,6 +2241,7 @@
     function loadSampleFixture() {
       const imported = sampleParseFixtureRecords.map((record, index) => buildImportedParseRecord(record, index, "embedded sample fixture"));
       photos.unshift(...imported);
+      validateDuplicateActiveMice(imported);
       selectedId = imported[0].id;
       setView("review");
       actionLogEntries.push(`Loaded ${imported.length} embedded parsed fixture records.`);

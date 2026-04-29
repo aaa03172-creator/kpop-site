@@ -78,6 +78,45 @@
       ]
     },
     {
+      "id": "FIXTURE-COUNT-MISMATCH",
+      "uploaded": "Fixture import",
+      "type": "Separated",
+      "rawStrain": "ApoM Tg/Tg",
+      "matchedStrain": "ApoM Tg/Tg",
+      "dobRaw": "25.11.02",
+      "dobNormalized": "2025-11-02",
+      "mouseCount": "4 total",
+      "confidence": 93,
+      "status": "auto",
+      "issue": "Fixture auto-filled by policy",
+      "severity": "Low",
+      "reviewField": "mouseCount",
+      "currentValue": "4 total",
+      "suggestedValue": "4 total",
+      "reviewReason": "Fixture intentionally contains a count mismatch to exercise validation.",
+      "notes": [
+        {
+          "raw": "MT401 R'",
+          "meaning": "Mouse MT401, right ear notch",
+          "strike": "none"
+        },
+        {
+          "raw": "MT402 L'",
+          "meaning": "Mouse MT402, left ear notch",
+          "strike": "none"
+        },
+        {
+          "raw": "MT403 R'L'",
+          "meaning": "Mouse MT403, both ears notched",
+          "strike": "none"
+        }
+      ],
+      "actions": [
+        "Import as parsed result.",
+        "Run count mismatch validation before canonical candidate creation."
+      ]
+    },
+    {
       "id": "FIXTURE-AUTO-SEPARATED",
       "uploaded": "Fixture import",
       "type": "Separated",
@@ -85,7 +124,7 @@
       "matchedStrain": "ApoM Tg/Tg",
       "dobRaw": "25.10.20-28",
       "dobNormalized": "2025-10-20 to 2025-10-28",
-      "mouseCount": "2M, 1F / 3",
+      "mouseCount": "2 total",
       "confidence": 95,
       "status": "auto",
       "issue": "Fixture auto-filled by policy",
