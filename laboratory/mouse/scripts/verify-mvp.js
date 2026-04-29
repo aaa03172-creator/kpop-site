@@ -124,7 +124,9 @@ async function main() {
 
   await page.getByRole("button", { name: "Photo Inbox" }).click();
   await page.setInputFiles("#photoInput", uploadPath);
-  await page.waitForFunction(() => document.querySelector("#reviewSummary").textContent.includes("pending"));
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("#inboxRows tr")].some((row) => row.textContent.includes("UPLOAD-"))
+  );
   assert((await page.locator("#inboxRows tr").filter({ hasText: "UPLOAD-" }).count()) === 1, "Uploaded source photo row missing.");
 
   await page.reload();
