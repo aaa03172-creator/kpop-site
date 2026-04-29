@@ -184,6 +184,7 @@ Create small fixtures before integrating real OCR:
 Current fixture file:
 
 - `fixtures/sample_parse_results.json`: parsed/intermediate result fixture that can be imported through the prototype's `Import Parse JSON` button.
+- The prototype also includes a `Load Sample Fixture` button that loads equivalent embedded parsed/intermediate records without using the file picker.
 
 ## UI Acceptance Checklist
 
