@@ -1170,6 +1170,7 @@
           </div>
           <div class="toolbar">
             <strong id="reviewSummary">0 pending review items</strong>
+            <span class="muted" id="reviewImpact">0 exports blocked</span>
             <button class="small-button" type="button" id="jumpFirstReview">Open first pending item</button>
           </div>
           <div class="table-wrap">
@@ -1244,6 +1245,30 @@
                 </tr>
               </thead>
               <tbody id="exportRows"></tbody>
+            </table>
+            <table aria-label="Export attempt log">
+              <thead>
+                <tr>
+                  <th>Attempt</th>
+                  <th>View</th>
+                  <th>Included</th>
+                  <th>Blocked</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody id="exportLogRows"></tbody>
+            </table>
+            <table aria-label="Blocked export rows">
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Issue</th>
+                  <th>Current Value</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody id="blockedExportRows"></tbody>
             </table>
           </div>
         </section>
@@ -1508,6 +1533,15 @@
       "Session opened: raw source photos loaded.",
       "No destructive overwrite permitted without review."
     ];
+    const exportLogEntries = [
+      {
+        time: "Session start",
+        view: "Separation workbook CSV",
+        included: 0,
+        blocked: 0,
+        result: "No export attempted yet"
+      }
+    ];
 
     const statusLabels = {
       auto: "Auto-filled",
@@ -1614,8 +1648,58 @@
       }[character]));
     }
 
+    function persistSession() {
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify({
+          version: 1,
+          selectedId,
+          generatedRecordSequence,
+          photos,
+          actionLogEntries,
+          exportLogEntries
+        }));
+      } catch (error) {
+        console.warn("Local session could not be persisted.", error);
+      }
+    }
+
+    function restoreSession() {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(storageKey) || "null");
+        if (!saved || saved.version !== 1 || !Array.isArray(saved.photos)) {
+          return;
+        }
+        photos.splice(0, photos.length, ...saved.photos);
+        if (Array.isArray(saved.actionLogEntries)) {
+          actionLogEntries.splice(0, actionLogEntries.length, ...saved.actionLogEntries);
+        }
+        if (Array.isArray(saved.exportLogEntries)) {
+          exportLogEntries.splice(0, exportLogEntries.length, ...saved.exportLogEntries);
+        }
+        generatedRecordSequence = Number(saved.generatedRecordSequence || 0);
+        selectedId = photos.some((photo) => photo.id === saved.selectedId) ? saved.selectedId : photos[0]?.id;
+      } catch (error) {
+        console.warn("Local session could not be restored.", error);
+      }
+    }
+
+    function resetLocalSession() {
+      window.localStorage.removeItem(storageKey);
+      showToast("Local prototype session cleared. Reloading seed fixture data.");
+      window.setTimeout(() => window.location.reload(), 350);
+    }
+
     function todayLabel() {
       return new Intl.DateTimeFormat("en", {
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(new Date());
+    }
+
+    function timestampLabel() {
+      return new Intl.DateTimeFormat("en", {
+        month: "short",
+        day: "2-digit",
         hour: "2-digit",
         minute: "2-digit"
       }).format(new Date());
@@ -1631,8 +1715,18 @@
       return `PARSE-${String(generatedRecordSequence).padStart(4, "0")}-${String(index + 1).padStart(2, "0")}`;
     }
 
-    function buildUploadedPhoto(file, index) {
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.addEventListener("load", () => resolve(String(reader.result || "")));
+        reader.addEventListener("error", () => reject(reader.error));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function buildUploadedPhoto(file, index) {
       const id = formatUploadId(index);
+      const sourceUrl = await readFileAsDataUrl(file);
       return {
         id,
         uploaded: `Today ${todayLabel()}`,
@@ -1651,7 +1745,7 @@
         suggestedValue: "Review against Strain Master",
         reviewReason: "Raw source photo is stored locally. Parsed values will stay intermediate until reviewed.",
         sourceName: file.name,
-        sourceUrl: URL.createObjectURL(file),
+        sourceUrl,
         notes: [],
         actions: [
           "Store uploaded file as raw source evidence.",
@@ -1817,6 +1911,7 @@
     function renderReviewRows() {
       const reviewItems = photos.filter((photo) => photo.status === "review" || photo.status === "conflict");
       document.getElementById("reviewSummary").textContent = `${reviewItems.length} pending review items`;
+      document.getElementById("reviewImpact").textContent = `${reviewItems.length} export block${reviewItems.length === 1 ? "" : "s"} from review/conflict items`;
       document.getElementById("reviewRows").innerHTML = reviewItems.map((photo) => `
         <tr class="${photo.id === selectedId ? "selected" : ""}" data-id="${photo.id}">
           <td>${escapeHtml(photo.severity)}</td>
@@ -1871,6 +1966,15 @@
           <td>${escapeHtml(row[2])}</td>
           <td>${escapeHtml(row[3])}</td>
           <td>${escapeHtml(row[4])}</td>
+        </tr>
+      `).join("");
+      document.getElementById("exportLogRows").innerHTML = exportLogEntries.slice(-5).reverse().map((entry) => `
+        <tr>
+          <td>${escapeHtml(entry.time)}</td>
+          <td>${escapeHtml(entry.view)}</td>
+          <td>${escapeHtml(entry.included)}</td>
+          <td>${escapeHtml(entry.blocked)}</td>
+          <td>${escapeHtml(entry.result)}</td>
         </tr>
       `).join("");
     }
@@ -1976,26 +2080,33 @@
       window.setTimeout(() => toast.classList.remove("show"), 2200);
     }
 
-    function handlePhotoUpload(event) {
+    async function handlePhotoUpload(event) {
       const files = Array.from(event.target.files || []);
       if (!files.length) return;
-      const uploadedPhotos = files.map(buildUploadedPhoto);
-      photos.unshift(...uploadedPhotos);
-      selectedId = uploadedPhotos[0].id;
-      setView("inbox");
-      renderAll();
-      showToast(`${uploadedPhotos.length} raw source photo${uploadedPhotos.length > 1 ? "s" : ""} stored locally.`);
-      uploadedPhotos.forEach((photo, index) => {
-        window.setTimeout(() => {
-          completeLocalParse(photo);
-          if (selectedId === photo.id) {
-            setView("review");
-          }
-          renderAll();
-          showToast(`${photo.id} parsed locally and sent to review.`);
-        }, 700 + index * 300);
-      });
-      event.target.value = "";
+      try {
+        const uploadedPhotos = await Promise.all(files.map(buildUploadedPhoto));
+        photos.unshift(...uploadedPhotos);
+        selectedId = uploadedPhotos[0].id;
+        setView("inbox");
+        persistSession();
+        renderAll();
+        showToast(`${uploadedPhotos.length} raw source photo${uploadedPhotos.length > 1 ? "s" : ""} stored locally.`);
+        uploadedPhotos.forEach((photo, index) => {
+          window.setTimeout(() => {
+            completeLocalParse(photo);
+            if (selectedId === photo.id) {
+              setView("review");
+            }
+            persistSession();
+            renderAll();
+            showToast(`${photo.id} parsed locally and sent to review.`);
+          }, 700 + index * 300);
+        });
+      } catch (error) {
+        showToast("Could not store uploaded source photo locally.");
+      } finally {
+        event.target.value = "";
+      }
     }
 
     function handleParseImport(event) {
@@ -2015,6 +2126,7 @@
           selectedId = imported[0].id;
           setView(imported.some((photo) => photo.status === "review" || photo.status === "conflict") ? "review" : "inbox");
           actionLogEntries.push(`Imported ${imported.length} parsed fixture record${imported.length === 1 ? "" : "s"} from ${file.name}.`);
+          persistSession();
           renderAll();
           showToast(`${imported.length} parsed fixture record${imported.length === 1 ? "" : "s"} imported as intermediate results.`);
         } catch (error) {
@@ -2032,6 +2144,7 @@
       selectedId = imported[0].id;
       setView("review");
       actionLogEntries.push(`Loaded ${imported.length} embedded parsed fixture records.`);
+      persistSession();
       renderAll();
       showToast("Embedded parsed fixture loaded as intermediate results.");
     }
@@ -2041,6 +2154,7 @@
     }
 
     function generateSeparationCsv() {
+      const blocked = photos.filter((photo) => photo.status === "review" || photo.status === "conflict").length;
       const rows = photos
         .filter((photo) => photo.type === "Separated" && photo.status === "auto")
         .map((photo) => [
@@ -2052,6 +2166,15 @@
           "source photo retained"
         ]);
       if (!rows.length) {
+        exportLogEntries.push({
+          time: timestampLabel(),
+          view: "Separation workbook CSV",
+          included: 0,
+          blocked,
+          result: "Blocked: no reviewed separation rows"
+        });
+        renderExports();
+        persistSession();
         showToast("No reviewed separation rows are ready for export.");
         return;
       }
@@ -2063,6 +2186,16 @@
       link.download = "separation_export_preview.csv";
       link.click();
       URL.revokeObjectURL(link.href);
+      exportLogEntries.push({
+        time: timestampLabel(),
+        view: "Separation workbook CSV",
+        included: rows.length,
+        blocked,
+        result: blocked ? "Preview generated; blocked rows excluded" : "Preview generated"
+      });
+      actionLogEntries.push(`Generated separation CSV preview with ${rows.length} included row${rows.length === 1 ? "" : "s"} and ${blocked} blocked review item${blocked === 1 ? "" : "s"}.`);
+      renderExports();
+      persistSession();
       showToast("Separation CSV generated from reviewed rows only.");
     }
 
@@ -2095,6 +2228,7 @@
       photo.issue = "Reviewed correction applied";
       photo.confidence = Math.max(photo.confidence, 90);
       actionLogEntries.push(`User applied reviewed change on ${photo.id}: "${beforeValue}" -> "${afterValue}".`);
+      persistSession();
       renderAll();
       showToast("Reviewed change applied with before/after action log entry.");
     }
@@ -2115,6 +2249,7 @@
       photo.dismissReason = reason;
       photo.reviewReason = `Dismissed review item remains non-canonical and is excluded from export. Reason: ${reason}`;
       actionLogEntries.push(`Review item dismissed for ${photo.id}: "${reason}".`);
+      persistSession();
       renderAll();
       showToast("Review item dismissed without creating canonical records.");
     }
@@ -2160,6 +2295,7 @@
     document.getElementById("photoInput").addEventListener("change", handlePhotoUpload);
     document.getElementById("loadSampleButton").addEventListener("click", loadSampleFixture);
     document.getElementById("loadSampleInline").addEventListener("click", loadSampleFixture);
+    document.getElementById("resetSessionButton").addEventListener("click", resetLocalSession);
     document.getElementById("importParseButton").addEventListener("click", () => document.getElementById("parseInput").click());
     document.getElementById("parseInput").addEventListener("change", handleParseImport);
     document.getElementById("generateExport").addEventListener("click", generateSeparationCsv);
@@ -2184,6 +2320,7 @@
       window.location.href = "final_mouse_colony_prd.md";
     });
 
+    restoreSession();
     renderAll();
   </script>
 </body>
