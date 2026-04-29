@@ -80,7 +80,7 @@ async function main() {
 
   await page.getByRole("button", { name: "Colony Records" }).click();
   await page.waitForFunction(() =>
-    [...document.querySelectorAll("#recordRows tr")].some((row) => row.textContent.includes("Moved candidate"))
+    [...document.querySelectorAll("#recordRows tr")].some((row) => row.textContent.includes("FIXTURE-AUTO-SEPARATED"))
   );
   assert((await page.locator("#recordRows tr").filter({ hasText: "MT321" }).count()) >= 1, "Auto fixture mouse candidate missing.");
   assert((await page.locator("#recordRows tr").filter({ hasText: "Moved candidate" }).count()) >= 1, "Strike-through candidate status missing.");
@@ -88,6 +88,13 @@ async function main() {
   assert((await page.locator("#recordRows tr").filter({ hasText: "FIXTURE-DUPLICATE-ACTIVE" }).count()) === 0, "Duplicate active fixture leaked into canonical candidates.");
 
   await page.getByRole("button", { name: "Review Queue" }).click();
+  await page.locator("#reviewRows tr").filter({ hasText: "FIXTURE-DUPLICATE-ACTIVE" }).click();
+  const duplicateReviewCount = await page.locator("#reviewRows tr").count();
+  await page.locator("#afterValue").fill("Reviewed duplicate without movement");
+  await page.getByRole("button", { name: "Apply Reviewed Changes" }).click();
+  await page.waitForTimeout(50);
+  assert((await page.locator("#reviewRows tr").count()) === duplicateReviewCount, "Duplicate active mouse was accepted without movement review.");
+
   await page.locator("#reviewRows tr").first().click();
   const beforeReviewCount = await page.locator("#reviewRows tr").count();
   await page.locator("#afterValue").fill("Reviewed configured value");

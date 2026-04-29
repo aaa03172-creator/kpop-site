@@ -2312,6 +2312,10 @@
         showToast("This item is already auto-filled; no review action is required.");
         return;
       }
+      if (photo.reviewField === "mouseId" && photo.issue === "Duplicate active mouse") {
+        showToast("Resolve the mouse movement before accepting this duplicate active mouse.");
+        return;
+      }
       const afterValue = document.getElementById("afterValue").value.trim();
       if (!afterValue) {
         showToast("Enter a reviewed value before applying changes.");
