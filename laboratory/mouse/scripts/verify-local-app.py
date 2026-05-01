@@ -123,6 +123,8 @@ def main() -> None:
                 "mouse_event",
                 "genotyping_record",
                 "strain_target_genotype",
+                "cage_registry",
+                "mouse_cage_assignment",
                 "my_assigned_strain",
                 "distribution_import",
                 "distribution_assignment_row",
@@ -241,7 +243,9 @@ def main() -> None:
                 assert_true("Mouse Events" in index_html, "Local UI should expose mouse events.")
                 assert_true("Correction Log" in index_html, "Local UI should expose correction history.")
                 assert_true("Search & CSV Export" in index_html, "Local UI should expose search and CSV export.")
+                assert_true("Cage View" in index_html, "Local UI should expose cage management.")
                 assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
+                assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
                 assert_true("Distribution Assignment Import" in index_html, "Local UI should expose distribution import.")
                 assert_true("/[^a-z0-9가-힣]/g" in index_html, "Local UI strain matching key should preserve Korean strain text.")
@@ -466,6 +470,36 @@ def main() -> None:
                     any(mouse["display_id"] == "MT323" and mouse["status"] == "moved" for mouse in mice),
                     "Mouse API should expose moved candidate from single-struck note line.",
                 )
+                cage = client.post(
+                    "/api/cages",
+                    json={"cage_label": "C-014", "location": "Room A / Rack 2", "cage_type": "holding"},
+                )
+                assert_true(cage.status_code == 200, "Could not create cage registry entry.")
+                cage_payload = cage.json()
+                assert_true(cage_payload["source_record_id"], "Cage creation should create source evidence.")
+                moved_mouse = next(mouse for mouse in mice if mouse["display_id"] == "MT321")
+                moved_to_cage = client.post(
+                    f"/api/mice/{moved_mouse['mouse_id']}/move-cage",
+                    json={"cage_id": cage_payload["cage_id"], "note": "Verified cage movement flow."},
+                )
+                assert_true(moved_to_cage.status_code == 200, "Could not move mouse to cage.")
+                moved_payload = moved_to_cage.json()
+                assert_true(moved_payload["event_id"], "Cage move should create a mouse event.")
+                cage_rows = client.get("/api/cages").json()
+                assert_true(
+                    any(row["cage_label"] == "C-014" and row["active_mouse_count"] == 1 for row in cage_rows),
+                    "Cage list should show active mouse count after assignment.",
+                )
+                mice_after_cage = client.get("/api/mice", params={"query": "C-014"}).json()
+                assert_true(
+                    any(mouse["display_id"] == "MT321" and mouse["current_cage_label"] == "C-014" for mouse in mice_after_cage),
+                    "Mouse search should find current cage assignment.",
+                )
+                cage_events = client.get("/api/mouse-events").json()
+                assert_true(
+                    any(event["event_type"] == "moved" and event["related_entity_id"] == cage_payload["cage_id"] for event in cage_events),
+                    "Cage movement should be present in mouse event history.",
+                )
                 filtered_mice = client.get("/api/mice", params={"query": "MT321"}).json()
                 assert_true(
                     filtered_mice and all("MT321" in mouse["display_id"] for mouse in filtered_mice),
@@ -486,6 +520,13 @@ def main() -> None:
                 csv_text = csv_response.text
                 assert_true("display_id" in csv_text and "MT321" in csv_text, "Mouse CSV export is missing expected rows.")
                 assert_true("MT323" not in csv_text, "Filtered mouse CSV export should exclude non-matching mice.")
+                dashboard_before = client.get("/api/genotyping-dashboard")
+                assert_true(dashboard_before.status_code == 200, "Genotyping dashboard endpoint failed.")
+                dashboard_before_rows = {card["key"]: card["count"] for card in dashboard_before.json()}
+                assert_true(
+                    dashboard_before_rows.get("not_sampled", 0) >= 1,
+                    "Genotyping dashboard should count newly separated mice that need sampling.",
+                )
                 genotyping_target = next(mouse for mouse in mice if mouse["display_id"] == "MT321")
                 target_rule = client.post(
                     "/api/strain-target-genotypes",
@@ -506,6 +547,32 @@ def main() -> None:
                     ),
                     "Target genotype rule API should preserve configured rule values.",
                 )
+                cage = client.post(
+                    "/api/cages",
+                    json={
+                        "cage_label": "A-101",
+                        "location": "Room A",
+                        "rack": "R1",
+                        "shelf": "S2",
+                        "cage_type": "holding",
+                        "note": "Verification cage.",
+                    },
+                )
+                assert_true(cage.status_code == 200, "Could not create cage registry entry.")
+                cage_payload = cage.json()
+                assert_true(cage_payload["source_record_id"], "Cage creation should leave source evidence.")
+                duplicate_cage = client.post("/api/cages", json={"cage_label": "a-101"})
+                assert_true(duplicate_cage.status_code == 409, "Duplicate cage labels should be rejected case-insensitively.")
+                cage_move = client.post(
+                    f"/api/mice/{genotyping_target['mouse_id']}/move-cage",
+                    json={"cage_id": cage_payload["cage_id"], "note": "Moved for verification."},
+                )
+                assert_true(cage_move.status_code == 200, "Could not assign mouse to cage.")
+                cages = client.get("/api/cages").json()
+                assert_true(
+                    any(item["cage_label"] == "A-101" and item["active_mouse_count"] == 1 for item in cages),
+                    "Cage list should include active assignment counts.",
+                )
                 genotyping_update = client.post(
                     "/api/genotyping/update",
                     json={
@@ -520,6 +587,11 @@ def main() -> None:
                 assert_true(genotyping_payload["genotyping_status"] == "resulted", "Genotyping result should mark mouse resulted.")
                 assert_true(genotyping_payload["target_match_status"] == "matches_target", "Genotyping result should use configured target matching.")
                 assert_true(genotyping_payload["next_action"] == "consider_for_mating", "Matching target genotype should suggest a mating review action.")
+                dashboard_after = {card["key"]: card["count"] for card in client.get("/api/genotyping-dashboard").json()}
+                assert_true(
+                    dashboard_after.get("target_confirmed", 0) >= 1,
+                    "Genotyping dashboard should count mice with confirmed target genotypes.",
+                )
                 genotyping_records = client.get("/api/genotyping-records").json()
                 assert_true(
                     any(record["mouse_id"] == genotyping_target["mouse_id"] and record["normalized_result"] == "Tg/Tg" for record in genotyping_records),
@@ -569,11 +641,28 @@ def main() -> None:
                         """,
                         (genotyping_target["mouse_id"],),
                     ).fetchone()["count"]
+                    cage_move_action_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM action_log
+                        WHERE action_type = 'mouse_cage_moved' AND target_id = ?
+                        """,
+                        (genotyping_target["mouse_id"],),
+                    ).fetchone()["count"]
+                    cage_move_event_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM mouse_event
+                        WHERE event_type = 'moved' AND related_entity_type = 'cage'
+                        """
+                    ).fetchone()["count"]
                 assert_true(note_count >= 10, "Persisted note item evidence count is too low.")
                 assert_true(mouse_count >= 3, "Persisted mouse candidate count is too low.")
                 assert_true(moved_count >= 1, "Single-struck mouse note should create a moved candidate.")
                 assert_true(duplicate_leak_count == 0, "Duplicate active fixture should not create mouse candidates.")
                 assert_true(genotyping_action_count == 1, "Genotyping update should create an action log entry.")
+                assert_true(cage_move_action_count == 1, "Cage move should create an action log entry.")
+                assert_true(cage_move_event_count >= 1, "Cage move should create a mouse event.")
                 correction = client.post(
                     "/api/corrections",
                     json={
