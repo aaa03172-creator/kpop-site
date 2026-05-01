@@ -156,15 +156,18 @@ Goal:
 Minimum behavior:
 
 - Show a separation workbook preview table.
+- Refresh export preview/readiness after accepted uploads and reviewed corrections.
 - Show blocked export count.
 - Show stale or failed export state.
 - Record export attempt in export log.
+- Generate final Excel-style outputs only when the user explicitly requests an export.
 
 Acceptance checks:
 
 - Export preview is labeled as export/view.
 - Blocking review items prevent final export.
 - Export does not become the only source of truth.
+- Export behavior is upload-driven and on-demand, not tied to a monthly schedule or automated email handoff.
 
 ## Initial Test Fixtures
 

@@ -243,10 +243,12 @@ Adopt:
 - Stale export warning.
 - Export preview.
 - Failed export log.
+- On-demand generation using the lab filename pattern, rather than a scheduled monthly automation.
 
 Design principle:
 
 - Excel exports must look like generated views, not the canonical database.
+- Email sending should remain outside MVP; the product can support a manual handoff checklist without sending mail automatically.
 
 ### 5. Settings And Masters
 

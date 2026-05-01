@@ -1220,7 +1220,7 @@
           <div class="page-header">
             <div>
               <h1>Export Center</h1>
-              <p>Excel workbooks are generated views from accepted structured records, never the only source of truth.</p>
+              <p>Export readiness updates after accepted uploads and reviews. Excel workbooks are generated on demand from structured records, never the only source of truth.</p>
             </div>
             <span class="layer-chip">Export or view</span>
           </div>
@@ -2034,8 +2034,8 @@
       const blockedItems = blockedExportItems();
       const blocked = blockedItems.length;
       const rows = [
-        ["Separation workbook CSV", "Accepted canonical structured state", separationReady, blocked, "Source photo + parsed note line per row"],
-        ["Animalsheet preview", "Accepted mating/litter events", animalsheetReady, blocked, "Parent IDs and litter notes remain linked"],
+        ["Separation workbook CSV", "Accepted canonical structured state", separationReady, blocked, "Source photo + parsed note line per row; filename follows date + strain + 분리 현황표"],
+        ["Animalsheet preview", "Accepted mating/litter events", animalsheetReady, blocked, "Parent IDs and litter notes remain linked; filename follows date + strain + animal sheet"],
         ["Review block list", "Review item", blocked, 0, "Low-confidence and conflict rows excluded from exports"]
       ];
       document.getElementById("exportRows").innerHTML = rows.map((row) => `
