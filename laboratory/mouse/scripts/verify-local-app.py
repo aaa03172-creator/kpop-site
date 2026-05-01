@@ -63,6 +63,7 @@ def main() -> None:
                 "strain_registry",
                 "correction_log",
                 "mouse_event",
+                "genotyping_record",
                 "my_assigned_strain",
                 "distribution_import",
                 "distribution_assignment_row",
@@ -182,7 +183,7 @@ def main() -> None:
                 assert_true("Correction Log" in index_html, "Local UI should expose correction history.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
                 assert_true("Distribution Assignment Import" in index_html, "Local UI should expose distribution import.")
-                assert_true("/[^a-z0-9]/g" in index_html, "Local UI strain matching key should use a valid regex.")
+                assert_true("/[^a-z0-9가-힣]/g" in index_html, "Local UI strain matching key should preserve Korean strain text.")
                 assert_true(client.get("/api/assigned-strains").json() == [], "Assigned strain scope should start empty.")
                 assert_true(client.get("/api/source-records").json() == [], "Source evidence should start empty.")
                 assert_true(client.get("/api/strains").json() == [], "Strain registry should start empty.")
@@ -404,6 +405,25 @@ def main() -> None:
                     any(mouse["display_id"] == "MT323" and mouse["status"] == "moved" for mouse in mice),
                     "Mouse API should expose moved candidate from single-struck note line.",
                 )
+                genotyping_target = next(mouse for mouse in mice if mouse["display_id"] == "MT321")
+                genotyping_update = client.post(
+                    "/api/genotyping/update",
+                    json={
+                        "mouse_id": genotyping_target["mouse_id"],
+                        "sample_id": "MT321",
+                        "raw_result": "Tg/Tg",
+                        "normalized_result": "Tg/Tg",
+                    },
+                )
+                assert_true(genotyping_update.status_code == 200, "Could not update genotyping workflow state.")
+                genotyping_payload = genotyping_update.json()
+                assert_true(genotyping_payload["genotyping_status"] == "resulted", "Genotyping result should mark mouse resulted.")
+                assert_true(genotyping_payload["next_action"] == "review_result", "Genotyping result should request result review.")
+                genotyping_records = client.get("/api/genotyping-records").json()
+                assert_true(
+                    any(record["mouse_id"] == genotyping_target["mouse_id"] and record["normalized_result"] == "Tg/Tg" for record in genotyping_records),
+                    "Genotyping record history should preserve the entered result.",
+                )
                 with db.connection() as conn:
                     note_count = conn.execute(
                         "SELECT COUNT(*) AS count FROM card_note_item_log"
@@ -420,10 +440,19 @@ def main() -> None:
                         """,
                         ("note_FIXTURE-DUPLICATE-ACTIVE_%",),
                     ).fetchone()["count"]
+                    genotyping_action_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM action_log
+                        WHERE action_type = 'genotyping_resulted' AND target_id = ?
+                        """,
+                        (genotyping_target["mouse_id"],),
+                    ).fetchone()["count"]
                 assert_true(note_count >= 10, "Persisted note item evidence count is too low.")
                 assert_true(mouse_count >= 3, "Persisted mouse candidate count is too low.")
                 assert_true(moved_count >= 1, "Single-struck mouse note should create a moved candidate.")
                 assert_true(duplicate_leak_count == 0, "Duplicate active fixture should not create mouse candidates.")
+                assert_true(genotyping_action_count == 1, "Genotyping update should create an action log entry.")
                 correction = client.post(
                     "/api/corrections",
                     json={

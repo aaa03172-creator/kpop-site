@@ -47,7 +47,7 @@
     h1 { font-size: 22px; }
     h2 { font-size: 16px; margin-bottom: 10px; }
     p { color: var(--muted); }
-    button, input {
+    button, input, select {
       font: inherit;
     }
     button {
@@ -63,7 +63,7 @@
       width: 100%;
       margin: 8px 0 12px;
     }
-    input[type="text"] {
+    input[type="text"], select {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -251,6 +251,31 @@
           </tr>
         </thead>
         <tbody id="mouseRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
+      <h2>Genotyping Worklist</h2>
+      <p>Manual MVP path for tail sample collection and result entry.</p>
+      <div class="form-grid">
+        <label>
+          Mouse
+          <select id="genotypingMouse"></select>
+        </label>
+        <label>
+          Sample ID
+          <input id="genotypingSampleId" type="text" placeholder="MT321">
+        </label>
+        <label>
+          Result
+          <input id="genotypingResult" type="text" placeholder="Tg/Tg">
+        </label>
+        <button id="genotypingButton" type="button">Update Genotyping</button>
+      </div>
+      <p class="muted" id="genotypingMessage"></p>
+      <table>
+        <thead><tr><th>Mouse</th><th>Sample</th><th>Status</th><th>Result</th><th>Next action</th></tr></thead>
+        <tbody id="genotypingRows"></tbody>
       </table>
     </section>
 
@@ -525,6 +550,18 @@
           mouse.source_note_item_id || "--"
         ])
       ).join("") || row(["No mouse candidates yet", "", "", "", "", "", "", "", ""]);
+      document.getElementById("genotypingMouse").innerHTML = mice.map((mouse) =>
+        `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.ear_label_raw || "")}</option>`
+      ).join("");
+      document.getElementById("genotypingRows").innerHTML = mice.map((mouse) =>
+        row([
+          mouse.display_id,
+          mouse.sample_id || "--",
+          mouse.genotyping_status,
+          mouse.genotype_result || "--",
+          mouse.next_action
+        ])
+      ).join("") || row(["No mouse candidates yet", "", "", "", ""]);
       document.getElementById("noteRows").innerHTML = noteItems.map((item) =>
         row([
           item.parse_id || item.photo_id || "--",
@@ -632,6 +669,31 @@
       document.getElementById("distributionMessage").textContent =
         `Imported ${result.stored_rows} assignment rows from ${result.source_file_name}.`;
       document.getElementById("distributionFile").value = "";
+      await refresh();
+    });
+
+    document.getElementById("genotypingButton").addEventListener("click", async () => {
+      const mouseId = document.getElementById("genotypingMouse").value;
+      if (!mouseId) {
+        document.getElementById("genotypingMessage").textContent = "Import mouse candidates first.";
+        return;
+      }
+      const sampleId = document.getElementById("genotypingSampleId").value.trim();
+      const result = document.getElementById("genotypingResult").value.trim();
+      const updated = await api("/api/genotyping/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mouse_id: mouseId,
+          sample_id: sampleId,
+          raw_result: result,
+          normalized_result: result
+        })
+      });
+      document.getElementById("genotypingMessage").textContent =
+        `Updated sample ${updated.sample_id || "--"}; status ${updated.genotyping_status}.`;
+      document.getElementById("genotypingSampleId").value = "";
+      document.getElementById("genotypingResult").value = "";
       await refresh();
     });
 
