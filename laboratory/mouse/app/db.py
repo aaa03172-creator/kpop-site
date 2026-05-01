@@ -129,6 +129,34 @@ def init_db() -> None:
                 notes TEXT NOT NULL DEFAULT ''
             );
 
+            CREATE TABLE IF NOT EXISTS distribution_import (
+                distribution_import_id TEXT PRIMARY KEY,
+                source_file_name TEXT NOT NULL,
+                source_file_path TEXT NOT NULL DEFAULT '',
+                received_date TEXT NOT NULL DEFAULT '',
+                sheet_name TEXT NOT NULL DEFAULT '',
+                imported_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'parsed',
+                notes TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS distribution_assignment_row (
+                assignment_row_id TEXT PRIMARY KEY,
+                distribution_import_id TEXT NOT NULL,
+                source_sheet TEXT NOT NULL DEFAULT '',
+                source_row_number INTEGER,
+                institution_or_group TEXT NOT NULL DEFAULT '',
+                responsible_person_raw TEXT NOT NULL DEFAULT '',
+                mating_type_raw TEXT NOT NULL DEFAULT '',
+                matched_strain_id TEXT,
+                cage_count_raw TEXT NOT NULL DEFAULT '',
+                mating_cage_count_raw TEXT NOT NULL DEFAULT '',
+                confidence REAL NOT NULL DEFAULT 0,
+                review_status TEXT NOT NULL DEFAULT 'candidate',
+                traceability TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY (distribution_import_id) REFERENCES distribution_import(distribution_import_id)
+            );
+
             CREATE TABLE IF NOT EXISTS ear_label_master (
                 ear_label_code TEXT PRIMARY KEY,
                 display_text TEXT NOT NULL,
@@ -219,6 +247,8 @@ def init_db() -> None:
                 ON mouse_master(display_id, raw_strain_text, dob_start, dob_end, ear_label_code);
             CREATE INDEX IF NOT EXISTS idx_mouse_master_sample
                 ON mouse_master(sample_id);
+            CREATE INDEX IF NOT EXISTS idx_distribution_assignment_import
+                ON distribution_assignment_row(distribution_import_id, source_row_number);
             """
         )
         conn.executemany(
