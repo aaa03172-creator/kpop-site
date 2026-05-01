@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 import re
 import hashlib
+import csv
+import io
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -89,6 +91,17 @@ class MouseEventCreate(BaseModel):
 class ReviewResolutionCreate(BaseModel):
     resolution_note: str = Field(min_length=1)
     resolved_value: str = ""
+
+
+class GenotypingUpdate(BaseModel):
+    mouse_id: str = Field(min_length=1)
+    sample_id: str = ""
+    sample_date: str = ""
+    raw_result: str = ""
+    normalized_result: str = ""
+    result_date: str = ""
+    target_name: str = ""
+    notes: str = ""
 
 
 @app.get("/")
@@ -1096,6 +1109,157 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "resolution_note": payload.resolution_note,
         "resolved_value": payload.resolved_value,
     }
+
+
+def suggested_genotyping_fields(normalized_result: str) -> dict[str, str]:
+    result = normalized_result.strip()
+    if not result:
+        return {
+            "genotyping_status": "sampled",
+            "genotype_result": "",
+            "genotype_result_date": "",
+            "target_match_status": "unknown",
+            "use_category": "unknown",
+            "next_action": "awaiting_result",
+        }
+    if result.lower() in {"failed", "fail", "no result"}:
+        return {
+            "genotyping_status": "failed",
+            "genotype_result": result,
+            "target_match_status": "unknown",
+            "use_category": "unknown",
+            "next_action": "review_result",
+        }
+    return {
+        "genotyping_status": "resulted",
+        "genotype_result": result,
+        "target_match_status": "unknown",
+        "use_category": "unknown",
+        "next_action": "review_result",
+    }
+
+
+@app.post("/api/genotyping/update")
+def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
+    updated_at = utc_now()
+    sample_date = payload.sample_date or updated_at[:10]
+    normalized_result = payload.normalized_result.strip() or payload.raw_result.strip()
+    suggestions = suggested_genotyping_fields(normalized_result)
+    result_date = payload.result_date or (updated_at[:10] if normalized_result else "")
+    with connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT mouse_id, display_id, sample_id, sample_date, genotyping_status,
+                   genotype_result, genotype_result_date, next_action
+            FROM mouse_master
+            WHERE mouse_id = ?
+            """,
+            (payload.mouse_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Mouse not found.")
+        before = dict(existing)
+        conn.execute(
+            """
+            UPDATE mouse_master
+            SET sample_id = ?,
+                sample_date = ?,
+                genotyping_status = ?,
+                genotype = COALESCE(NULLIF(?, ''), genotype),
+                genotype_status = ?,
+                genotype_result = ?,
+                genotype_result_date = ?,
+                target_match_status = ?,
+                use_category = ?,
+                next_action = ?,
+                updated_at = ?
+            WHERE mouse_id = ?
+            """,
+            (
+                payload.sample_id or before["display_id"],
+                sample_date,
+                suggestions["genotyping_status"],
+                suggestions["genotype_result"],
+                "confirmed" if suggestions["genotyping_status"] == "resulted" else "pending",
+                suggestions["genotype_result"],
+                result_date,
+                suggestions["target_match_status"],
+                suggestions["use_category"],
+                suggestions["next_action"],
+                updated_at,
+                payload.mouse_id,
+            ),
+        )
+        record_id = new_id("genotyping")
+        conn.execute(
+            """
+            INSERT INTO genotyping_record
+                (genotyping_id, mouse_id, sample_id, sample_date, result_date,
+                 target_name, raw_result, normalized_result, result_status,
+                 confidence, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record_id,
+                payload.mouse_id,
+                payload.sample_id or before["display_id"],
+                sample_date,
+                result_date,
+                payload.target_name,
+                payload.raw_result,
+                normalized_result,
+                suggestions["genotyping_status"] if suggestions["genotyping_status"] != "sampled" else "pending",
+                1.0 if normalized_result else 0.8,
+                payload.notes,
+                updated_at,
+                updated_at,
+            ),
+        )
+        after = conn.execute(
+            """
+            SELECT mouse_id, sample_id, sample_date, genotyping_status,
+                   genotype_result, genotype_result_date, next_action
+            FROM mouse_master
+            WHERE mouse_id = ?
+            """,
+            (payload.mouse_id,),
+        ).fetchone()
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "genotyping_resulted" if normalized_result else "sample_collected",
+                payload.mouse_id,
+                json.dumps(before, ensure_ascii=False),
+                json.dumps(dict(after), ensure_ascii=False),
+                updated_at,
+            ),
+        )
+    return {"genotyping_id": record_id, **dict(after)}
+
+
+@app.get("/api/genotyping-records")
+def list_genotyping_records() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT genotyping_id, mouse_id, sample_id, sample_date, submitted_date,
+                   result_date, target_name, raw_result, normalized_result,
+                   result_status, source_photo_id, confidence, notes, created_at, updated_at
+            FROM genotyping_record
+            ORDER BY updated_at DESC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def contains_filter(columns: list[str], query: str) -> tuple[str, list[str]]:
+    normalized = f"%{query.lower()}%"
+    clause = " OR ".join([f"LOWER(COALESCE({column}, '')) LIKE ?" for column in columns])
+    return f"({clause})", [normalized for _ in columns]
 
 
 @app.get("/api/note-items")

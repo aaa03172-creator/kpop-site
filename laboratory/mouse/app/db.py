@@ -177,6 +177,26 @@ def init_db() -> None:
                 FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
             );
 
+            CREATE TABLE IF NOT EXISTS genotyping_record (
+                genotyping_id TEXT PRIMARY KEY,
+                mouse_id TEXT,
+                sample_id TEXT NOT NULL DEFAULT '',
+                sample_date TEXT,
+                submitted_date TEXT,
+                result_date TEXT,
+                target_name TEXT NOT NULL DEFAULT '',
+                raw_result TEXT NOT NULL DEFAULT '',
+                normalized_result TEXT NOT NULL DEFAULT '',
+                result_status TEXT NOT NULL DEFAULT 'pending',
+                source_photo_id TEXT,
+                confidence REAL NOT NULL DEFAULT 0,
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (mouse_id) REFERENCES mouse_master(mouse_id),
+                FOREIGN KEY (source_photo_id) REFERENCES photo_log(photo_id)
+            );
+
             CREATE TABLE IF NOT EXISTS my_assigned_strain (
                 assigned_strain_id TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL,
@@ -317,6 +337,8 @@ def init_db() -> None:
                 ON correction_log(entity_type, entity_id, corrected_at);
             CREATE INDEX IF NOT EXISTS idx_mouse_event_mouse
                 ON mouse_event(mouse_id, event_date);
+            CREATE INDEX IF NOT EXISTS idx_genotyping_record_mouse
+                ON genotyping_record(mouse_id, sample_id);
             """
         )
         conn.executemany(
