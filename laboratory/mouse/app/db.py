@@ -248,6 +248,19 @@ def init_db() -> None:
                 FOREIGN KEY (review_id) REFERENCES review_queue(review_id)
             );
 
+            CREATE TABLE IF NOT EXISTS export_log (
+                export_id TEXT PRIMARY KEY,
+                export_type TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                query TEXT NOT NULL DEFAULT '',
+                row_count INTEGER NOT NULL DEFAULT 0,
+                blocked_review_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'generated',
+                exported_at TEXT NOT NULL,
+                source_layer TEXT NOT NULL DEFAULT 'export or view',
+                note TEXT NOT NULL DEFAULT ''
+            );
+
             CREATE TABLE IF NOT EXISTS mouse_event (
                 event_id TEXT PRIMARY KEY,
                 mouse_id TEXT NOT NULL,
@@ -464,6 +477,8 @@ def init_db() -> None:
                 ON source_record(source_type, imported_at);
             CREATE INDEX IF NOT EXISTS idx_correction_log_entity
                 ON correction_log(entity_type, entity_id, corrected_at);
+            CREATE INDEX IF NOT EXISTS idx_export_log_type_time
+                ON export_log(export_type, exported_at);
             CREATE INDEX IF NOT EXISTS idx_mouse_event_mouse
                 ON mouse_event(mouse_id, event_date);
             CREATE INDEX IF NOT EXISTS idx_genotyping_record_mouse

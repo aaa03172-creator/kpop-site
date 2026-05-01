@@ -443,6 +443,10 @@
         <thead><tr><th>Blocker</th><th>Severity</th><th>Suggested</th><th>Reason</th></tr></thead>
         <tbody id="exportBlockerRows"></tbody>
       </table>
+      <table>
+        <thead><tr><th>File</th><th>Type</th><th>Rows</th><th>Blocked</th><th>Generated</th><th>Filter</th></tr></thead>
+        <tbody id="exportLogRows"></tbody>
+      </table>
     </section>
   </main>
 
@@ -581,7 +585,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, photos, reviews, mice, noteItems, mouseEvents, cages, targets, genotypingDashboard, preview] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, photos, reviews, mice, noteItems, mouseEvents, cages, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -596,7 +600,8 @@
         api("/api/cages"),
         api("/api/strain-target-genotypes"),
         api("/api/genotyping-dashboard"),
-        api("/api/export-preview")
+        api("/api/export-preview"),
+        api("/api/export-log")
       ]);
 
       document.getElementById("health").textContent = health.storage;
@@ -793,6 +798,16 @@
           item.review_reason || item.parse_id || "--"
         ])
       ).join("") || row(["No open review blockers", "", "", ""]);
+      document.getElementById("exportLogRows").innerHTML = exportLog.map((item) =>
+        row([
+          item.filename,
+          item.export_type,
+          item.row_count,
+          item.blocked_review_count,
+          item.exported_at,
+          item.query || "--"
+        ])
+      ).join("") || row(["No exports generated yet", "", "", "", "", ""]);
     }
 
     document.getElementById("uploadButton").addEventListener("click", async () => {

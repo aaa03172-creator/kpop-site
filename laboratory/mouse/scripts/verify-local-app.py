@@ -120,6 +120,7 @@ def main() -> None:
                 "source_record",
                 "strain_registry",
                 "correction_log",
+                "export_log",
                 "mouse_event",
                 "genotyping_record",
                 "strain_target_genotype",
@@ -248,6 +249,7 @@ def main() -> None:
                 assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
                 assert_true("exportRows" in index_html, "Local UI should expose export preview rows.")
                 assert_true("exportBlockerRows" in index_html, "Local UI should expose export blockers.")
+                assert_true("exportLogRows" in index_html, "Local UI should expose export history.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
                 assert_true("Distribution Assignment Import" in index_html, "Local UI should expose distribution import.")
                 assert_true("/[^a-z0-9가-힣]/g" in index_html, "Local UI strain matching key should preserve Korean strain text.")
@@ -522,6 +524,13 @@ def main() -> None:
                 csv_text = csv_response.text
                 assert_true("display_id" in csv_text and "MT321" in csv_text, "Mouse CSV export is missing expected rows.")
                 assert_true("MT323" not in csv_text, "Filtered mouse CSV export should exclude non-matching mice.")
+                export_log = client.get("/api/export-log").json()
+                assert_true(export_log, "CSV generation should create an export log entry.")
+                assert_true(export_log[0]["export_type"] == "mouse_csv", "Export log should record CSV export type.")
+                assert_true(export_log[0]["filename"] == "mouse_records_filtered.csv", "Export log should preserve generated filename.")
+                assert_true(export_log[0]["query"] == "MT321", "Export log should preserve the export filter.")
+                assert_true(export_log[0]["row_count"] == len(filtered_mice), "Export log should preserve exported row count.")
+                assert_true(export_log[0]["source_layer"] == "export or view", "Export log should stay in the export/view layer.")
                 export_preview = client.get("/api/export-preview").json()
                 assert_true(export_preview["source_layer"] == "export or view", "Export preview should stay an export/view layer.")
                 assert_true(export_preview["export_type"] == "separation_preview", "Export preview should identify its workbook-like shape.")
