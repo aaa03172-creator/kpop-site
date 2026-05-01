@@ -144,6 +144,24 @@ async function main() {
     (await page.locator("#assignedStrainRows tr").filter({ hasText: "ApoM Tg/Tg" }).filter({ hasText: "Canonical scope" }).count()) === 1,
     "My Assigned Strains seed scope missing."
   );
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("#assignedStrainName").fill("GFAP Cre; S1PR1 fl/fl");
+  await page.locator("#assignedStrainAliases").fill("GFAP S1PR1");
+  await page.getByRole("button", { name: "Add / Update Scope" }).click();
+  assert(
+    (await page.locator("#assignedStrainRows tr").filter({ hasText: "GFAP Cre; S1PR1 fl/fl" }).filter({ hasText: "Active" }).count()) === 1,
+    "Manual assigned strain was not added to active scope."
+  );
+  await page.locator("#assignedStrainRows tr").filter({ hasText: "GFAP Cre; S1PR1 fl/fl" }).getByRole("button", { name: "Deactivate" }).click();
+  assert(
+    (await page.locator("#assignedStrainRows tr").filter({ hasText: "GFAP Cre; S1PR1 fl/fl" }).filter({ hasText: "Inactive" }).count()) === 1,
+    "Assigned strain deactivate action failed."
+  );
+  await page.locator("#assignedStrainRows tr").filter({ hasText: "GFAP Cre; S1PR1 fl/fl" }).getByRole("button", { name: "Reactivate" }).click();
+  assert(
+    (await page.locator("#assignedStrainRows tr").filter({ hasText: "GFAP Cre; S1PR1 fl/fl" }).filter({ hasText: "Active" }).count()) === 1,
+    "Assigned strain reactivate action failed."
+  );
 
   await page.getByRole("button", { name: "Load Distribution Fixture" }).click();
   assert(
@@ -219,7 +237,24 @@ async function main() {
     (await page.locator("#recordRows tr").filter({ hasText: "FIXTURE-OUTSIDE-SCOPE" }).count()) === 0,
     "Outside assigned strain scope fixture leaked into canonical candidates."
   );
-  await page.getByRole("button", { name: "Reset Local" }).click();
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
+  await page.waitForSelector("#inboxRows tr");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("#assignedStrainName").fill("GFAP Cre; S1PR1 fl/fl");
+  await page.locator("#assignedStrainAliases").fill("GFAP S1PR1");
+  await page.getByRole("button", { name: "Add / Update Scope" }).click();
+  await page.getByRole("button", { name: "Import Parse JSON" }).click();
+  await page.setInputFiles("#parseInput", outsideScopeFixturePath);
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("#recordRows tr")].some((row) => row.textContent.includes("FIXTURE-OUTSIDE-SCOPE"))
+  );
+  assert(
+    (await page.locator("#recordRows tr").filter({ hasText: "FIXTURE-OUTSIDE-SCOPE" }).filter({ hasText: "GF101" }).count()) >= 1,
+    "Newly assigned strain did not allow canonical candidates for matching parsed records."
+  );
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
   await page.waitForSelector("#inboxRows tr");
 
   await page.getByRole("button", { name: "Import Distribution JSON" }).click();
