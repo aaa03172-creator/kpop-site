@@ -25,6 +25,8 @@ The slice should prove the core product loop before adding broad dashboard featu
 | Artifact | Boundary | Notes |
 | --- | --- | --- |
 | Uploaded cage card image | raw source | Must be retained even if parsing fails. |
+| Imported distribution workbook | raw source | Periodic assignment source; must not overwrite photo-backed colony state. |
+| Parsed distribution row | parsed or intermediate result | Can suggest strain master entries and expected cage counts after review. |
 | OCR text | parsed or intermediate result | Never treated as clean canonical data by itself. |
 | ROI field extraction | parsed or intermediate result | Store field confidence and source region when available. |
 | Normalized DOB or strain match | parsed or intermediate result | Becomes canonical only through policy or review. |
@@ -41,6 +43,7 @@ The current prototype is static HTML. If the project moves into application code
 | Module | Responsibility |
 | --- | --- |
 | `source_store` | Save and retrieve raw photos and import files. |
+| `assignment_importer` | Parse distribution workbooks into assigned people, mating types, and expected cage counts. |
 | `parse_pipeline` | OCR, ROI extraction, raw field parsing, confidence. |
 | `normalization` | Date normalization, strain alias matching, genotype matching. |
 | `validation` | Required fields, count consistency, date logic, active conflict checks. |
@@ -74,6 +77,26 @@ Acceptance checks:
 - Upload failure does not create partial parsed or canonical records.
 - Re-uploading the same source does not silently duplicate downstream state.
 - One failed or review-blocked photo does not block unrelated photos from the same batch.
+
+### Step 1A: Distribution Workbook Intake
+
+Goal:
+
+- Register periodic assignment workbooks as raw source evidence before photo processing.
+
+Minimum behavior:
+
+- Accept a `.xlsx` distribution workbook such as `20260407 의대 수의대 분배현황표.xlsx`.
+- Preserve the original file name, received/import time, sheet name, row number, and parsed row values.
+- Parse repeated blocks with responsible person, mating type, cage count, and mating cage count.
+- Suggest candidate strain/master entries from `mating 종류` values without silently confirming them.
+- Show review items for unknown or changed assignment rows.
+
+Acceptance checks:
+
+- Distribution imports update assigned scope and strain-master suggestions, not current cage/card state.
+- Merged responsible-person cells are carried down as row evidence without losing the original row trace.
+- A newer distribution workbook can supersede older assignment scope while preserving import history.
 
 ### Step 2: Stub OCR And Field Extraction
 

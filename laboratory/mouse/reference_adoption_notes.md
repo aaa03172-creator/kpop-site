@@ -259,6 +259,7 @@ Adopt:
 
 - Strain Master.
 - Strain Alias Master.
+- Distribution Import Master for periodic assignment workbooks.
 - Genotype Category Master.
 - Management Rule Master.
 - Card Type Rules.
@@ -268,6 +269,7 @@ UX guidance:
 
 - Unknown parsed values should create review items.
 - Adding a new strain/genotype/rule should feel deliberate, not automatic.
+- Periodic distribution workbooks should update assignment scope and candidate strain suggestions, not overwrite accepted cage/card state.
 
 ## External References Worth Evaluating
 

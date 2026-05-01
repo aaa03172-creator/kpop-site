@@ -189,6 +189,30 @@ Genotyping sheets may include:
 
 These records should link to mouse IDs where possible and update genotype status.
 
+### 5.5 Distribution / Assignment Workbook
+
+The user may periodically receive a distribution workbook such as `20260407 의대 수의대 분배현황표.xlsx`.
+
+This workbook is not an animal state export. It is an assignment and planning source that says who is responsible for which mating types and how many cages are assigned or expected.
+
+Observed structure from the current example:
+
+- one `Mating` sheet;
+- repeated column blocks for institution/group sections such as `수의대` and `의대`;
+- each block contains responsible person, `mating 종류`, `Cage 갯수`, and `mating cage 개수`;
+- merged person cells indicate that multiple mating types belong to one responsible person or group;
+- total or subtotal values may appear in the `mating cage 개수` column.
+
+The system should treat this file as raw source evidence first. Rows from this workbook may create or update:
+
+- assigned-person scope,
+- candidate strain or mating type names,
+- expected cage counts,
+- optional strain-master suggestions,
+- review items when a distribution row conflicts with existing configured strains or active records.
+
+The distribution workbook must not silently overwrite photo-backed colony state. It should help the user know what they are responsible for and which strain names should be pre-registered before processing photos.
+
 ## 6. Note And Strike-Through Rules
 
 The `Note` section is not plain free text. It is structured evidence and must be parsed line by line.
@@ -248,7 +272,7 @@ Strain names, genotype categories, PCR protocols, and management rules must not 
 
 ### 7.2 Strain Pre-Registration
 
-When the user receives an assigned strain list, they should enter it into `Strain_Master` before processing photos.
+When the user receives an assigned strain list or distribution workbook, they should import or enter it before processing photos. Distribution rows can suggest new `Strain_Master` entries, but confirmation should remain reviewable.
 
 Benefits:
 
@@ -599,6 +623,45 @@ Fields:
 - `exported_at`
 - `notes`
 
+### 8.15 `distribution_import`
+
+Purpose: records periodic assignment workbook imports.
+
+Boundary: raw source plus parsed/intermediate rows until reviewed.
+
+Fields:
+
+- `distribution_import_id`
+- `source_file_name`
+- `source_file_path`
+- `received_date`
+- `sheet_name`
+- `imported_at`
+- `status`: imported / parsed / reviewed / superseded
+- `notes`
+
+### 8.16 `distribution_assignment_row`
+
+Purpose: row-level assignment extracted from a distribution workbook.
+
+Boundary: parsed/intermediate result unless reviewed into configuration.
+
+Fields:
+
+- `assignment_row_id`
+- `distribution_import_id`
+- `source_sheet`
+- `source_row_number`
+- `institution_or_group`
+- `responsible_person_raw`
+- `mating_type_raw`
+- `matched_strain_id`
+- `cage_count_raw`
+- `mating_cage_count_raw`
+- `confidence`
+- `review_status`
+- `traceability`
+
 ## 9. Parsing Pipeline
 
 ### 9.1 Upload
@@ -606,6 +669,8 @@ Fields:
 The user uploads photos from phone or PC. Direct in-animal-room app use is not required for MVP.
 
 Batch upload should be a first-class path because the user will often upload many cage card/name tag photos at once after animal-room work. Each upload batch should have a `batch_id`, preserve per-photo source evidence, and show per-batch progress across processing, review, accepted, and blocked states. A failed or low-confidence photo in a batch must not prevent the rest of the batch from being stored, parsed, reviewed, or exported when ready.
+
+Distribution workbook upload is a separate raw-source intake path from cage-card photo upload. It updates assignment scope and strain-master suggestions, not current cage/card state.
 
 ### 9.2 Image Quality Check
 
