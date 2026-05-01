@@ -102,6 +102,10 @@
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
+    .mono {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+    }
     .full { grid-column: 1 / -1; }
     .form-grid {
       display: grid;
@@ -179,6 +183,48 @@
     </section>
 
     <section class="full">
+      <h2>Colony Records</h2>
+      <p>Current mouse-level candidate state from accepted source-backed note lines.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Mouse ID</th>
+            <th>Strain</th>
+            <th>DOB</th>
+            <th>Ear label</th>
+            <th>Code</th>
+            <th>Status</th>
+            <th>Genotyping</th>
+            <th>Next action</th>
+            <th>Source note</th>
+          </tr>
+        </thead>
+        <tbody id="mouseRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
+      <h2>Parsed Note Evidence</h2>
+      <p>Line-level parsed evidence preserved before mouse state is written.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Line</th>
+            <th>Raw note</th>
+            <th>Type</th>
+            <th>Strike</th>
+            <th>Interpreted</th>
+            <th>Mouse ID</th>
+            <th>Ear code</th>
+            <th>Review</th>
+          </tr>
+        </thead>
+        <tbody id="noteRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
       <h2>Export Readiness</h2>
       <p id="exportPreview"></p>
     </section>
@@ -205,11 +251,13 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, photos, reviews, preview] = await Promise.all([
+      const [health, assignedStrains, photos, reviews, mice, noteItems, preview] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/photos"),
         api("/api/review-items"),
+        api("/api/mice"),
+        api("/api/note-items"),
         api("/api/export-preview")
       ]);
 
@@ -228,6 +276,32 @@
       document.getElementById("reviewRows").innerHTML = reviews.map((item) =>
         row([item.issue, item.severity, item.suggested_value, item.status])
       ).join("") || row(["No review items", "", "", ""]);
+      document.getElementById("mouseRows").innerHTML = mice.map((mouse) =>
+        row([
+          mouse.display_id,
+          mouse.raw_strain_text || "--",
+          mouse.dob_raw || mouse.dob_start || "--",
+          mouse.ear_label_raw || "--",
+          mouse.ear_label_code || "--",
+          mouse.status,
+          mouse.genotyping_status,
+          mouse.next_action,
+          mouse.source_note_item_id || "--"
+        ])
+      ).join("") || row(["No mouse candidates yet", "", "", "", "", "", "", "", ""]);
+      document.getElementById("noteRows").innerHTML = noteItems.map((item) =>
+        row([
+          item.parse_id || item.photo_id || "--",
+          item.line_number ?? "--",
+          item.raw_line_text,
+          item.parsed_type,
+          item.strike_status,
+          item.interpreted_status,
+          item.parsed_mouse_display_id || "--",
+          item.parsed_ear_label_code || "--",
+          item.needs_review ? "Needs review" : "No"
+        ])
+      ).join("") || row(["No parsed note evidence yet", "", "", "", "", "", "", "", ""]);
       document.getElementById("exportPreview").textContent =
         `Photos: ${preview.photos}. Parsed results: ${preview.parsed_results}. ` +
         `Blocked review items: ${preview.blocked_review_items}. Ready: ${preview.ready ? "yes" : "no"}.`;
@@ -251,6 +325,8 @@
       const result = await api("/api/fixtures/import-sample", { method: "POST" });
       document.getElementById("fixtureMessage").textContent =
         `Imported ${result.imported_parse_results} parsed records; ` +
+        `${result.created_or_updated_note_items} note lines; ` +
+        `${result.created_or_updated_mouse_candidates} mouse candidates; ` +
         `${result.created_or_updated_review_items} review items open.`;
       await refresh();
     });
