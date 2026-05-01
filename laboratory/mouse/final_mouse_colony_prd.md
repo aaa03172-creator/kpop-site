@@ -832,7 +832,7 @@ If a mouse that was previously in a separated cage appears as a parent in a mati
 8. User reviews exceptions on PC.
 9. Export previews and export readiness update after each accepted upload/review action.
 
-The workflow should be upload-driven, not calendar-driven. A monthly lab handoff may still happen outside the system, but the product should keep records continuously current as photos are uploaded.
+The workflow should be upload-driven, not calendar-driven. Any lab handoff should happen from the current accepted state when the user needs it, while the product keeps records continuously current as photos are uploaded.
 
 ### 13.2 Separated Cage Workflow
 
