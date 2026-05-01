@@ -830,6 +830,9 @@ If a mouse that was previously in a separated cage appears as a parent in a mati
 6. System auto-fills records.
 7. System creates warnings/review items only where needed.
 8. User reviews exceptions on PC.
+9. Export previews and export readiness update after each accepted upload/review action.
+
+The workflow should be upload-driven, not calendar-driven. A monthly lab handoff may still happen outside the system, but the product should keep records continuously current as photos are uploaded.
 
 ### 13.2 Separated Cage Workflow
 
@@ -886,6 +889,8 @@ The lab's existing formats should be preserved as much as possible:
 
 These outputs should be generated from structured records. They should not be the only source of truth.
 
+Current lab examples use `animal sheet.xlsx` for mating cage status and `분리 현황표.xlsx` for separated cage status. Existing lab workbooks can be imported as previous snapshots or template references. They should be reconciled against photo-backed records and must not silently overwrite newer accepted source-photo-derived state.
+
 ### 15.2 Separation Output
 
 Should summarize by card snapshot:
@@ -916,6 +921,13 @@ Should summarize:
 ### 15.4 Export Log
 
 Every export should be logged with date, type, and file path.
+
+Exports are generated on demand by the user, not automatically on a monthly schedule. The expected filename pattern is:
+
+- `{update_date} {strain} animal sheet.xlsx`
+- `{update_date} {strain} 분리 현황표.xlsx`
+
+The system may show a manual handoff checklist, but MVP should not automate email sending.
 
 ## 16. MVP Scope
 
@@ -957,6 +969,7 @@ Not required initially:
 - treatment/drug log,
 - behavior experiment tracking,
 - multi-lab permission system,
+- automated email sending,
 - native iOS/Android apps.
 
 ## 17. Future Extensions
