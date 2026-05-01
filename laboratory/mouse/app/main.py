@@ -104,6 +104,12 @@ class GenotypingUpdate(BaseModel):
     notes: str = ""
 
 
+class StrainTargetGenotypeCreate(BaseModel):
+    strain_text: str = Field(min_length=1)
+    target_genotype: str = Field(min_length=1)
+    purpose: str = "strain_maintenance"
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
@@ -418,6 +424,10 @@ def assigned_scope_match(scope: dict[str, str], record: dict[str, Any]) -> str:
         if key in scope:
             return scope[key]
     return ""
+
+
+def compact_genotype(value: str) -> str:
+    return re.sub(r"\s+", "", value or "").lower()
 
 
 def parse_optional_int(value: Any) -> int | None:
@@ -1111,7 +1121,35 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
     }
 
 
-def suggested_genotyping_fields(normalized_result: str) -> dict[str, str]:
+def target_suggestion(conn: Any, mouse_row: Any, normalized_result: str) -> dict[str, str]:
+    result_key = compact_genotype(normalized_result)
+    if not result_key:
+        return {"target_match_status": "unknown", "use_category": "unknown", "next_action": "awaiting_result"}
+    rows = conn.execute(
+        """
+        SELECT target_genotype, purpose
+        FROM strain_target_genotype
+        WHERE active = 1 AND strain_text = ?
+        ORDER BY created_at DESC
+        """,
+        (mouse_row["raw_strain_text"],),
+    ).fetchall()
+    if not rows:
+        return {"target_match_status": "unknown", "use_category": "unknown", "next_action": "review_result"}
+    for row in rows:
+        if compact_genotype(row["target_genotype"]) == result_key:
+            purpose = row["purpose"] or "unknown"
+            if purpose == "mating_candidate":
+                return {"target_match_status": "matches_target", "use_category": "mating_candidate", "next_action": "consider_for_mating"}
+            if purpose == "experimental_cross":
+                return {"target_match_status": "matches_target", "use_category": "experimental_candidate", "next_action": "available_for_experiment"}
+            if purpose == "backup":
+                return {"target_match_status": "matches_target", "use_category": "backup", "next_action": "review_needed"}
+            return {"target_match_status": "matches_target", "use_category": "maintenance_candidate", "next_action": "keep_for_maintenance"}
+    return {"target_match_status": "does_not_match_target", "use_category": "cleanup_candidate", "next_action": "cleanup_or_confirm"}
+
+
+def suggested_genotyping_fields(normalized_result: str, target: dict[str, str] | None = None) -> dict[str, str]:
     result = normalized_result.strip()
     if not result:
         return {
@@ -1130,6 +1168,12 @@ def suggested_genotyping_fields(normalized_result: str) -> dict[str, str]:
             "use_category": "unknown",
             "next_action": "review_result",
         }
+    if target:
+        return {
+            "genotyping_status": "resulted",
+            "genotype_result": result,
+            **target,
+        }
     return {
         "genotyping_status": "resulted",
         "genotype_result": result,
@@ -1144,13 +1188,12 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
     updated_at = utc_now()
     sample_date = payload.sample_date or updated_at[:10]
     normalized_result = payload.normalized_result.strip() or payload.raw_result.strip()
-    suggestions = suggested_genotyping_fields(normalized_result)
     result_date = payload.result_date or (updated_at[:10] if normalized_result else "")
     with connection() as conn:
         existing = conn.execute(
             """
             SELECT mouse_id, display_id, sample_id, sample_date, genotyping_status,
-                   genotype_result, genotype_result_date, next_action
+                   raw_strain_text, genotype_result, genotype_result_date, next_action
             FROM mouse_master
             WHERE mouse_id = ?
             """,
@@ -1159,6 +1202,8 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
         if existing is None:
             raise HTTPException(status_code=404, detail="Mouse not found.")
         before = dict(existing)
+        target = target_suggestion(conn, existing, normalized_result) if normalized_result else None
+        suggestions = suggested_genotyping_fields(normalized_result, target)
         conn.execute(
             """
             UPDATE mouse_master
@@ -1218,7 +1263,8 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
         after = conn.execute(
             """
             SELECT mouse_id, sample_id, sample_date, genotyping_status,
-                   genotype_result, genotype_result_date, next_action
+                   genotype_result, genotype_result_date, target_match_status,
+                   use_category, next_action
             FROM mouse_master
             WHERE mouse_id = ?
             """,
@@ -1239,6 +1285,63 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
             ),
         )
     return {"genotyping_id": record_id, **dict(after)}
+
+
+@app.get("/api/strain-target-genotypes")
+def list_strain_target_genotypes() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT target_id, strain_text, target_genotype, purpose, active, created_at
+            FROM strain_target_genotype
+            ORDER BY active DESC, strain_text COLLATE NOCASE, created_at DESC
+            """
+        ).fetchall()
+    result = []
+    for row in rows:
+        payload = dict(row)
+        payload["active"] = bool(payload["active"])
+        result.append(payload)
+    return result
+
+
+@app.post("/api/strain-target-genotypes")
+def create_strain_target_genotype(payload: StrainTargetGenotypeCreate) -> dict[str, Any]:
+    target_id = new_id("target_genotype")
+    created_at = utc_now()
+    strain_text = " ".join(payload.strain_text.split())
+    target_genotype = " ".join(payload.target_genotype.split())
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO strain_target_genotype
+                (target_id, strain_text, target_genotype, purpose, active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (target_id, strain_text, target_genotype, payload.purpose, 1, created_at),
+        )
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "strain_target_genotype_created",
+                target_id,
+                None,
+                json.dumps({"strain_text": strain_text, "target_genotype": target_genotype, "purpose": payload.purpose}, ensure_ascii=False),
+                created_at,
+            ),
+        )
+    return {
+        "target_id": target_id,
+        "strain_text": strain_text,
+        "target_genotype": target_genotype,
+        "purpose": payload.purpose,
+        "active": True,
+        "created_at": created_at,
+    }
 
 
 @app.get("/api/genotyping-records")
@@ -1279,24 +1382,154 @@ def list_note_items() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+MOUSE_SELECT = """
+    SELECT mouse_id, display_id, id_prefix, strain_id, raw_strain_text, sex,
+           genotype, genotype_status, dob_raw, dob_start, dob_end,
+           ear_label_raw, ear_label_code, ear_label_confidence,
+           ear_label_review_status, sample_id, sample_date, genotyping_status,
+           genotype_result, genotype_result_date, target_match_status,
+           use_category, next_action, source_note_item_id,
+           current_card_snapshot_id, status, source_photo_id,
+           created_at, updated_at
+    FROM mouse_master
+"""
+
+
+def mouse_rows(conn: Any, query: str = "") -> list[Any]:
+    params: list[str] = []
+    where = ""
+    if query.strip():
+        clause, params = contains_filter(
+            [
+                "display_id",
+                "raw_strain_text",
+                "sex",
+                "genotype",
+                "genotype_status",
+                "dob_raw",
+                "ear_label_raw",
+                "ear_label_code",
+                "sample_id",
+                "genotyping_status",
+                "genotype_result",
+                "use_category",
+                "next_action",
+                "status",
+                "source_note_item_id",
+            ],
+            query.strip(),
+        )
+        where = f"WHERE {clause}"
+    return conn.execute(
+        f"""
+        {MOUSE_SELECT}
+        {where}
+        ORDER BY display_id COLLATE NOCASE, created_at
+        """,
+        params,
+    ).fetchall()
+
+
 @app.get("/api/mice")
-def list_mice() -> list[dict[str, Any]]:
+def list_mice(query: str = "") -> list[dict[str, Any]]:
     with connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT mouse_id, display_id, id_prefix, strain_id, raw_strain_text, sex,
-                   genotype, genotype_status, dob_raw, dob_start, dob_end,
-                   ear_label_raw, ear_label_code, ear_label_confidence,
-                   ear_label_review_status, sample_id, sample_date, genotyping_status,
-                   genotype_result, genotype_result_date, target_match_status,
-                   use_category, next_action, source_note_item_id,
-                   current_card_snapshot_id, status, source_photo_id,
-                   created_at, updated_at
-            FROM mouse_master
-            ORDER BY display_id COLLATE NOCASE, created_at
-            """
-        ).fetchall()
+        rows = mouse_rows(conn, query)
     return [dict(row) for row in rows]
+
+
+@app.get("/api/search")
+def search_records(query: str = "") -> dict[str, Any]:
+    term = query.strip()
+    if not term:
+        return {"query": "", "mice": [], "strains": [], "reviews": [], "sources": []}
+
+    with connection() as conn:
+        mouse_matches = [dict(row) for row in mouse_rows(conn, term)[:25]]
+        strain_clause, strain_params = contains_filter(
+            ["strain_name", "common_name", "official_name", "gene", "allele", "background", "source", "status", "owner"],
+            term,
+        )
+        strains = conn.execute(
+            f"""
+            SELECT strain_id, strain_name, gene, allele, background, source, status, owner
+            FROM strain_registry
+            WHERE {strain_clause}
+            ORDER BY strain_name COLLATE NOCASE
+            LIMIT 25
+            """,
+            strain_params,
+        ).fetchall()
+        review_clause, review_params = contains_filter(
+            ["parse_id", "severity", "issue", "current_value", "suggested_value", "review_reason", "status"],
+            term,
+        )
+        reviews = conn.execute(
+            f"""
+            SELECT review_id, parse_id, severity, issue, suggested_value, status
+            FROM review_queue
+            WHERE {review_clause}
+            ORDER BY created_at DESC
+            LIMIT 25
+            """,
+            review_params,
+        ).fetchall()
+        source_clause, source_params = contains_filter(
+            ["source_type", "source_uri", "source_label", "raw_payload", "note"],
+            term,
+        )
+        sources = conn.execute(
+            f"""
+            SELECT source_record_id, source_type, source_label, source_uri, note, imported_at
+            FROM source_record
+            WHERE {source_clause}
+            ORDER BY imported_at DESC
+            LIMIT 25
+            """,
+            source_params,
+        ).fetchall()
+
+    return {
+        "query": term,
+        "mice": mouse_matches,
+        "strains": [dict(row) for row in strains],
+        "reviews": [dict(row) for row in reviews],
+        "sources": [dict(row) for row in sources],
+    }
+
+
+@app.get("/api/exports/mice.csv")
+def export_mice_csv(query: str = "") -> Response:
+    output = io.StringIO()
+    fieldnames = [
+        "mouse_id",
+        "display_id",
+        "raw_strain_text",
+        "sex",
+        "dob_raw",
+        "dob_start",
+        "dob_end",
+        "ear_label_raw",
+        "ear_label_code",
+        "status",
+        "genotyping_status",
+        "sample_id",
+        "genotype_result",
+        "next_action",
+        "source_note_item_id",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    with connection() as conn:
+        for row in mouse_rows(conn, query):
+            payload = dict(row)
+            writer.writerow({field: payload.get(field, "") for field in fieldnames})
+
+    suffix = "_filtered" if query.strip() else ""
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="mouse_records{suffix}.csv"'},
+    )
 
 
 @app.get("/api/export-preview")
