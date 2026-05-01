@@ -38,6 +38,16 @@ class AssignedStrainCreate(BaseModel):
     notes: str = ""
 
 
+class DistributionImportPayload(BaseModel):
+    layer: str = ""
+    description: str = ""
+    source_file_name: str = ""
+    source_file_path: str = ""
+    received_date: str = ""
+    sheet_name: str = ""
+    rows: list[dict[str, Any]]
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
@@ -96,6 +106,20 @@ def assigned_scope_match(scope: dict[str, str], record: dict[str, Any]) -> str:
         if key in scope:
             return scope[key]
     return ""
+
+
+def parse_optional_int(value: Any) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = re.search(r"\d+", text)
+    return int(match.group(0)) if match else None
+
+
+def distribution_row_payload(row: Any) -> dict[str, Any]:
+    result = dict(row)
+    result["traceability"] = json.loads(result.get("traceability") or "{}")
+    return result
 
 
 def split_dob_range(raw: Any, normalized: Any) -> tuple[str, str | None, str | None]:
@@ -222,6 +246,71 @@ def should_write_mouse_candidate(record: dict[str, Any], status: str) -> bool:
     review_field = str(record.get("reviewField") or "").lower()
     issue = str(record.get("issue") or "").lower()
     return review_field not in {"mouseid", "mousecount"} and "count mismatch" not in issue
+
+
+def active_mouse_note_count(record: dict[str, Any]) -> int:
+    card_type = str(record.get("type") or "unknown").lower()
+    notes = record.get("notes") if isinstance(record.get("notes"), list) else []
+    active_count = 0
+    for note in notes:
+        raw_line = str(note.get("raw") if isinstance(note, dict) else note)
+        strike_status = str(note.get("strike") or "none") if isinstance(note, dict) else "none"
+        parsed = parse_note_line(raw_line, card_type)
+        if parsed["parsed_type"] == "mouse_item" and interpreted_status(card_type, strike_status) == "active":
+            active_count += 1
+    return active_count
+
+
+def declared_total_count(record: dict[str, Any]) -> int | None:
+    mouse_count = str(record.get("mouseCount") or "")
+    if "total" not in mouse_count.lower():
+        return None
+    match = re.search(r"\d+", mouse_count)
+    return int(match.group(0)) if match else None
+
+
+def validation_review_for_record(conn: Any, record: dict[str, Any], status: str) -> dict[str, str] | None:
+    if status in {"review", "conflict"}:
+        return None
+
+    review_field = str(record.get("reviewField") or "").lower()
+    issue = str(record.get("issue") or "").lower()
+    card_type = str(record.get("type") or "").lower()
+
+    if card_type == "separated" and (review_field == "mousecount" or "count mismatch" in issue):
+        expected = declared_total_count(record)
+        active_count = active_mouse_note_count(record)
+        if expected is None or expected != active_count:
+            return {
+                "severity": "Medium",
+                "issue": "Count mismatch",
+                "currentValue": str(record.get("mouseCount") or ""),
+                "suggestedValue": f"{active_count} active parsed note line{'s' if active_count != 1 else ''}",
+                "reviewReason": "Parsed sex/count does not match the active unstruck mouse note lines. Review before creating canonical mouse candidates.",
+            }
+
+    if review_field == "mouseid" or "duplicate active" in issue:
+        mouse_id = str(record.get("currentValue") or "").strip()
+        if mouse_id:
+            existing = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM mouse_master
+                WHERE display_id = ? AND status IN ('active', 'mating')
+                """,
+                (mouse_id,),
+            ).fetchone()["count"]
+        else:
+            existing = 0
+        return {
+            "severity": "High" if existing else str(record.get("severity") or "High"),
+            "issue": "Duplicate active mouse",
+            "currentValue": mouse_id or str(record.get("currentValue") or ""),
+            "suggestedValue": "Resolve movement or confirm this is a different mouse before accepting",
+            "reviewReason": "Mouse ID appears as a duplicate-active risk. Review movement/source evidence before writing mouse state.",
+        }
+
+    return None
 
 
 def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict[str, Any], status: str) -> tuple[int, int]:
@@ -406,6 +495,134 @@ def deactivate_assigned_strain(assigned_strain_id: str) -> dict[str, Any]:
     return {"assigned_strain_id": assigned_strain_id, "active": False, "removed_at": removed_at}
 
 
+@app.get("/api/distribution-imports")
+def list_distribution_imports() -> list[dict[str, Any]]:
+    with connection() as conn:
+        imports = conn.execute(
+            """
+            SELECT distribution_import_id, source_file_name, source_file_path,
+                   received_date, sheet_name, imported_at, status, notes
+            FROM distribution_import
+            ORDER BY imported_at DESC
+            """
+        ).fetchall()
+        rows = conn.execute(
+            """
+            SELECT assignment_row_id, distribution_import_id, source_sheet,
+                   source_row_number, institution_or_group, responsible_person_raw,
+                   mating_type_raw, matched_strain_id, cage_count_raw,
+                   mating_cage_count_raw, confidence, review_status, traceability
+            FROM distribution_assignment_row
+            ORDER BY distribution_import_id, source_row_number
+            """
+        ).fetchall()
+
+    rows_by_import: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        payload = distribution_row_payload(row)
+        rows_by_import.setdefault(payload["distribution_import_id"], []).append(payload)
+
+    return [
+        {**dict(import_row), "rows": rows_by_import.get(import_row["distribution_import_id"], [])}
+        for import_row in imports
+    ]
+
+
+@app.post("/api/distribution-imports")
+def create_distribution_import(payload: DistributionImportPayload) -> dict[str, Any]:
+    if payload.layer and payload.layer != "parsed or intermediate result":
+        raise HTTPException(status_code=400, detail="Distribution import must be parsed/intermediate JSON.")
+    if not payload.rows:
+        raise HTTPException(status_code=400, detail="Distribution import requires parsed rows.")
+
+    import_id = new_id("distribution_import")
+    imported_at = utc_now()
+    source_file_name = payload.source_file_name or "distribution_import.json"
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO distribution_import
+                (distribution_import_id, source_file_name, source_file_path,
+                 received_date, sheet_name, imported_at, status, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                import_id,
+                source_file_name,
+                payload.source_file_path,
+                payload.received_date,
+                payload.sheet_name,
+                imported_at,
+                "parsed",
+                payload.description,
+            ),
+        )
+        inserted_rows = 0
+        for index, row in enumerate(payload.rows, start=1):
+            mating_type = str(row.get("mating_type_raw") or row.get("matingTypeRaw") or "").strip()
+            if not mating_type:
+                continue
+            source_row = parse_optional_int(row.get("source_row_number") or row.get("sourceRowNumber"))
+            conn.execute(
+                """
+                INSERT INTO distribution_assignment_row
+                    (assignment_row_id, distribution_import_id, source_sheet,
+                     source_row_number, institution_or_group, responsible_person_raw,
+                     mating_type_raw, matched_strain_id, cage_count_raw,
+                     mating_cage_count_raw, confidence, review_status, traceability)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("assignment_row"),
+                    import_id,
+                    payload.sheet_name,
+                    source_row,
+                    str(row.get("institution_or_group") or row.get("institutionOrGroup") or ""),
+                    str(row.get("responsible_person_raw") or row.get("responsiblePersonRaw") or ""),
+                    mating_type,
+                    str(row.get("matched_strain_id") or row.get("matchedStrainId") or "") or None,
+                    str(row.get("cage_count_raw") or row.get("cageCountRaw") or ""),
+                    str(row.get("mating_cage_count_raw") or row.get("matingCageCountRaw") or ""),
+                    float(row.get("confidence") or 0),
+                    str(row.get("review_status") or row.get("reviewStatus") or "candidate"),
+                    json.dumps(
+                        {
+                            "source_file_name": source_file_name,
+                            "sheet_name": payload.sheet_name,
+                            "source_row_number": source_row or index,
+                            "source_cells": row.get("source_cells") or row.get("sourceCells") or {},
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            inserted_rows += 1
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "distribution_import_created",
+                import_id,
+                None,
+                json.dumps({"source_file_name": source_file_name, "rows": inserted_rows}, ensure_ascii=False),
+                imported_at,
+            ),
+        )
+
+    return {
+        "distribution_import_id": import_id,
+        "source_file_name": source_file_name,
+        "sheet_name": payload.sheet_name,
+        "imported_at": imported_at,
+        "status": "parsed",
+        "stored_rows": inserted_rows,
+        "boundary": "parsed or intermediate result",
+    }
+
+
 @app.post("/api/photos")
 def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
     if not file.filename:
@@ -534,6 +751,10 @@ def import_sample_fixture() -> dict[str, Any]:
                 }
             elif matched_scope:
                 record = {**record, "matchedStrain": matched_scope}
+            validation_review = validation_review_for_record(conn, record, status)
+            if validation_review:
+                status = "review"
+                record = {**record, "status": status, **validation_review}
             confidence = float(record.get("confidence") or 0)
             needs_review = 1 if status in {"review", "conflict"} else 0
             conn.execute(

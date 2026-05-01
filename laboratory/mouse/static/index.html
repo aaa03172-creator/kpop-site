@@ -166,6 +166,27 @@
       </table>
     </section>
 
+    <section class="full">
+      <h2>Distribution Assignment Import</h2>
+      <p>Parsed distribution rows stay non-canonical until added to My Assigned Strains.</p>
+      <input id="distributionFile" type="file" accept="application/json,.json">
+      <button id="distributionButton" type="button">Import Distribution JSON</button>
+      <p class="muted" id="distributionMessage"></p>
+      <table>
+        <thead>
+          <tr>
+            <th>Mating type</th>
+            <th>Rows</th>
+            <th>People</th>
+            <th>Cage count</th>
+            <th>Signal</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="distributionRows"></tbody>
+      </table>
+    </section>
+
     <section>
       <h2>Photo Inbox</h2>
       <table>
@@ -271,10 +292,79 @@
       `;
     }
 
+    function compactStrainKey(value) {
+      return text(value).toLowerCase().replace(/[^a-z0-9가-힣]/g, "");
+    }
+
+    function assignedScopeLookup(assignedStrains) {
+      const exact = new Map();
+      const compact = new Map();
+      assignedStrains.filter((strain) => strain.active).forEach((strain) => {
+        const names = [strain.display_name].concat(strain.aliases || []);
+        names.forEach((name) => {
+          exact.set(text(name).toLowerCase().trim(), strain.display_name);
+          compact.set(compactStrainKey(name), strain.display_name);
+        });
+      });
+      return { exact, compact };
+    }
+
+    function distributionSuggestions(distributionImports, assignedStrains) {
+      const latest = distributionImports[0];
+      if (!latest) return [];
+      const scope = assignedScopeLookup(assignedStrains);
+      const grouped = new Map();
+      latest.rows.forEach((item) => {
+        const matingType = text(item.mating_type_raw).trim();
+        if (!matingType) return;
+        const key = matingType.toLowerCase();
+        if (!grouped.has(key)) {
+          const exactMatch = scope.exact.get(key) || "";
+          const possibleAlias = exactMatch ? "" : scope.compact.get(compactStrainKey(matingType)) || "";
+          grouped.set(key, {
+            importId: latest.distribution_import_id,
+            sourceFile: latest.source_file_name,
+            matingType,
+            rows: [],
+            people: new Set(),
+            cageCount: 0,
+            exactMatch,
+            possibleAlias
+          });
+        }
+        const suggestion = grouped.get(key);
+        suggestion.rows.push(item.source_row_number || "--");
+        suggestion.people.add(item.responsible_person_raw || "--");
+        const cageMatch = text(item.cage_count_raw).match(/\d+/);
+        suggestion.cageCount += cageMatch ? Number(cageMatch[0]) : 0;
+      });
+      return Array.from(grouped.values()).sort((a, b) => a.matingType.localeCompare(b.matingType));
+    }
+
+    function distributionSignal(suggestion) {
+      if (suggestion.exactMatch) return `Exact current value: ${suggestion.exactMatch}`;
+      if (suggestion.possibleAlias) return `Possible alias for ${suggestion.possibleAlias}`;
+      return "New candidate";
+    }
+
+    function distributionRow(suggestion) {
+      return `
+        <tr>
+          <td>${escapeHtml(suggestion.matingType)}</td>
+          <td>${escapeHtml(suggestion.rows.map((line) => `r${line}`).join(", "))}</td>
+          <td>${escapeHtml(Array.from(suggestion.people).join(", "))}</td>
+          <td>${escapeHtml(suggestion.cageCount || "--")}</td>
+          <td>${escapeHtml(distributionSignal(suggestion))}</td>
+          <td><button class="add-distribution-scope" type="button" data-mating-type="${escapeHtml(suggestion.matingType)}" data-canonical="${escapeHtml(suggestion.possibleAlias || suggestion.exactMatch || suggestion.matingType)}" data-source="${escapeHtml(suggestion.sourceFile)}">Add Scope</button></td>
+        </tr>
+      `;
+    }
+
     async function refresh() {
-      const [health, assignedStrains, photos, reviews, mice, noteItems, preview] = await Promise.all([
+      const [health, assignedStrains, distributionImports, photos, reviews, mice, noteItems, preview] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
+        api("/api/distribution-imports"),
         api("/api/photos"),
         api("/api/review-items"),
         api("/api/mice"),
@@ -290,6 +380,28 @@
         button.addEventListener("click", async () => {
           await api(`/api/assigned-strains/${button.dataset.assignedStrainId}/deactivate`, { method: "POST" });
           document.getElementById("assignedStrainMessage").textContent = "Assigned strain scope deactivated.";
+          await refresh();
+        });
+      });
+      const suggestions = distributionSuggestions(distributionImports, assignedStrains);
+      document.getElementById("distributionRows").innerHTML = suggestions.map(distributionRow).join("") ||
+        row(["No distribution candidates yet", "", "", "", "", ""]);
+      document.querySelectorAll(".add-distribution-scope").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const canonical = button.dataset.canonical;
+          const matingType = button.dataset.matingType;
+          const aliases = canonical === matingType ? [] : [matingType];
+          const result = await api("/api/assigned-strains", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              display_name: canonical,
+              aliases,
+              source_type: "distribution_workbook",
+              source_reference: button.dataset.source || ""
+            })
+          });
+          document.getElementById("distributionMessage").textContent = `Added ${result.display_name} to active scope.`;
           await refresh();
         });
       });
@@ -372,6 +484,24 @@
       document.getElementById("assignedStrainMessage").textContent = `Added ${result.display_name} to active scope.`;
       document.getElementById("assignedStrainName").value = "";
       document.getElementById("assignedStrainAliases").value = "";
+      await refresh();
+    });
+
+    document.getElementById("distributionButton").addEventListener("click", async () => {
+      const file = document.getElementById("distributionFile").files[0];
+      if (!file) {
+        document.getElementById("distributionMessage").textContent = "Choose a parsed distribution JSON first.";
+        return;
+      }
+      const payload = JSON.parse(await file.text());
+      const result = await api("/api/distribution-imports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      document.getElementById("distributionMessage").textContent =
+        `Imported ${result.stored_rows} assignment rows from ${result.source_file_name}.`;
+      document.getElementById("distributionFile").value = "";
       await refresh();
     });
 

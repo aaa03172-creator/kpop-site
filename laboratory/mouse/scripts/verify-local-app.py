@@ -60,6 +60,8 @@ def main() -> None:
                 "review_queue",
                 "action_log",
                 "my_assigned_strain",
+                "distribution_import",
+                "distribution_assignment_row",
                 "ear_label_master",
                 "ear_label_alias",
                 "mouse_master",
@@ -171,7 +173,36 @@ def main() -> None:
                 assert_true("Colony Records" in index_html, "Local UI should expose mouse records.")
                 assert_true("Parsed Note Evidence" in index_html, "Local UI should expose parsed note evidence.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
+                assert_true("Distribution Assignment Import" in index_html, "Local UI should expose distribution import.")
                 assert_true(client.get("/api/assigned-strains").json() == [], "Assigned strain scope should start empty.")
+                distribution = client.post(
+                    "/api/distribution-imports",
+                    json={
+                        "layer": "parsed or intermediate result",
+                        "source_file_name": "distribution_test.xlsx",
+                        "sheet_name": "Mating",
+                        "rows": [
+                            {
+                                "institution_or_group": "Vet Med",
+                                "responsible_person_raw": "Jang S.",
+                                "mating_type_raw": "ApoMtg/tg",
+                                "cage_count_raw": "6",
+                                "source_row_number": 35,
+                                "source_cells": {"mating_type": "B35"},
+                                "review_status": "candidate",
+                            }
+                        ],
+                    },
+                )
+                assert_true(distribution.status_code == 200, "Could not store distribution import JSON.")
+                distribution_payload = distribution.json()
+                assert_true(distribution_payload["stored_rows"] == 1, "Distribution import row count is wrong.")
+                distribution_imports = client.get("/api/distribution-imports").json()
+                assert_true(len(distribution_imports) == 1, "Distribution import list should include the stored import.")
+                assert_true(
+                    distribution_imports[0]["rows"][0]["traceability"]["source_cells"]["mating_type"] == "B35",
+                    "Distribution import should preserve source cell traceability.",
+                )
                 created = client.post(
                     "/api/assigned-strains",
                     json={
@@ -193,6 +224,29 @@ def main() -> None:
                 assert_true(deactivated.status_code == 200, "Could not deactivate assigned strain scope.")
                 rows = client.get("/api/assigned-strains").json()
                 assert_true(rows[0]["active"] is False, "Deactivated assigned strain stayed active.")
+
+                mice_before_distribution = client.get("/api/mice").json()
+                distribution_fixture = json.loads(
+                    (ROOT / "fixtures" / "sample_distribution_import.json").read_text(encoding="utf-8")
+                )
+                distribution_import = client.post("/api/distribution-imports", json=distribution_fixture)
+                assert_true(distribution_import.status_code == 200, "Could not import distribution assignment JSON.")
+                distribution_payload = distribution_import.json()
+                assert_true(
+                    distribution_payload["boundary"] == "parsed or intermediate result",
+                    "Distribution import should stay non-canonical.",
+                )
+                assert_true(distribution_payload["stored_rows"] >= 3, "Distribution import stored too few rows.")
+                imports = client.get("/api/distribution-imports").json()
+                assert_true(len(imports) == 1, "Distribution import list did not return the new import.")
+                assert_true(
+                    any(row["mating_type_raw"] == "GFAP Cre; S1PR1 fl/fl" for row in imports[0]["rows"]),
+                    "Distribution assignment rows did not preserve candidate mating type.",
+                )
+                assert_true(
+                    client.get("/api/mice").json() == mice_before_distribution,
+                    "Distribution import must not create canonical mouse records.",
+                )
 
                 with db.connection() as conn:
                     action_count = conn.execute(
@@ -221,10 +275,18 @@ def main() -> None:
                     "Fixture import should create safe mouse candidates from accepted separated rows.",
                 )
                 review_items = client.get("/api/review-items").json()
-                assert_true(len(review_items) >= 2, "Fixture import should create review items.")
+                assert_true(len(review_items) >= 4, "Fixture import should create review and validation items.")
                 assert_true(
                     not any(item["issue"] == "Outside assigned strain scope" for item in review_items),
                     "Assigned ApoM scope should prevent ApoM fixture rows from being marked outside scope.",
+                )
+                assert_true(
+                    any(item["parse_id"] == "FIXTURE-COUNT-MISMATCH" and item["issue"] == "Count mismatch" for item in review_items),
+                    "Count mismatch fixture should create a backend review item.",
+                )
+                assert_true(
+                    any(item["parse_id"] == "FIXTURE-DUPLICATE-ACTIVE" and item["issue"] == "Duplicate active mouse" for item in review_items),
+                    "Duplicate active fixture should create a backend review item.",
                 )
                 note_items = client.get("/api/note-items").json()
                 mice = client.get("/api/mice").json()
