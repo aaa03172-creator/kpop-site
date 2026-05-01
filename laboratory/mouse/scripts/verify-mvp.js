@@ -140,6 +140,10 @@ async function main() {
 
   assert((await page.locator("#inboxRows tr").count()) >= 5, "Seed inbox rows did not render.");
   assert((await page.locator("#reviewSummary").textContent()).includes("3 pending"), "Initial review count is wrong.");
+  assert(
+    (await page.locator("#assignedStrainRows tr").filter({ hasText: "ApoM Tg/Tg" }).filter({ hasText: "Canonical scope" }).count()) === 1,
+    "My Assigned Strains seed scope missing."
+  );
 
   await page.getByRole("button", { name: "Load Distribution Fixture" }).click();
   assert(
@@ -174,6 +178,49 @@ async function main() {
   await page.waitForSelector("#inboxRows tr");
   assert((await page.locator("#inboxRows tr").filter({ hasText: "FIXTURE-AUTO-MATING" }).count()) === 0, "Reset did not remove embedded fixture rows.");
   assert((await page.locator("#distributionRows tr").filter({ hasText: "ApoMtg/tg" }).count()) === 0, "Reset did not remove distribution assignment rows.");
+
+  const outsideScopeFixturePath = path.join(os.tmpdir(), `outside-scope-${Date.now()}.json`);
+  fs.writeFileSync(outsideScopeFixturePath, JSON.stringify({
+    layer: "parsed or intermediate result",
+    records: [
+      {
+        id: "FIXTURE-OUTSIDE-SCOPE",
+        uploaded: "Fixture import",
+        type: "Separated",
+        rawStrain: "GFAP Cre; S1PR1 fl/fl",
+        matchedStrain: "GFAP Cre; S1PR1 fl/fl",
+        dobRaw: "26.01.01",
+        dobNormalized: "2026-01-01",
+        mouseCount: "2 total",
+        confidence: 96,
+        status: "auto",
+        issue: "Fixture auto-filled by policy",
+        severity: "Low",
+        reviewField: "matchedStrain",
+        currentValue: "GFAP Cre; S1PR1 fl/fl",
+        suggestedValue: "GFAP Cre; S1PR1 fl/fl",
+        reviewReason: "Tests assigned scope validation.",
+        notes: [
+          { raw: "GF101 R'", meaning: "Mouse GF101, right prime ear label (R_PRIME)", strike: "none" },
+          { raw: "GF102 L'", meaning: "Mouse GF102, left prime ear label (L_PRIME)", strike: "none" }
+        ],
+        actions: ["Import as parsed result."]
+      }
+    ]
+  }), "utf8");
+  await page.getByRole("button", { name: "Import Parse JSON" }).click();
+  await page.setInputFiles("#parseInput", outsideScopeFixturePath);
+  await page.waitForSelector("#reviewRows tr");
+  assert(
+    (await page.locator("#reviewRows tr").filter({ hasText: "FIXTURE-OUTSIDE-SCOPE" }).filter({ hasText: "Outside assigned strain scope" }).count()) === 1,
+    "Outside assigned strain scope fixture was not routed to review."
+  );
+  assert(
+    (await page.locator("#recordRows tr").filter({ hasText: "FIXTURE-OUTSIDE-SCOPE" }).count()) === 0,
+    "Outside assigned strain scope fixture leaked into canonical candidates."
+  );
+  await page.getByRole("button", { name: "Reset Local" }).click();
+  await page.waitForSelector("#inboxRows tr");
 
   await page.getByRole("button", { name: "Import Distribution JSON" }).click();
   await page.setInputFiles("#distributionInput", generatedDistributionPath);

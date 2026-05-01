@@ -193,7 +193,16 @@ These records should link to mouse IDs where possible and update genotype status
 
 The user may periodically receive a distribution workbook such as `20260407 의대 수의대 분배현황표.xlsx`.
 
-This workbook is not an animal state export. It is an assignment and planning source that says who is responsible for which mating types and how many cages are assigned or expected.
+This workbook is not part of the daily update loop and is not an animal state export. It is an occasional assignment reference that helps the user update their own assigned strain scope.
+
+The normal day-to-day product loop remains:
+
+1. upload cage card photos,
+2. OCR/parse and review uncertain fields,
+3. update accepted structured records,
+4. preview/export `animal sheet` and `분리 현황표` workbooks.
+
+When a new distribution workbook arrives, the user should use it only to update `My Assigned Strains`. The system should then classify uploaded cage cards primarily within that assigned strain scope. If a photo parses to something outside that scope, it should become a review item instead of being silently accepted.
 
 Observed structure from the current example:
 
@@ -203,17 +212,16 @@ Observed structure from the current example:
 - merged person cells indicate that multiple mating types belong to one responsible person or group;
 - total or subtotal values may appear in the `mating cage 개수` column.
 
-The system should treat this file as raw source evidence first. Rows from this workbook may create or update:
+The system should treat this file as raw source evidence first. Rows from this workbook may suggest updates to:
 
-- assigned-person scope,
-- candidate strain or mating type names,
+- `My Assigned Strains`,
+- optional raw aliases for those assigned strains,
 - expected cage counts,
-- optional strain-master suggestions,
-- review items when a distribution row conflicts with existing configured strains or active records.
+- review items when the user chooses to import and inspect the workbook.
 
-In the current prototype, the workbook is converted to parsed/intermediate JSON with `scripts/parse_distribution_workbook.py` and then loaded through `Import Distribution JSON`. The converted rows retain workbook filename, sheet name, source row number, and source cell coordinates. The Settings view groups `mating 종류` values into reviewable candidate strain suggestions; these suggestions must not become confirmed strain-master values without explicit review.
+In the current prototype, the workbook can be converted to parsed/intermediate JSON with `scripts/parse_distribution_workbook.py` and then loaded through `Import Distribution JSON`. This is a helper path, not the primary workflow. The converted rows retain workbook filename, sheet name, source row number, and source cell coordinates. The user should still decide which rows become active assigned strains.
 
-The distribution workbook must not silently overwrite photo-backed colony state. It should help the user know what they are responsible for and which strain names should be pre-registered before processing photos.
+The distribution workbook must not silently overwrite photo-backed colony state, current cage/card state, or confirmed strain master values.
 
 ## 6. Note And Strike-Through Rules
 
@@ -227,8 +235,8 @@ Example:
 
 | Raw note line | Meaning |
 | --- | --- |
-| `319 L'` | mouse 319, left ear mark |
-| `320 R'L'` | mouse 320, right and left ear marks |
+| `319 L'` | mouse 319, raw ear label `L'`, normalized code `L_PRIME` |
+| `320 R'L'` | mouse 320, raw ear label `R'L'`, normalized code `R_PRIME_L_PRIME` |
 | `318 R'` with one strike-through | mouse 318 moved/separated out |
 | mouse line with two strike-throughs | mouse is dead |
 
@@ -241,7 +249,27 @@ Status interpretation:
 | double | dead |
 | unclear | needs review |
 
-### 6.2 Mating Cage Note
+### 6.2 Ear Label Notation
+
+Ear labels are structured mouse identity data, not decorative text. The system must preserve both the exact raw notation from the card and a normalized internal code used for matching, validation, and duplicate checks.
+
+Canonical examples:
+
+| Raw card value | Normalized code |
+| --- | --- |
+| `R'` | `R_PRIME` |
+| `L'` | `L_PRIME` |
+| `Rº` or `R°` | `R_CIRCLE` |
+| `Lº` or `L°` | `L_CIRCLE` |
+| `R'L'` | `R_PRIME_L_PRIME` |
+| `RºLº` or `R°L°` | `R_CIRCLE_L_CIRCLE` |
+| `R'Lº` or `R'L°` | `R_PRIME_L_CIRCLE` |
+| `RºL'` or `R°L'` | `R_CIRCLE_L_PRIME` |
+| `N` | `NONE`, only when the note-line context supports no ear mark |
+
+OCR aliases such as Unicode prime marks, curly apostrophes, backtick-like marks, dot suffixes, degree/circle variants, `R0`, `Ro`, `R o`, and `R˚` should be handled through configurable alias/fuzzy matching. However, prime and circle are different identity signals. Ambiguity between `R_PRIME` and `R_CIRCLE`, or between `L_PRIME` and `L_CIRCLE`, must not be silently merged. If confidence is not high enough, the parsed value should be marked `check` or routed to the Review Queue according to severity.
+
+### 6.3 Mating Cage Note
 
 For mating cage cards, each note line often represents a litter or breeding event.
 
@@ -262,7 +290,7 @@ Status interpretation:
 | double | dead |
 | unclear | needs review |
 
-### 6.3 Preserve Struck Lines
+### 6.4 Preserve Struck Lines
 
 Struck-through lines must not be deleted. They are historical evidence of completed or dead/missing mice/litters. They should generate or update event records.
 
@@ -272,9 +300,18 @@ Struck-through lines must not be deleted. They are historical evidence of comple
 
 Strain names, genotype categories, PCR protocols, and management rules must not be hard-coded. The user receives new strain assignment lists over time. These should be registered before use.
 
-### 7.2 Strain Pre-Registration
+### 7.2 My Assigned Strains And Pre-Registration
 
-When the user receives an assigned strain list or distribution workbook, they should import or enter it before processing photos. Distribution rows can suggest new `Strain_Master` entries, but confirmation should remain reviewable.
+The user should maintain a simple active list called `My Assigned Strains`. This list is the default matching scope for cage card OCR.
+
+In normal use, the user will likely upload photos only for their own assigned strains. Therefore:
+
+- high-confidence OCR matches inside `My Assigned Strains` can be auto-filled according to policy;
+- OCR values outside `My Assigned Strains` should go to review;
+- the system should suggest close aliases within `My Assigned Strains` before suggesting unrelated global strains;
+- adding or removing assigned strains should be deliberate and logged.
+
+When the user receives a new assigned strain list or distribution workbook, they can manually enter/update `My Assigned Strains`, or use the distribution import helper to find candidate entries. Distribution rows can suggest assigned strains or aliases, but confirmation should remain reviewable.
 
 Benefits:
 
@@ -283,7 +320,7 @@ Benefits:
 - prevents unknown strings from being incorrectly accepted,
 - allows export categories to be configured in advance.
 
-If a parsed strain is not in `Strain_Master`, the system should not silently create a final confirmed strain. It should:
+If a parsed strain is not in `My Assigned Strains` or `Strain_Master`, the system should not silently create a final confirmed strain. It should:
 
 1. auto-fill the raw strain text,
 2. suggest similar known strains,
@@ -347,7 +384,25 @@ Fields:
 - `hit_count`
 - `created_at`
 
-### 8.3 `genotype_category_master`
+### 8.3 `my_assigned_strain`
+
+Purpose: active user scope for OCR matching, review routing, and export grouping.
+
+Fields:
+
+- `assigned_strain_id`
+- `strain_id`
+- `display_name`
+- `active`
+- `source_type`: manual / distribution_workbook / imported_list
+- `source_reference`
+- `assigned_at`
+- `removed_at`
+- `notes`
+
+Rows in this table should be explicit user scope, not inferred current cage/card state.
+
+### 8.4 `genotype_category_master`
 
 Purpose: strain-specific genotype output categories.
 
@@ -367,7 +422,7 @@ Examples:
 - `fl/fl`, `fl/+`, `WT`, `result unknown`
 - `Cre; fl/fl`, `WT; fl/fl`, `result unknown`
 
-### 8.4 `management_rule_master`
+### 8.5 `management_rule_master`
 
 Purpose: global or strain-specific timing rules.
 
@@ -388,7 +443,7 @@ Default example:
 - min age: 30 days,
 - max age: 90 days.
 
-### 8.5 `photo_log`
+### 8.6 `photo_log`
 
 Purpose: stores uploaded photo evidence.
 
@@ -406,7 +461,7 @@ Fields:
 - `status`
 - `notes`
 
-### 8.6 `parse_result`
+### 8.7 `parse_result`
 
 Purpose: stores ROI-level extraction results.
 
@@ -433,7 +488,7 @@ ROI examples:
 - note area,
 - LMO/O/N area.
 
-### 8.7 `card_snapshot`
+### 8.8 `card_snapshot`
 
 Purpose: represents one parsed cage card snapshot. This replaces exposing a user-facing `system_cage_id` or user-managed cage identifier.
 
@@ -465,7 +520,7 @@ Important:
 - `card_snapshot_id` is an implementation detail.
 - The user should work with photo, strain, DOB, mouse IDs, and Excel row outputs rather than internal IDs.
 
-### 8.8 `mouse_master`
+### 8.9 `mouse_master`
 
 Purpose: individual mouse-level state.
 
@@ -483,14 +538,17 @@ Fields:
 - `dob_start`
 - `dob_end`
 - `ear_label_raw`
-- `ear_label_normalized`
+- `ear_label_code`: normalized internal code; replaces the older planning name `ear_label_normalized`
+- `ear_label_confidence`
+- `ear_label_review_status`: accepted / check / review / rejected
+- `source_note_item_id`
 - `current_card_snapshot_id`
 - `status`: active / moved / mating / dead / used / unknown
 - `source_photo_id`
 - `created_at`
 - `updated_at`
 
-### 8.9 `card_note_item_log`
+### 8.10 `card_note_item_log`
 
 Purpose: stores each note line as structured evidence.
 
@@ -507,14 +565,16 @@ Fields:
 - `interpreted_status`
 - `parsed_mouse_display_id`
 - `parsed_ear_label_raw`
-- `parsed_ear_label_normalized`
+- `parsed_ear_label_code`: normalized internal code; replaces the older planning name `parsed_ear_label_normalized`
+- `parsed_ear_label_confidence`
+- `parsed_ear_label_review_status`: accepted / check / review / rejected
 - `parsed_event_date`
 - `parsed_count`
 - `confidence`
 - `needs_review`
 - `created_at`
 
-### 8.10 `mating_event_log`
+### 8.11 `mating_event_log`
 
 Purpose: mating cage and litter/breeding event history.
 
@@ -544,7 +604,7 @@ Pedigree note:
 - Full `sire_id` / `dam_id` pedigree fields can be added later.
 - MVP should capture parent IDs in mating events without requiring complete pedigree resolution.
 
-### 8.11 `genotyping_record`
+### 8.12 `genotyping_record`
 
 Purpose: genotype result records linked to mice.
 
@@ -565,7 +625,7 @@ Fields:
 - `source_photo_id`
 - `notes`
 
-### 8.12 `action_log`
+### 8.13 `action_log`
 
 Purpose: audit trail for all automatic and manual state changes.
 
@@ -590,7 +650,7 @@ Fields:
 
 All automatic updates must create an `action_log` entry.
 
-### 8.13 `review_queue`
+### 8.14 `review_queue`
 
 Purpose: queue for uncertain, conflicting, or high-risk items.
 
@@ -613,7 +673,7 @@ Fields:
 - `resolved_at`
 - `created_at`
 
-### 8.14 `export_log`
+### 8.15 `export_log`
 
 Purpose: records Excel export history.
 
@@ -625,7 +685,7 @@ Fields:
 - `exported_at`
 - `notes`
 
-### 8.15 `distribution_import`
+### 8.16 `distribution_import`
 
 Purpose: records periodic assignment workbook imports.
 
@@ -642,7 +702,7 @@ Fields:
 - `status`: imported / parsed / reviewed / superseded
 - `notes`
 
-### 8.16 `distribution_assignment_row`
+### 8.17 `distribution_assignment_row`
 
 Purpose: row-level assignment extracted from a distribution workbook.
 
@@ -672,7 +732,7 @@ The user uploads photos from phone or PC. Direct in-animal-room app use is not r
 
 Batch upload should be a first-class path because the user will often upload many cage card/name tag photos at once after animal-room work. Each upload batch should have a `batch_id`, preserve per-photo source evidence, and show per-batch progress across processing, review, accepted, and blocked states. A failed or low-confidence photo in a batch must not prevent the rest of the batch from being stored, parsed, reviewed, or exported when ready.
 
-Distribution workbook upload is a separate raw-source intake path from cage-card photo upload. It updates assignment scope and strain-master suggestions, not current cage/card state.
+Distribution workbook upload is a separate, occasional raw-source intake path from cage-card photo upload. It can help update `My Assigned Strains`, but it does not update current cage/card state.
 
 ### 9.2 Image Quality Check
 
@@ -732,8 +792,11 @@ Each note line should be:
 2. assigned a line number,
 3. checked for strike-through count,
 4. classified as mouse item / litter event / unknown,
-5. normalized,
-6. stored with confidence.
+5. parsed into raw mouse ID and raw ear label candidates when present,
+6. normalized into mouse ID and ear label codes with confidence,
+7. stored with confidence.
+
+For ear labels, raw text and normalized code must stay separate. A clear `R'` can normalize to `R_PRIME`, while uncertain variants such as `R`, `R.`, `Ro`, or `R0` should remain reviewable unless the alias match and visual context are strong enough.
 
 ### 9.6 Fuzzy Matching
 
@@ -752,8 +815,10 @@ Examples:
 - `MT3I8` may be `MT318`.
 - `ApoM Tg/tg` may map to `ApoM Tg/Tg`.
 - `25.01.30` may be `26.01.30` if DOB is late 2025 and the card is a mating card.
+- Unicode prime or curly apostrophe variants may map to `R_PRIME`.
+- Degree or small circle variants may map to `R_CIRCLE`.
 
-The system should suggest likely matches rather than silently overwriting when confidence is not high.
+The system should suggest likely matches rather than silently overwriting when confidence is not high. Ear label prime/circle ambiguity is identity-critical and should be sent to `check` or review instead of being collapsed into one code.
 
 ## 10. Auto-Fill Policy
 
@@ -836,11 +901,13 @@ Examples:
 
 ### 11.5 Strain Logic
 
-If raw strain is not pre-registered:
+If raw strain is not in `My Assigned Strains`:
 
 - auto-fill raw text,
-- suggest closest strain aliases,
+- suggest closest aliases inside the assigned scope first,
 - mark as review if not confident.
+
+If the raw strain appears to be a real strain but outside the assigned scope, the system should ask the user to confirm whether it belongs to them before accepting it.
 
 ### 11.6 Genotype Logic
 
@@ -1136,6 +1203,7 @@ Every auto-filled value should be traceable to:
 | --- | --- |
 | handwriting OCR errors | ROI parsing, confidence scores, review queue |
 | strain name variations | pre-registration and alias mapping |
+| ear label prime/circle ambiguity | preserve raw notation, normalize to explicit codes, route low-confidence identity marks to check/review |
 | card ID misunderstood as cage ID | separate raw ID from mouse ID and card record |
 | count mismatch | active note item count validation |
 | mouse appears in two places | high-severity active conflict check |

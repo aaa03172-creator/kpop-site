@@ -82,5 +82,17 @@ def init_db() -> None:
                 after_value TEXT,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS my_assigned_strain (
+                assigned_strain_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                aliases_json TEXT NOT NULL DEFAULT '[]',
+                source_type TEXT NOT NULL DEFAULT 'manual',
+                source_reference TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                assigned_at TEXT NOT NULL,
+                removed_at TEXT,
+                notes TEXT NOT NULL DEFAULT ''
+            );
             """
         )

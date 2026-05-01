@@ -1486,12 +1486,25 @@
               </thead>
               <tbody>
                 <tr><td>Strain Master</td><td class="mono">Configured strain</td><td>Allowed target for raw strain matching.</td></tr>
+                <tr><td>My Assigned Strains</td><td class="mono">Active scope</td><td>Default matching scope for cage card OCR and export grouping.</td></tr>
                 <tr><td>OCR Alias</td><td class="mono">Raw handwritten text</td><td>Maps repeated OCR variants to a configured strain.</td></tr>
                 <tr><td>Genotype Categories</td><td class="mono">Configured category</td><td>Blocks unexpected genotype values until review.</td></tr>
                 <tr><td>Management Rules</td><td class="mono">Min/max age days</td><td>Creates warnings without hard-coded date rules.</td></tr>
-                <tr><td>Distribution Import</td><td class="mono">Periodic assignment workbook</td><td>Registers assigned people, mating types, cage counts, and candidate strain names as raw Excel source before review.</td></tr>
+                <tr><td>Distribution Import</td><td class="mono">Occasional assignment workbook</td><td>Helps update My Assigned Strains when assignments change; never updates cage state directly.</td></tr>
                 <tr><td>Parse Assist Policy</td><td class="mono">LLM-optional</td><td>Core parsing runs locally/manual-first; external OCR or LLM payloads stay blocked until approved.</td></tr>
               </tbody>
+            </table>
+            <table aria-label="My assigned strains">
+              <thead>
+                <tr>
+                  <th>Assigned Strain</th>
+                  <th>Aliases</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Boundary</th>
+                </tr>
+              </thead>
+              <tbody id="assignedStrainRows"></tbody>
             </table>
             <table aria-label="Distribution assignment rows">
               <thead>
@@ -1639,9 +1652,9 @@
         suggestedValue: "ApoM Tg/Tg",
         reviewReason: "High-confidence match to configured strain alias.",
         notes: [
-          { raw: "MT318 R'", meaning: "Mouse MT318, right ear notch", strike: "none" },
-          { raw: "MT319 L'", meaning: "Mouse MT319, left ear notch", strike: "none" },
-          { raw: "MT320 R'L'", meaning: "Mouse MT320, both ears notched; moved out on reviewed card", strike: "single" }
+          { raw: "MT318 R'", meaning: "Mouse MT318, right prime ear label (R_PRIME)", strike: "none" },
+          { raw: "MT319 L'", meaning: "Mouse MT319, left prime ear label (L_PRIME)", strike: "none" },
+          { raw: "MT320 R'L'", meaning: "Mouse MT320, right and left prime ear labels (R_PRIME_L_PRIME); moved out on reviewed card", strike: "single" }
         ],
         actions: [
           "Create or update card snapshot from source photo.",
@@ -1667,9 +1680,9 @@
         suggestedValue: "Review against Strain Master",
         reviewReason: "Raw strain text does not confidently match a configured strain or confirmed alias.",
         notes: [
-          { raw: "318 R'", meaning: "Possible mouse ID 318, right ear notch", strike: "none" },
-          { raw: "319 L'", meaning: "Possible mouse ID 319, left ear notch", strike: "none" },
-          { raw: "320 R'L'", meaning: "Possible mouse ID 320, both ears notched", strike: "none" }
+          { raw: "318 R'", meaning: "Possible mouse ID 318, right prime ear label (R_PRIME)", strike: "none" },
+          { raw: "319 L'", meaning: "Possible mouse ID 319, left prime ear label (L_PRIME)", strike: "none" },
+          { raw: "320 R'L'", meaning: "Possible mouse ID 320, right and left prime ear labels (R_PRIME_L_PRIME)", strike: "none" }
         ],
         actions: [
           "Keep raw strain text.",
@@ -1780,6 +1793,14 @@
         result: "No export attempted yet"
       }
     ];
+    const assignedStrains = [
+      {
+        displayName: "ApoM Tg/Tg",
+        aliases: ["ApoM Tg/Tg", "ApoMtg/tg", "ApoM"],
+        source: "Manual seed scope",
+        active: true
+      }
+    ];
     const distributionImports = [];
     const sampleDistributionFixture = {
       source_file_name: "20260407 college-vet-med distribution-status.xlsx",
@@ -1810,7 +1831,7 @@
       dismissed: "dismissed"
     };
 
-    const sampleParseFixtureRecords = JSON.parse(`[{"id":"FIXTURE-LOW-STRAIN","uploaded":"Fixture import","type":"Separated","rawStrain":"B6 Cg Tg?","matchedStrain":"Review against Strain Master","dobRaw":"26.04.13","dobNormalized":"2026-04-13","mouseCount":"318 R', 319 L', 320 R'L'","confidence":61,"status":"review","issue":"Low-confidence strain alias","severity":"Medium","reviewField":"matchedStrain","currentValue":"Review against Strain Master","suggestedValue":"Select configured strain","reviewReason":"Raw strain text is uncertain and must not create a new strain automatically.","notes":[{"raw":"318 R'","meaning":"Possible mouse ID 318, right ear notch","strike":"none"},{"raw":"319 L'","meaning":"Possible mouse ID 319, left ear notch","strike":"none"},{"raw":"320 R'L'","meaning":"Possible mouse ID 320, both ears notched","strike":"none"}],"actions":["Keep raw strain text as parsed evidence.","Create review item before accepting normalized strain.","Do not create new strain automatically."]},{"id":"FIXTURE-MATING-CONFLICT","uploaded":"Fixture import","type":"Mating","rawStrain":"GH line","matchedStrain":"GH line","dobRaw":"25.12.01","dobNormalized":"2025-12-01","mouseCount":"Sire GH70 / Dam GH83","confidence":82,"status":"conflict","issue":"Duplicate active mouse","severity":"High","reviewField":"mouseId","currentValue":"GH70 active in another card snapshot","suggestedValue":"Apply reviewed movement before mating assignment","reviewReason":"A mouse ID appears active in more than one current card snapshot.","notes":[{"raw":"26.04.13 - 10p","meaning":"Litter event, 10 pups","strike":"none"},{"raw":"GH70 x GH83","meaning":"Parent IDs on mating card","strike":"none"}],"actions":["Create high-severity review item.","Require reviewed movement action before mating assignment.","Link event to source photo and note line."]},{"id":"FIXTURE-AUTO-MATING","uploaded":"Fixture import","type":"Mating","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.10.20","dobNormalized":"2025-10-20","mouseCount":"Sire MT321 / Dam MT322","confidence":94,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"matchedStrain","currentValue":"ApoM Tg/Tg","suggestedValue":"ApoM Tg/Tg","reviewReason":"Fixture represents an accepted mating block for animalsheet preview.","notes":[{"raw":"26.04.13 - 10p","meaning":"Litter event, 10 pups","strike":"none"},{"raw":"MT321 x MT322","meaning":"Parent IDs on mating card","strike":"none"}],"actions":["Create accepted mating block from parsed fixture.","Expose litter note evidence in animalsheet-style preview."]},{"id":"FIXTURE-COUNT-MISMATCH","uploaded":"Fixture import","type":"Separated","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.11.02","dobNormalized":"2025-11-02","mouseCount":"4 total","confidence":93,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"mouseCount","currentValue":"4 total","suggestedValue":"4 total","reviewReason":"Fixture intentionally contains a count mismatch to exercise validation.","notes":[{"raw":"MT401 R'","meaning":"Mouse MT401, right ear notch","strike":"none"},{"raw":"MT402 L'","meaning":"Mouse MT402, left ear notch","strike":"none"},{"raw":"MT403 R'L'","meaning":"Mouse MT403, both ears notched","strike":"none"}],"actions":["Import as parsed result.","Run count mismatch validation before canonical candidate creation."]},{"id":"FIXTURE-AUTO-SEPARATED","uploaded":"Fixture import","type":"Separated","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.10.20-28","dobNormalized":"2025-10-20 to 2025-10-28","mouseCount":"2 total","confidence":95,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"matchedStrain","currentValue":"ApoM Tg/Tg","suggestedValue":"ApoM Tg/Tg","reviewReason":"Fixture represents a high-confidence configured strain alias.","notes":[{"raw":"MT321 R'","meaning":"Mouse MT321, right ear notch","strike":"none"},{"raw":"MT322 L'","meaning":"Mouse MT322, left ear notch","strike":"none"},{"raw":"MT323 R'L'","meaning":"Mouse MT323, both ears notched; moved out on reviewed card","strike":"single"}],"actions":["Create or update card snapshot from parsed fixture.","Attach note lines as structured evidence.","Keep export traceability to fixture source."]},{"id":"FIXTURE-DUPLICATE-ACTIVE","uploaded":"Fixture import","type":"Separated","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.10.20","dobNormalized":"2025-10-20","mouseCount":"1 total","confidence":94,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"mouseId","currentValue":"MT318","suggestedValue":"MT318","reviewReason":"Fixture intentionally duplicates an active seed mouse ID.","notes":[{"raw":"MT318 R'","meaning":"Mouse MT318, right ear notch","strike":"none"}],"actions":["Import as parsed result.","Run duplicate active mouse validation before canonical candidate creation."]}]`);
+    const sampleParseFixtureRecords = JSON.parse(`[{"id":"FIXTURE-LOW-STRAIN","uploaded":"Fixture import","type":"Separated","rawStrain":"B6 Cg Tg?","matchedStrain":"Review against Strain Master","dobRaw":"26.04.13","dobNormalized":"2026-04-13","mouseCount":"318 R', 319 L', 320 R'L'","confidence":61,"status":"review","issue":"Low-confidence strain alias","severity":"Medium","reviewField":"matchedStrain","currentValue":"Review against Strain Master","suggestedValue":"Select configured strain","reviewReason":"Raw strain text is uncertain and must not create a new strain automatically.","notes":[{"raw":"318 R'","meaning":"Possible mouse ID 318, right prime ear label (R_PRIME)","strike":"none"},{"raw":"319 L'","meaning":"Possible mouse ID 319, left prime ear label (L_PRIME)","strike":"none"},{"raw":"320 R'L'","meaning":"Possible mouse ID 320, right and left prime ear labels (R_PRIME_L_PRIME)","strike":"none"}],"actions":["Keep raw strain text as parsed evidence.","Create review item before accepting normalized strain.","Do not create new strain automatically."]},{"id":"FIXTURE-MATING-CONFLICT","uploaded":"Fixture import","type":"Mating","rawStrain":"GH line","matchedStrain":"GH line","dobRaw":"25.12.01","dobNormalized":"2025-12-01","mouseCount":"Sire GH70 / Dam GH83","confidence":82,"status":"conflict","issue":"Duplicate active mouse","severity":"High","reviewField":"mouseId","currentValue":"GH70 active in another card snapshot","suggestedValue":"Apply reviewed movement before mating assignment","reviewReason":"A mouse ID appears active in more than one current card snapshot.","notes":[{"raw":"26.04.13 - 10p","meaning":"Litter event, 10 pups","strike":"none"},{"raw":"GH70 x GH83","meaning":"Parent IDs on mating card","strike":"none"}],"actions":["Create high-severity review item.","Require reviewed movement action before mating assignment.","Link event to source photo and note line."]},{"id":"FIXTURE-AUTO-MATING","uploaded":"Fixture import","type":"Mating","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.10.20","dobNormalized":"2025-10-20","mouseCount":"Sire MT321 / Dam MT322","confidence":94,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"matchedStrain","currentValue":"ApoM Tg/Tg","suggestedValue":"ApoM Tg/Tg","reviewReason":"Fixture represents an accepted mating block for animalsheet preview.","notes":[{"raw":"26.04.13 - 10p","meaning":"Litter event, 10 pups","strike":"none"},{"raw":"MT321 x MT322","meaning":"Parent IDs on mating card","strike":"none"}],"actions":["Create accepted mating block from parsed fixture.","Expose litter note evidence in animalsheet-style preview."]},{"id":"FIXTURE-COUNT-MISMATCH","uploaded":"Fixture import","type":"Separated","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.11.02","dobNormalized":"2025-11-02","mouseCount":"4 total","confidence":93,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"mouseCount","currentValue":"4 total","suggestedValue":"4 total","reviewReason":"Fixture intentionally contains a count mismatch to exercise validation.","notes":[{"raw":"MT401 R'","meaning":"Mouse MT401, right prime ear label (R_PRIME)","strike":"none"},{"raw":"MT402 L'","meaning":"Mouse MT402, left prime ear label (L_PRIME)","strike":"none"},{"raw":"MT403 R'L'","meaning":"Mouse MT403, right and left prime ear labels (R_PRIME_L_PRIME)","strike":"none"}],"actions":["Import as parsed result.","Run count mismatch validation before canonical candidate creation."]},{"id":"FIXTURE-AUTO-SEPARATED","uploaded":"Fixture import","type":"Separated","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.10.20-28","dobNormalized":"2025-10-20 to 2025-10-28","mouseCount":"2 total","confidence":95,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"matchedStrain","currentValue":"ApoM Tg/Tg","suggestedValue":"ApoM Tg/Tg","reviewReason":"Fixture represents a high-confidence configured strain alias.","notes":[{"raw":"MT321 R'","meaning":"Mouse MT321, right prime ear label (R_PRIME)","strike":"none"},{"raw":"MT322 L'","meaning":"Mouse MT322, left prime ear label (L_PRIME)","strike":"none"},{"raw":"MT323 R'L'","meaning":"Mouse MT323, right and left prime ear labels (R_PRIME_L_PRIME); moved out on reviewed card","strike":"single"}],"actions":["Create or update card snapshot from parsed fixture.","Attach note lines as structured evidence.","Keep export traceability to fixture source."]},{"id":"FIXTURE-DUPLICATE-ACTIVE","uploaded":"Fixture import","type":"Separated","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.10.20","dobNormalized":"2025-10-20","mouseCount":"1 total","confidence":94,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"mouseId","currentValue":"MT318","suggestedValue":"MT318","reviewReason":"Fixture intentionally duplicates an active seed mouse ID.","notes":[{"raw":"MT318 R'","meaning":"Mouse MT318, right prime ear label (R_PRIME)","strike":"none"}],"actions":["Import as parsed result.","Run duplicate active mouse validation before canonical candidate creation."]}]`);
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, (character) => ({
         "&": "&amp;",
@@ -1830,6 +1851,7 @@
           photos,
           actionLogEntries,
           exportLogEntries,
+          assignedStrains,
           distributionImports
         }));
       } catch (error) {
@@ -1849,6 +1871,9 @@
         }
         if (Array.isArray(saved.exportLogEntries)) {
           exportLogEntries.splice(0, exportLogEntries.length, ...saved.exportLogEntries);
+        }
+        if (Array.isArray(saved.assignedStrains)) {
+          assignedStrains.splice(0, assignedStrains.length, ...saved.assignedStrains);
         }
         if (Array.isArray(saved.distributionImports)) {
           distributionImports.splice(0, distributionImports.length, ...saved.distributionImports);
@@ -2014,11 +2039,29 @@
 
     function configuredStrainNames() {
       return Array.from(new Set(
-        photos
-          .filter((photo) => photo.status === "auto")
-          .map((photo) => String(photo.matchedStrain || "").trim())
-          .filter((strain) => strain && !/review|unknown|not matched/i.test(strain))
+        assignedStrains
+          .filter((strain) => strain.active)
+          .map((strain) => String(strain.displayName || "").trim())
+          .filter(Boolean)
       )).sort((a, b) => a.localeCompare(b));
+    }
+
+    function assignedStrainAliasMap() {
+      const map = new Map();
+      assignedStrains.filter((strain) => strain.active).forEach((strain) => {
+        const names = [strain.displayName].concat(strain.aliases || []);
+        names.forEach((name) => {
+          const key = compactStrainKey(name);
+          if (key) {
+            map.set(key, strain.displayName);
+          }
+        });
+      });
+      return map;
+    }
+
+    function assignedStrainMatch(value) {
+      return assignedStrainAliasMap().get(compactStrainKey(value)) || "";
     }
 
     function distributionStrainSuggestions(distributionImport) {
@@ -2123,6 +2166,24 @@
       return photo;
     }
 
+    function validateAssignedScope(photo) {
+      if (photo.status !== "auto") return photo;
+      const matched = assignedStrainMatch(photo.matchedStrain) || assignedStrainMatch(photo.rawStrain);
+      if (matched) {
+        photo.matchedStrain = matched;
+        return photo;
+      }
+      photo.status = "review";
+      photo.issue = "Outside assigned strain scope";
+      photo.severity = photo.severity === "High" ? "High" : "Medium";
+      photo.reviewField = "matchedStrain";
+      photo.currentValue = photo.matchedStrain || photo.rawStrain;
+      photo.suggestedValue = "Confirm assigned strain or add to My Assigned Strains";
+      photo.reviewReason = "Parsed strain is not in My Assigned Strains. Confirm scope before accepting this cage card.";
+      photo.actions = (photo.actions || []).concat("Block auto-fill until the strain is confirmed inside the user's assigned scope.");
+      return photo;
+    }
+
     function validateMatingRecord(photo) {
       if (photo.type !== "Mating" || photo.status !== "auto") return photo;
       const ids = parsedMatingIds(photo);
@@ -2140,7 +2201,7 @@
     }
 
     function validateImportedRecord(photo) {
-      return validateMatingRecord(validateParsedRecord(photo));
+      return validateMatingRecord(validateParsedRecord(validateAssignedScope(photo)));
     }
 
     function activeMouseIds(photo) {
@@ -2884,6 +2945,17 @@
       const latest = distributionImports[0];
       const rows = latest?.rows || [];
       const suggestions = distributionStrainSuggestions(latest);
+      document.getElementById("assignedStrainRows").innerHTML = assignedStrains.length
+        ? assignedStrains.map((strain) => `
+          <tr>
+            <td>${escapeHtml(strain.displayName)}</td>
+            <td>${escapeHtml((strain.aliases || []).join(", ") || "--")}</td>
+            <td>${escapeHtml(strain.source || "Manual")}</td>
+            <td><span class="status ${strain.active ? "auto" : "dismissed"}">${strain.active ? "Active" : "Inactive"}</span></td>
+            <td><span class="layer-chip">Canonical scope</span></td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="5">No assigned strains configured yet.</td></tr>`;
       document.getElementById("distributionSummary").textContent = latest
         ? `${latest.sourceFileName} / ${latest.sheetName}: ${rows.length} parsed assignment row${rows.length === 1 ? "" : "s"} and ${suggestions.length} candidate mating type${suggestions.length === 1 ? "" : "s"} retained as non-canonical source.`
         : "No distribution workbook imported in this session.";

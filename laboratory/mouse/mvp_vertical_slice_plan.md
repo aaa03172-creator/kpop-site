@@ -25,8 +25,9 @@ The slice should prove the core product loop before adding broad dashboard featu
 | Artifact | Boundary | Notes |
 | --- | --- | --- |
 | Uploaded cage card image | raw source | Must be retained even if parsing fails. |
-| Imported distribution workbook | raw source | Periodic assignment source; must not overwrite photo-backed colony state. |
-| Parsed distribution row | parsed or intermediate result | Can suggest strain master entries and expected cage counts after review. |
+| My Assigned Strains | canonical structured state | User-approved scope for OCR strain matching and export grouping. |
+| Imported distribution workbook | raw source | Occasional assignment reference; must not overwrite photo-backed colony state. |
+| Parsed distribution row | parsed or intermediate result | Can help update My Assigned Strains after user review. |
 | OCR text | parsed or intermediate result | Never treated as clean canonical data by itself. |
 | ROI field extraction | parsed or intermediate result | Store field confidence and source region when available. |
 | Normalized DOB or strain match | parsed or intermediate result | Becomes canonical only through policy or review. |
@@ -43,7 +44,8 @@ The current prototype is static HTML. If the project moves into application code
 | Module | Responsibility |
 | --- | --- |
 | `source_store` | Save and retrieve raw photos and import files. |
-| `assignment_importer` | Parse distribution workbooks into assigned people, mating types, and expected cage counts. |
+| `assignment_scope` | Store and edit My Assigned Strains for OCR matching scope. |
+| `assignment_importer` | Optional helper to parse distribution workbooks into assigned people, mating types, and expected cage counts. |
 | `parse_pipeline` | OCR, ROI extraction, raw field parsing, confidence. |
 | `normalization` | Date normalization, strain alias matching, genotype matching. |
 | `validation` | Required fields, count consistency, date logic, active conflict checks. |
@@ -78,26 +80,27 @@ Acceptance checks:
 - Re-uploading the same source does not silently duplicate downstream state.
 - One failed or review-blocked photo does not block unrelated photos from the same batch.
 
-### Step 1A: Distribution Workbook Intake
+### Step 1A: My Assigned Strains
 
 Goal:
 
-- Register periodic assignment workbooks as raw source evidence before photo processing.
+- Keep an explicit list of the user's assigned strains for OCR matching and review routing.
 
 Minimum behavior:
 
-- Accept a `.xlsx` distribution workbook such as `20260407 의대 수의대 분배현황표.xlsx`.
-- Convert the workbook with `npm run parse:distribution -- "path/to/분배현황표.xlsx" --out fixtures/parsed_distribution.json`, then import the JSON through `Import Distribution JSON`.
-- Preserve the original file name, received/import time, sheet name, row number, and parsed row values.
-- Parse repeated blocks with responsible person, mating type, cage count, and mating cage count.
-- Suggest candidate strain/master entries from `mating 종류` values without silently confirming them.
-- Show review items for unknown or changed assignment rows.
+- Let the user add, edit, deactivate, and review `My Assigned Strains`.
+- Use `My Assigned Strains` as the first matching scope for cage card OCR.
+- If a parsed cage card strain is outside this scope, route it to review instead of auto-accepting it.
+- Optionally accept a `.xlsx` distribution workbook such as `20260407 의대 수의대 분배현황표.xlsx` when the user's assignment list changes.
+- Convert the workbook with `npm run parse:distribution -- "path/to/분배현황표.xlsx" --out fixtures/parsed_distribution.json`, then import the JSON through `Import Distribution JSON` as a helper.
+- Preserve distribution filename, sheet name, row number, and parsed row values when used.
 
 Acceptance checks:
 
-- Distribution imports update assigned scope and strain-master suggestions, not current cage/card state.
-- Merged responsible-person cells are carried down as row evidence without losing the original row trace.
-- A newer distribution workbook can supersede older assignment scope while preserving import history.
+- My Assigned Strains can be updated without changing current cage/card state.
+- Distribution imports remain optional and non-canonical until the user chooses assigned strains from them.
+- Merged responsible-person cells are carried down as row evidence without losing the original row trace when distribution import is used.
+- A newer distribution workbook can help update assigned scope while preserving import history.
 
 ### Step 2: Stub OCR And Field Extraction
 
@@ -130,12 +133,16 @@ Minimum behavior:
 
 - Parse note lines into typed candidates: mouse item, litter event, unknown.
 - Preserve raw note text.
+- Preserve raw ear label notation exactly when present.
+- Normalize ear labels into codes such as `R_PRIME`, `L_PRIME`, `R_CIRCLE`, `L_CIRCLE`, and `NONE`.
+- Keep prime/circle ambiguity reviewable instead of silently merging identity marks.
 - Preserve strike-through status when available.
 - Attach confidence and source photo link.
 
 Acceptance checks:
 
 - Struck-through lines are not deleted.
+- Raw ear label text and normalized ear label code are visible separately for parsed mouse lines.
 - Unknown note lines become review items.
 - Mouse IDs from note lines are visible in review and records views.
 
@@ -242,7 +249,7 @@ Current verification command:
 - Source photo remains visible during review.
 - Review actions show before and after values.
 - Export Center shows blocked review item count.
-- Settings shows configurable strain, genotype, date/rule, and export template masters.
+- Settings shows My Assigned Strains plus configurable strain, genotype, date/rule, and export template masters.
 - External OCR or LLM use is presented as approval-gated or local-only by default.
 
 ## Technical Guardrails

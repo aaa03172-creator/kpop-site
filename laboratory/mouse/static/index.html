@@ -63,6 +63,13 @@
       width: 100%;
       margin: 8px 0 12px;
     }
+    input[type="text"] {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin: 6px 0 10px;
+    }
     .muted { color: var(--muted); }
     .status {
       display: inline-flex;
@@ -96,9 +103,16 @@
       letter-spacing: 0.04em;
     }
     .full { grid-column: 1 / -1; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 10px;
+      align-items: end;
+    }
     @media (max-width: 900px) {
       main { grid-template-columns: 1fr; }
       .full { grid-column: auto; }
+      .form-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -125,6 +139,27 @@
       <p>Imports sample parsed/intermediate records without OCR.</p>
       <button id="fixtureButton" type="button">Import Sample Fixture</button>
       <p class="muted" id="fixtureMessage"></p>
+    </section>
+
+    <section class="full">
+      <h2>My Assigned Strains</h2>
+      <p>Explicit active scope for OCR matching and export grouping.</p>
+      <div class="form-grid">
+        <label>
+          Assigned strain
+          <input id="assignedStrainName" type="text" placeholder="ApoM Tg/Tg">
+        </label>
+        <label>
+          Aliases
+          <input id="assignedStrainAliases" type="text" placeholder="ApoMtg/tg, ApoM">
+        </label>
+        <button id="assignedStrainButton" type="button">Add Scope</button>
+      </div>
+      <p class="muted" id="assignedStrainMessage"></p>
+      <table>
+        <thead><tr><th>Strain</th><th>Aliases</th><th>Source</th><th>Status</th></tr></thead>
+        <tbody id="assignedStrainRows"></tbody>
+      </table>
     </section>
 
     <section>
@@ -170,14 +205,23 @@
     }
 
     async function refresh() {
-      const [health, photos, reviews, preview] = await Promise.all([
+      const [health, assignedStrains, photos, reviews, preview] = await Promise.all([
         api("/api/health"),
+        api("/api/assigned-strains"),
         api("/api/photos"),
         api("/api/review-items"),
         api("/api/export-preview")
       ]);
 
       document.getElementById("health").textContent = health.storage;
+      document.getElementById("assignedStrainRows").innerHTML = assignedStrains.map((strain) =>
+        row([
+          strain.display_name,
+          (strain.aliases || []).join(", ") || "--",
+          strain.source_type,
+          strain.active ? "Active" : "Inactive"
+        ])
+      ).join("") || row(["No assigned strains yet", "", "", ""]);
       document.getElementById("photoRows").innerHTML = photos.map((photo) =>
         row([photo.photo_id, photo.original_filename, photo.status, photo.uploaded_at])
       ).join("") || row(["No photos yet", "", "", ""]);
@@ -208,6 +252,27 @@
       document.getElementById("fixtureMessage").textContent =
         `Imported ${result.imported_parse_results} parsed records; ` +
         `${result.created_or_updated_review_items} review items open.`;
+      await refresh();
+    });
+
+    document.getElementById("assignedStrainButton").addEventListener("click", async () => {
+      const displayName = document.getElementById("assignedStrainName").value.trim();
+      const aliases = document.getElementById("assignedStrainAliases").value
+        .split(",")
+        .map((alias) => alias.trim())
+        .filter(Boolean);
+      if (!displayName) {
+        document.getElementById("assignedStrainMessage").textContent = "Enter an assigned strain first.";
+        return;
+      }
+      const result = await api("/api/assigned-strains", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: displayName, aliases, source_type: "manual" })
+      });
+      document.getElementById("assignedStrainMessage").textContent = `Added ${result.display_name} to active scope.`;
+      document.getElementById("assignedStrainName").value = "";
+      document.getElementById("assignedStrainAliases").value = "";
       await refresh();
     });
 
