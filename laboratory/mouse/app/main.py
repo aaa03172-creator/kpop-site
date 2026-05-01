@@ -1810,17 +1810,57 @@ def export_mice_csv(query: str = "") -> Response:
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
+    row_count = 0
     with connection() as conn:
         for row in mouse_rows(conn, query):
             payload = dict(row)
             writer.writerow({field: payload.get(field, "") for field in fieldnames})
+            row_count += 1
+        blocked_review_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
+        ).fetchone()["count"]
+        suffix = "_filtered" if query.strip() else ""
+        filename = f"mouse_records{suffix}.csv"
+        conn.execute(
+            """
+            INSERT INTO export_log
+                (export_id, export_type, filename, query, row_count,
+                 blocked_review_count, status, exported_at, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("export"),
+                "mouse_csv",
+                filename,
+                query.strip(),
+                row_count,
+                blocked_review_count,
+                "generated",
+                utc_now(),
+                "Generated from local mouse records CSV endpoint.",
+            ),
+        )
 
-    suffix = "_filtered" if query.strip() else ""
     return Response(
         content=output.getvalue(),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="mouse_records{suffix}.csv"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.get("/api/export-log")
+def list_export_log() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT export_id, export_type, filename, query, row_count,
+                   blocked_review_count, status, exported_at, source_layer, note
+            FROM export_log
+            ORDER BY exported_at DESC
+            LIMIT 25
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 @app.get("/api/export-preview")
