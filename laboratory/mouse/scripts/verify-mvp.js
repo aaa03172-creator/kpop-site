@@ -6,6 +6,7 @@ const { chromium } = require("playwright");
 const root = path.resolve(__dirname, "..");
 const pagePath = path.join(root, "index.html");
 const fixturePath = path.join(root, "fixtures", "sample_parse_results.json");
+const distributionFixturePath = path.join(root, "fixtures", "sample_distribution_import.json");
 
 function assert(condition, message) {
   if (!condition) {
@@ -29,6 +30,7 @@ function makeTinyPng() {
 async function main() {
   assert(fs.existsSync(pagePath), "index.html is missing.");
   assert(fs.existsSync(fixturePath), "fixtures/sample_parse_results.json is missing.");
+  assert(fs.existsSync(distributionFixturePath), "fixtures/sample_distribution_import.json is missing.");
 
   const html = fs.readFileSync(pagePath, "utf8");
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
@@ -40,6 +42,7 @@ async function main() {
   assert(!missingIds.length, `Missing DOM ids: ${missingIds.join(", ")}`);
 
   const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+  const distributionFixture = JSON.parse(fs.readFileSync(distributionFixturePath, "utf8"));
   assert(fixture.layer === "parsed or intermediate result", "Fixture layer must stay non-canonical.");
   assert(Array.isArray(fixture.records) && fixture.records.length >= 3, "Fixture must contain at least three parse records.");
   assert(
@@ -48,6 +51,8 @@ async function main() {
       fixture.records.some((record) => record.status === "auto"),
     "Fixture should cover review, conflict, and auto-filled states."
   );
+  assert(distributionFixture.layer === "parsed or intermediate result", "Distribution fixture must stay non-canonical.");
+  assert(Array.isArray(distributionFixture.rows) && distributionFixture.rows.length >= 3, "Distribution fixture should contain parsed assignment rows.");
 
   const uploadPath = makeTinyPng();
   const browser = await chromium.launch({ headless: true });
@@ -70,6 +75,26 @@ async function main() {
   assert((await page.locator("#inboxRows tr").count()) >= 5, "Seed inbox rows did not render.");
   assert((await page.locator("#reviewSummary").textContent()).includes("3 pending"), "Initial review count is wrong.");
 
+  await page.getByRole("button", { name: "Load Distribution Fixture" }).click();
+  assert(
+    (await page.locator("#distributionSummary").textContent()).includes("20260407"),
+    "Distribution fixture did not update settings summary."
+  );
+  assert(
+    (await page.locator("#distributionRows tr").filter({ hasText: "ApoMtg/tg" }).count()) === 1,
+    "Distribution fixture assignment row missing."
+  );
+  assert(
+    (await page.locator("#recordRows tr").filter({ hasText: "ApoMtg/tg" }).count()) === 0,
+    "Distribution assignment leaked into canonical mouse records."
+  );
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector("#distributionRows")?.textContent.includes("TAStg/+; TPMtg/+; ApoMtg/+"));
+  assert(
+    (await page.locator("#distributionRows tr").filter({ hasText: "TAStg/+; TPMtg/+; ApoMtg/+" }).count()) === 1,
+    "Distribution import did not persist after reload."
+  );
+
   await page.getByRole("button", { name: "Load Sample Fixture" }).click();
   await page.waitForSelector("#reviewRows tr");
   assert((await page.locator("#inboxRows tr").filter({ hasText: "FIXTURE-AUTO-MATING" }).count()) === 1, "Embedded fixture mating row missing.");
@@ -78,6 +103,7 @@ async function main() {
   await page.getByRole("button", { name: "Reset Local" }).click();
   await page.waitForSelector("#inboxRows tr");
   assert((await page.locator("#inboxRows tr").filter({ hasText: "FIXTURE-AUTO-MATING" }).count()) === 0, "Reset did not remove embedded fixture rows.");
+  assert((await page.locator("#distributionRows tr").filter({ hasText: "ApoMtg/tg" }).count()) === 0, "Reset did not remove distribution assignment rows.");
 
   await page.getByRole("button", { name: "Import Parse JSON" }).click();
   await page.setInputFiles("#parseInput", fixturePath);

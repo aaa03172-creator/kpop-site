@@ -1,0 +1,49 @@
+{
+  "layer": "parsed or intermediate result",
+  "description": "Fixture distribution workbook rows for assignment scope. These rows are not canonical colony state.",
+  "source_file_name": "20260407 college-vet-med distribution-status.xlsx",
+  "sheet_name": "Mating",
+  "received_date": "2026-04-07",
+  "rows": [
+    {
+      "institution_or_group": "Vet Med",
+      "responsible_person_raw": "Jang S.",
+      "mating_type_raw": "TAStg/+; TPMtg/+; ApoMtg/+",
+      "cage_count_raw": "16",
+      "mating_cage_count_raw": "16",
+      "source_row_number": 3
+    },
+    {
+      "institution_or_group": "Medicine",
+      "responsible_person_raw": "Kim S.",
+      "mating_type_raw": "Lyz2-cre+/-; S565Afl/fl",
+      "cage_count_raw": "8",
+      "mating_cage_count_raw": "",
+      "source_row_number": 12
+    },
+    {
+      "institution_or_group": "Medicine",
+      "responsible_person_raw": "Kim S.",
+      "mating_type_raw": "GFAP Cre; S1PR1 fl/fl",
+      "cage_count_raw": "8",
+      "mating_cage_count_raw": "",
+      "source_row_number": 42
+    },
+    {
+      "institution_or_group": "Medicine",
+      "responsible_person_raw": "Lee W.",
+      "mating_type_raw": "ApoM KO; S1PR1 tm3.1; Stock Tg",
+      "cage_count_raw": "10",
+      "mating_cage_count_raw": "",
+      "source_row_number": 24
+    },
+    {
+      "institution_or_group": "Vet Med",
+      "responsible_person_raw": "Jang S.",
+      "mating_type_raw": "ApoMtg/tg",
+      "cage_count_raw": "6",
+      "mating_cage_count_raw": "",
+      "source_row_number": 35
+    }
+  ]
+}
