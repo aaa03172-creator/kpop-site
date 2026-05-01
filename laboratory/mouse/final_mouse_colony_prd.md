@@ -259,15 +259,15 @@ Canonical examples:
 | --- | --- |
 | `R'` | `R_PRIME` |
 | `L'` | `L_PRIME` |
-| `Rº` or `R°` | `R_CIRCLE` |
-| `Lº` or `L°` | `L_CIRCLE` |
+| `R°` | `R_CIRCLE` |
+| `L°` | `L_CIRCLE` |
 | `R'L'` | `R_PRIME_L_PRIME` |
-| `RºLº` or `R°L°` | `R_CIRCLE_L_CIRCLE` |
-| `R'Lº` or `R'L°` | `R_PRIME_L_CIRCLE` |
-| `RºL'` or `R°L'` | `R_CIRCLE_L_PRIME` |
+| `R°L°` | `R_CIRCLE_L_CIRCLE` |
+| `R'L°` | `R_PRIME_L_CIRCLE` |
+| `R°L'` | `R_CIRCLE_L_PRIME` |
 | `N` | `NONE`, only when the note-line context supports no ear mark |
 
-OCR aliases such as Unicode prime marks, curly apostrophes, backtick-like marks, dot suffixes, degree/circle variants, `R0`, `Ro`, `R o`, and `R˚` should be handled through configurable alias/fuzzy matching. However, prime and circle are different identity signals. Ambiguity between `R_PRIME` and `R_CIRCLE`, or between `L_PRIME` and `L_CIRCLE`, must not be silently merged. If confidence is not high enough, the parsed value should be marked `check` or routed to the Review Queue according to severity.
+The lab's intended circle notation is the degree sign form, such as `R°` and `L°`. OCR aliases or accidental input variants such as masculine ordinal `º`, ring-above `˚`, zero, `Ro`, or spaced forms like `R o` should be handled through configurable alias/fuzzy matching, but they are not the preferred canonical raw examples. Unicode prime marks, curly apostrophes, backtick-like marks, and dot suffixes should likewise be handled as aliases for prime candidates when confidence supports it. However, prime and circle are different identity signals. Ambiguity between `R_PRIME` and `R_CIRCLE`, or between `L_PRIME` and `L_CIRCLE`, must not be silently merged. If confidence is not high enough, the parsed value should be marked `check` or routed to the Review Queue according to severity.
 
 ### 6.3 Mating Cage Note
 
@@ -402,7 +402,66 @@ Fields:
 
 Rows in this table should be explicit user scope, not inferred current cage/card state.
 
-### 8.4 `genotype_category_master`
+### 8.4 `ear_label_master`
+
+Purpose: allowed normalized ear label codes and lab-friendly display text.
+
+Boundary: canonical configuration.
+
+Fields:
+
+- `ear_label_code`: primary key, e.g. `R_PRIME`, `R_CIRCLE`, `NONE`
+- `display_text`: lab-facing notation, e.g. `R'`, `R°`, `R'L°`
+- `meaning`
+- `active`
+- `created_at`
+
+Seed examples:
+
+| `ear_label_code` | `display_text` | Meaning |
+| --- | --- | --- |
+| `R_PRIME` | `R'` | right ear prime mark |
+| `L_PRIME` | `L'` | left ear prime mark |
+| `R_CIRCLE` | `R°` | right ear circle mark |
+| `L_CIRCLE` | `L°` | left ear circle mark |
+| `R_PRIME_L_PRIME` | `R'L'` | right prime + left prime |
+| `R_CIRCLE_L_CIRCLE` | `R°L°` | right circle + left circle |
+| `R_PRIME_L_CIRCLE` | `R'L°` | right prime + left circle |
+| `R_CIRCLE_L_PRIME` | `R°L'` | right circle + left prime |
+| `NONE` | `N` | no ear label / no mark |
+
+The degree sign form, such as `R°` and `L°`, is the lab's intended circle notation. Similar glyphs such as `º` and `˚` may appear as OCR/input aliases but should not be the preferred display text.
+
+### 8.5 `ear_label_alias`
+
+Purpose: maps OCR/raw ear label variants to allowed ear label codes.
+
+Boundary: parsed/intermediate configuration until confirmed; confirmed aliases become configuration.
+
+Fields:
+
+- `alias_id`
+- `raw_text`
+- `ear_label_code`
+- `confidence`
+- `confirmed`
+- `hit_count`
+- `created_at`
+
+Seed examples:
+
+| `raw_text` | `ear_label_code` | Confirmed |
+| --- | --- | --- |
+| `R'`, `R′`, `R’` | `R_PRIME` | yes |
+| `L'`, `L′`, `L’` | `L_PRIME` | yes |
+| `R°`, `Rº`, `R˚` | `R_CIRCLE` | yes |
+| `L°`, `Lº`, `L˚` | `L_CIRCLE` | yes |
+| `N` | `NONE` | yes |
+| `R0`, `Ro`, `L0`, `Lo` | circle candidates | no, review/check unless visual confidence is high |
+
+Ambiguous aliases must not silently become confirmed just because they occur often. Confirmation should preserve the raw alias, normalized code, confidence, and source evidence for the decision.
+
+### 8.6 `genotype_category_master`
 
 Purpose: strain-specific genotype output categories.
 
@@ -422,7 +481,24 @@ Examples:
 - `fl/fl`, `fl/+`, `WT`, `result unknown`
 - `Cre; fl/fl`, `WT; fl/fl`, `result unknown`
 
-### 8.5 `management_rule_master`
+### 8.6.1 `strain_target_genotype`
+
+Purpose: strain-level target genotype settings used to suggest maintenance, mating, experimental, backup, or cleanup decisions after genotyping.
+
+Boundary: canonical configuration.
+
+Fields:
+
+- `target_id`
+- `strain_id`
+- `target_genotype`
+- `purpose`: strain_maintenance / mating_candidate / experimental_cross / backup / unknown
+- `active`
+- `created_at`
+
+Examples are configuration examples only and must not be hard-coded. The same normalized genotype result may imply a different next action depending on strain, target purpose, colony plan, and user review.
+
+### 8.7 `management_rule_master`
 
 Purpose: global or strain-specific timing rules.
 
@@ -443,7 +519,7 @@ Default example:
 - min age: 30 days,
 - max age: 90 days.
 
-### 8.6 `photo_log`
+### 8.8 `photo_log`
 
 Purpose: stores uploaded photo evidence.
 
@@ -461,7 +537,7 @@ Fields:
 - `status`
 - `notes`
 
-### 8.7 `parse_result`
+### 8.9 `parse_result`
 
 Purpose: stores ROI-level extraction results.
 
@@ -488,7 +564,7 @@ ROI examples:
 - note area,
 - LMO/O/N area.
 
-### 8.8 `card_snapshot`
+### 8.10 `card_snapshot`
 
 Purpose: represents one parsed cage card snapshot. This replaces exposing a user-facing `system_cage_id` or user-managed cage identifier.
 
@@ -520,9 +596,13 @@ Important:
 - `card_snapshot_id` is an implementation detail.
 - The user should work with photo, strain, DOB, mouse IDs, and Excel row outputs rather than internal IDs.
 
-### 8.9 `mouse_master`
+### 8.11 `mouse_master`
 
 Purpose: individual mouse-level state.
+
+Rationale: `mouse_master` is required because colony continuity is mouse-centered, not cage-centered. Cage cards may not have a stable cage ID, and the same mouse can appear in separated, moved, mating, genotyping, or historical note contexts over time. Ear label, tail sample ID, genotype result, target genotype match, and current status must remain connected to the same individual mouse without ambiguity.
+
+Boundary: canonical structured state. It stores the latest accepted state for fast lookup. Historical changes should be represented as events in `action_log`, source note rows, genotyping records, or other event tables rather than accumulating all history directly in `mouse_master`.
 
 Fields:
 
@@ -540,7 +620,15 @@ Fields:
 - `ear_label_raw`
 - `ear_label_code`: normalized internal code; replaces the older planning name `ear_label_normalized`
 - `ear_label_confidence`
-- `ear_label_review_status`: accepted / check / review / rejected
+- `ear_label_review_status`: auto_filled / check / needs_review / verified / user_corrected
+- `sample_id`
+- `sample_date`
+- `genotyping_status`: not_sampled / sampled / submitted / pending / resulted / failed / not_required / unknown
+- `genotype_result`
+- `genotype_result_date`
+- `target_match_status`: matches_target / does_not_match_target / partially_matches / unknown / not_applicable
+- `use_category`: maintenance_candidate / mating_candidate / experimental_candidate / cleanup_candidate / backup / unknown
+- `next_action`: sample_needed / awaiting_result / review_result / keep_for_maintenance / consider_for_mating / available_for_experiment / cleanup_or_confirm / review_needed
 - `source_note_item_id`
 - `current_card_snapshot_id`
 - `status`: active / moved / mating / dead / used / unknown
@@ -548,14 +636,25 @@ Fields:
 - `created_at`
 - `updated_at`
 
-### 8.10 `card_note_item_log`
+Implementation notes:
+
+- `display_id` must not be globally unique by itself. Matching should use candidates such as display ID, strain or raw strain, DOB range, ear label, source history, and review status.
+- `raw_strain_text` must remain available because a strain may not be matched when the mouse candidate is first created.
+- In the current local SQLite implementation, unresolved future references such as `strain_id` and `current_card_snapshot_id` may be stored as nullable text values until those tables are implemented. Safe existing references such as `source_photo_id` and `ear_label_code` can use foreign keys.
+
+### 8.12 `card_note_item_log`
 
 Purpose: stores each note line as structured evidence.
+
+Rationale: the cage card `Note` area is not plain free text. In separated/stock cards, note lines often represent individual mice with mouse IDs, ear labels, and strike-through status. In mating cards, note lines often represent litter events. Storing the note area only as a blob would lose line number, strike status, parsed mouse/litter meaning, confidence, and reviewability.
+
+Boundary: parsed/intermediate evidence. Rows should preserve what was read from the photo and how it was interpreted at parse time. They should not be silently overwritten when OCR or parsing is corrected; use review/action history or a later parse version to preserve traceability.
 
 Fields:
 
 - `note_item_id`
 - `photo_id`
+- `parse_id`
 - `card_snapshot_id`
 - `card_type`
 - `line_number`
@@ -567,14 +666,22 @@ Fields:
 - `parsed_ear_label_raw`
 - `parsed_ear_label_code`: normalized internal code; replaces the older planning name `parsed_ear_label_normalized`
 - `parsed_ear_label_confidence`
-- `parsed_ear_label_review_status`: accepted / check / review / rejected
+- `parsed_ear_label_review_status`: auto_filled / check / needs_review / verified / user_corrected
 - `parsed_event_date`
 - `parsed_count`
 - `confidence`
 - `needs_review`
 - `created_at`
 
-### 8.11 `mating_event_log`
+Implementation notes:
+
+- `raw_line_text` must preserve the original parsed line.
+- `strike_status` and `interpreted_status` are separate because a single strike can mean moved/separated for mouse lines and separated for litter lines.
+- `parsed_ear_label_raw` and `parsed_ear_label_code` must stay separate.
+- `parse_id` should be kept when available so repeated parsing of the same photo can be audited.
+- In the current local SQLite implementation, `photo_id`, `parse_id`, and `parsed_ear_label_code` can use existing foreign keys; `card_snapshot_id` can remain nullable text until the card snapshot table exists.
+
+### 8.13 `mating_event_log`
 
 Purpose: mating cage and litter/breeding event history.
 
@@ -604,35 +711,40 @@ Pedigree note:
 - Full `sire_id` / `dam_id` pedigree fields can be added later.
 - MVP should capture parent IDs in mating events without requiring complete pedigree resolution.
 
-### 8.12 `genotyping_record`
+### 8.14 `genotyping_record`
 
-Purpose: genotype result records linked to mice.
+Purpose: sample collection, submission, and genotype result records linked to mice.
+
+Boundary: event/history record. The latest accepted genotype state may be summarized in `mouse_master`, but source result history belongs here.
 
 Fields:
 
 - `genotyping_id`
-- `date`
+- `mouse_id`
+- `sample_id`
+- `sample_date`
+- `submitted_date`
+- `result_date`
 - `strain_id`
 - `target_name`
-- `sample_no`
-- `mouse_id`
 - `mouse_display_id`
-- `band_pattern`
-- `wild_band_bp`
-- `target_band_bp`
-- `result`
-- `result_status`
+- `raw_result`
+- `normalized_result`
+- `result_status`: pending / resulted / failed / ambiguous / needs_review
 - `source_photo_id`
+- `confidence`
 - `notes`
+- `created_at`
+- `updated_at`
 
-### 8.13 `action_log`
+### 8.15 `action_log`
 
 Purpose: audit trail for all automatic and manual state changes.
 
 Fields:
 
 - `action_id`
-- `action_type`: created / moved / separated / dead / born / assigned_to_mating / genotyped / updated / closed
+- `action_type`: created / moved / separated / dead / born / assigned_to_mating / genotyped / sample_collected / genotyping_submitted / genotyping_resulted / genotyping_failed / genotype_updated / use_category_suggested / updated / closed
 - `target_type`: mouse / card_snapshot / mating / genotype / strain
 - `target_id`
 - `mouse_id`
@@ -650,7 +762,7 @@ Fields:
 
 All automatic updates must create an `action_log` entry.
 
-### 8.14 `review_queue`
+### 8.16 `review_queue`
 
 Purpose: queue for uncertain, conflicting, or high-risk items.
 
@@ -673,7 +785,7 @@ Fields:
 - `resolved_at`
 - `created_at`
 
-### 8.15 `export_log`
+### 8.17 `export_log`
 
 Purpose: records Excel export history.
 
@@ -685,7 +797,7 @@ Fields:
 - `exported_at`
 - `notes`
 
-### 8.16 `distribution_import`
+### 8.18 `distribution_import`
 
 Purpose: records periodic assignment workbook imports.
 
@@ -702,7 +814,7 @@ Fields:
 - `status`: imported / parsed / reviewed / superseded
 - `notes`
 
-### 8.17 `distribution_assignment_row`
+### 8.19 `distribution_assignment_row`
 
 Purpose: row-level assignment extracted from a distribution workbook.
 
@@ -798,7 +910,50 @@ Each note line should be:
 
 For ear labels, raw text and normalized code must stay separate. A clear `R'` can normalize to `R_PRIME`, while uncertain variants such as `R`, `R.`, `Ro`, or `R0` should remain reviewable unless the alias match and visual context are strong enough.
 
-### 9.6 Fuzzy Matching
+Example separated/stock note parsing:
+
+| Raw note line | Mouse display ID | Ear label raw | Ear label code |
+| --- | --- | --- | --- |
+| `319 L'` | `319` | `L'` | `L_PRIME` |
+| `320 R'L'` | `320` | `R'L'` | `R_PRIME_L_PRIME` |
+| `321 R°` | `321` | `R°` | `R_CIRCLE` |
+| `322 R°L'` | `322` | `R°L'` | `R_CIRCLE_L_PRIME` |
+| `323 N` | `323` | `N` | `NONE` |
+
+The original line must still be preserved in `card_note_item_log.raw_line_text`, even when the parsed mouse ID and ear label are clear.
+
+### 9.7 Ear Label Normalization Logic
+
+The parser should expose ear label normalization as a deterministic function backed by `ear_label_master` and `ear_label_alias`.
+
+Conceptual return shape:
+
+```ts
+normalizeEarLabel(raw: string): {
+  code: string | null;
+  confidence: number;
+  status: "auto_filled" | "check" | "needs_review";
+  candidates?: Array<{ code: string; confidence: number }>;
+}
+```
+
+Expected behavior:
+
+| Raw value | Result |
+| --- | --- |
+| `R'`, `R′`, `R’` | `R_PRIME`, high confidence |
+| `L'`, `L′`, `L’` | `L_PRIME`, high confidence |
+| `R°` | `R_CIRCLE`, high confidence |
+| `L°` | `L_CIRCLE`, high confidence |
+| `Rº`, `R˚` | `R_CIRCLE`, alias match |
+| `Lº`, `L˚` | `L_CIRCLE`, alias match |
+| `N` | `NONE`, when note-line context supports no ear mark |
+| `R0`, `Ro`, `L0`, `Lo` | circle candidate with `check` unless visual confidence is very high |
+| `R`, `L` | ambiguous, `needs_review` |
+
+Combination parsing must support multiple marks in one label, including `R'L'`, `R°L°`, `R'L°`, and `R°L'`. If one component is uncertain, such as `R0L'`, the parser may suggest `R_CIRCLE_L_PRIME` with `check`. If both components are uncertain, such as `RoLo`, it should produce candidates and choose `check` or `needs_review` based on confidence.
+
+### 9.8 Fuzzy Matching
 
 The system should compare parsed values against existing records.
 
@@ -816,7 +971,7 @@ Examples:
 - `ApoM Tg/tg` may map to `ApoM Tg/Tg`.
 - `25.01.30` may be `26.01.30` if DOB is late 2025 and the card is a mating card.
 - Unicode prime or curly apostrophe variants may map to `R_PRIME`.
-- Degree or small circle variants may map to `R_CIRCLE`.
+- The intended lab notation `R°` maps to `R_CIRCLE`; visually similar OCR/input variants may be suggested as aliases only when confidence supports it.
 
 The system should suggest likely matches rather than silently overwriting when confidence is not high. Ear label prime/circle ambiguity is identity-critical and should be sent to `check` or review instead of being collapsed into one code.
 
@@ -916,6 +1071,107 @@ If genotype is not in the strain's configured genotype categories:
 - mark as review,
 - allow user to add a new genotype category if legitimate.
 
+If a genotype result can be parsed but does not match any configured `genotype_category_master` row for the strain, do not silently create a new category. Keep the raw result, suggest the closest configured category when possible, and send the item to review.
+
+### 11.7 Ear Label Logic
+
+Ear labels must participate in validation because they are part of mouse identity.
+
+Duplicate label warning:
+
+- If two active mice in the same cage/card snapshot have the same `ear_label_code`, same strain, and same compatible DOB group, create a Review Queue item.
+- This should be a warning/review item, not an automatic overwrite, because same-label collisions may represent OCR error, a missing label, or a real cage-card issue.
+
+Mouse identity matching:
+
+- If the same mouse display ID appears again and strain, DOB, and ear label are compatible, treat it as the same mouse candidate.
+- If display ID matches but ear label differs, create a Review Queue item.
+- Do not silently overwrite the previous ear label. Store the new raw value, normalized candidate, source photo, and note line.
+
+Strike-through handling:
+
+- If a struck-through note line contains an ear label, still parse and store the ear label.
+- The strike-through affects interpreted status or event creation; it does not erase identity evidence.
+- For example, `318 R'` with a single strike should preserve `R_PRIME`, interpret the line as moved/separated, and create an action log event when accepted.
+
+Review Queue items should be created when:
+
+- an ear label cannot be parsed;
+- prime/circle distinction is ambiguous;
+- the same active cage has duplicate ear label codes for otherwise similar mice;
+- an existing mouse ID has a conflicting ear label;
+- OCR output is likely ambiguous, such as `R0`, `Ro`, `L0`, `Lo`, `R`, or `L`;
+- a combination label is partially ambiguous.
+
+Ear label review items should include the original photo, cropped ROI when available, raw note line, parsed mouse ID, suggested candidates, confidence score, and any existing matched mouse record.
+
+### 11.8 Genotyping Workflow Logic
+
+After pups are separated and individual mouse records are created, the system should treat genotyping as a structured workflow:
+
+`Separated cage created -> Mouse IDs created -> Ear labels assigned -> Tail sample collected -> Genotyping submitted or pending -> Genotype result entered -> Target genotype matched -> Next action suggested`
+
+Newly separated mice should default to:
+
+- `genotyping_status`: not_sampled
+- `genotype_result`: unknown
+- `target_match_status`: unknown
+- `use_category`: unknown
+- `next_action`: sample_needed
+
+When a tail sample is collected from a sample sheet, cage card note, or manual entry:
+
+- update `sample_id`;
+- update `sample_date`;
+- set `genotyping_status` to sampled;
+- set `next_action` to awaiting_result;
+- create a `sample_collected` action log entry.
+
+If sample ID equals mouse display ID by lab convention, the system may suggest an automatic mapping, but ambiguous matches still go to review.
+
+When genotyping is submitted or pending:
+
+- set `genotyping_status` to submitted or pending;
+- set `next_action` to awaiting_result;
+- create a `genotyping_submitted` action log entry when the state change is accepted.
+
+When a result is uploaded or manually entered:
+
+- create a `genotyping_record`;
+- update the latest genotype fields in `mouse_master`;
+- compare the normalized result with active `strain_target_genotype` settings;
+- suggest `target_match_status`, `use_category`, and `next_action`;
+- create `genotyping_resulted`, `genotype_updated`, and when applicable `use_category_suggested` action log entries.
+
+The system should suggest, not force, final use category. A non-target result may still be useful for a control, experiment, backup, or colony decision.
+
+### 11.9 Sample ID Matching Logic
+
+Sample ID matching priority:
+
+1. exact mouse display ID match;
+2. mouse ID without prefix match;
+3. same strain, compatible DOB group, and same ear label;
+4. fuzzy match candidate;
+5. Review Queue.
+
+If one sample ID maps to multiple possible mice, or if no mouse can be matched, create a Review Queue item. The review item should show sample ID, raw result, candidate mice, strain, DOB, ear label, source photo or sheet, and confidence.
+
+### 11.10 Genotyping Validation Rules
+
+Create warnings or Review Queue items when:
+
+- genotype result exists but the mouse was never marked sampled;
+- sample ID cannot be matched to any mouse;
+- one sample ID matches multiple mice;
+- result conflicts with an existing genotype;
+- genotype does not match any configured category for that strain;
+- result contradicts an active target genotype setting;
+- mouse is marked dead before sample or result date;
+- mouse is already used or moved but a new result is uploaded;
+- sample date is before DOB;
+- result date is before sample date.
+
 ## 12. Data Stitching Rules
 
 Because there is no QR/barcode, continuity must be inferred.
@@ -984,10 +1240,12 @@ The workflow should be upload-driven, not calendar-driven. Any lab handoff shoul
 2. System extracts strain, DOB, sex/count, ID field, note lines.
 3. System creates/updates card record.
 4. New mouse IDs are added to `mouse_master`.
-5. Existing mouse IDs are linked or moved.
-6. Struck mouse lines generate moved/dead actions.
-7. Count mismatch is flagged.
-8. Export view updates separated workbook format.
+5. Ear labels are parsed and linked as identity evidence.
+6. New separated mice default to `genotyping_status = not_sampled` and `next_action = sample_needed` unless the strain does not require genotyping.
+7. Existing mouse IDs are linked or moved.
+8. Struck mouse lines generate moved/dead actions.
+9. Count mismatch is flagged.
+10. Export view updates separated workbook format.
 
 ### 13.3 Mating Cage Workflow
 
@@ -1001,11 +1259,18 @@ The workflow should be upload-driven, not calendar-driven. Any lab handoff shoul
 
 ### 13.4 Genotyping Workflow
 
-1. User uploads genotyping sheet/result photo or enters results.
-2. System links sample numbers to mouse IDs when possible.
-3. Genotype records update `mouse_master`.
-4. Genotype count summaries update output sheets.
-5. Unmatched sample IDs go to review.
+1. Newly separated mice appear in the genotyping worklist as not sampled.
+2. User uploads a sample sheet/photo, enters tail sample collection manually, or records sample IDs from cage card notes.
+3. System links sample IDs to mouse IDs when possible.
+4. Sampled mice move to awaiting result.
+5. User uploads a genotyping result photo/sheet or enters results manually.
+6. System creates `genotyping_record` rows and updates latest genotype state in `mouse_master`.
+7. System compares results with configured genotype categories and active strain target genotypes.
+8. System suggests target match status, use category, and next action.
+9. Genotype count summaries update output sheets.
+10. Unmatched, conflicting, or ambiguous sample/result rows go to review.
+
+For MVP, manual or semi-structured result entry is sufficient before real OCR. Supported input shapes may include sample/result rows such as `Sample 319: Tg/Tg`, `Sample MT320: Cre+`, or `Sample 21: fl/fl`.
 
 ## 14. Dashboard Requirements
 
@@ -1021,6 +1286,96 @@ Dashboard should show:
 - active card snapshots by strain,
 - open mating/litter events,
 - export status.
+
+Genotyping dashboard cards should include:
+
+| Card | Meaning |
+| --- | --- |
+| Not sampled | separated mice that still need tail sampling |
+| Awaiting result | sampled/submitted mice without an accepted result |
+| Failed or ambiguous | failed, ambiguous, or review-needed results |
+| Target genotype confirmed | mice whose result matches an active target genotype setting |
+| Non-target genotype | mice needing cleanup, experiment, backup, or review decision |
+| Review needed | sample/result matching conflicts or invalid genotype states |
+
+The dashboard should help the user know what to do next without remembering which mice need sampling, which samples are awaiting results, or which mice are possible maintenance/mating/experiment candidates.
+
+### 14.1 Ear Label Review UI
+
+For ear label review, the UI should show:
+
+- original photo;
+- highlighted note line;
+- cropped ear label ROI when available;
+- AI/OCR raw reading;
+- suggested normalized code;
+- candidate options from `ear_label_master`, including combinations and `NONE`;
+- manual correction input;
+- confidence and review status.
+
+Example review message:
+
+`Ear label uncertain: raw value "R0" may indicate "R°" (R_CIRCLE). Please confirm.`
+
+### 14.2 Mouse Detail Ear Label Display
+
+Mouse detail should show both lab notation and internal code:
+
+- Ear label: `R'`
+- Internal code: `R_PRIME`
+- Source: source photo and note line
+- Status: `auto_filled`, `check`, `needs_review`, `verified`, or `user_corrected`
+
+Do not show only the normalized code to the user. The lab is accustomed to raw notation, so raw/display notation should be prominent and the internal code should remain secondary.
+
+### 14.3 Mouse Detail Genotyping Display
+
+Mouse detail should show:
+
+- Mouse ID;
+- strain;
+- sex;
+- DOB;
+- ear label;
+- current cage/card snapshot;
+- genotyping status;
+- sample ID;
+- sample date;
+- genotype result;
+- target match status;
+- suggested use category;
+- next action;
+- source photos or result sheets;
+- action timeline.
+
+### 14.4 Genotyping Worklist And Result Entry UI
+
+The Genotyping screen should include a worklist with:
+
+| Mouse ID | Ear label | Strain | DOB | Sample status | Result | Next action |
+| --- | --- | --- | --- | --- | --- | --- |
+
+Filters should include:
+
+- not sampled;
+- awaiting result;
+- failed;
+- target genotype confirmed;
+- non-target genotype;
+- needs review.
+
+Result entry should support:
+
+- upload result sheet photo;
+- upload Excel/CSV later if needed;
+- manual entry table for MVP.
+
+Manual entry columns:
+
+- Sample ID;
+- Result;
+- Target;
+- Notes.
 
 ## 15. Excel Output Requirements
 
@@ -1081,6 +1436,18 @@ Should summarize by card snapshot:
 - genotype category counts,
 - usage/status,
 - notes with mouse IDs and ear labels.
+
+Ear labels in exports should use lab-friendly display notation from `ear_label_master.display_text`, not internal codes. For example, export `R'`, `L'`, `R°`, `L°`, and `R'L°` rather than `R_PRIME` or `R_PRIME_L_CIRCLE`.
+
+If an ear label is uncertain, the export preview should mark it clearly without disrupting the familiar workbook shape. Acceptable representations include:
+
+- inline marker: `320 R°?`
+- compact status marker: `320 R° (check)`
+- separate notes/status column when the template allows it
+
+The app should propose the least disruptive representation for the selected export template and block final export only when unresolved review items make the row unsafe.
+
+Where appropriate, separated-cage exports should include or support mouse ID, ear label, sample ID, genotyping status, genotype result, and use category/notes. If the existing lab workbook format does not have a safe place for these values, keep the original format unchanged and add a separate export sheet such as `Genotyping_Worklist` or `Mouse_Master`.
 
 ### 15.3 Animalsheet Output
 

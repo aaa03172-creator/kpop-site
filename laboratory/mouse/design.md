@@ -134,6 +134,7 @@ Important distinction:
 
 - Mouse records are durable canonical state.
 - Card records are snapshots.
+- Note item rows are line-level parsed evidence from source photos.
 - Movement, death, mating assignment, litter, and genotype changes are events.
 
 Avoid making internal IDs prominent. User-facing continuity should be based on:
@@ -143,7 +144,7 @@ Avoid making internal IDs prominent. User-facing continuity should be based on:
 - source card photo;
 - strain;
 - DOB range;
-- ear label;
+- ear label raw notation and normalized code;
 - current card snapshot.
 
 ### 5. Record Detail / Source Evidence
@@ -206,7 +207,7 @@ Recommended sections:
 - Card Type Rules;
 - Export Templates.
 
-Settings should make it clear that strain names, genotype categories, date rules, and protocols are configurable. Unknown parsed values should create review items instead of silently becoming new canonical values.
+Settings should make it clear that strain names, genotype categories, date rules, ear label aliases, and protocols are configurable. Unknown parsed values should create review items instead of silently becoming new canonical values. Ear label settings should preserve the lab's handwritten symbols as raw evidence while mapping accepted forms to explicit codes such as `R_PRIME`, `R_CIRCLE`, and `NONE`.
 
 ### 8. Mating & Litters
 
@@ -234,11 +235,16 @@ Goal: connect genotyping sheets and results to mouse IDs without forcing uncerta
 
 Recommended layout:
 
+- post-separation genotyping workflow cards;
+- not sampled / awaiting result / ambiguous / target confirmed / non-target / review needed counts;
 - sample/result table;
 - mouse ID matching status;
+- ear label and DOB context beside mouse ID candidates;
 - configured genotype category;
+- strain target genotype setting;
 - raw band/result text;
 - final interpreted genotype;
+- suggested use category and next action;
 - source sheet or photo link;
 - unmatched sample review queue.
 
@@ -252,6 +258,8 @@ Genotype results should show whether they are:
 - blocked by missing mouse ID.
 
 When a genotype result is outside the configured categories for a strain, the UI should send it to review and offer a path to add a legitimate category in Settings.
+
+The UI should suggest maintenance, mating, experiment, backup, cleanup, or review categories from strain-level target genotype settings, but the suggestion must not override human judgment. Mouse detail and the genotyping worklist should keep sample ID, ear label, genotype result, target match, and next action visible together.
 
 ## Navigation
 
@@ -603,6 +611,7 @@ Risk mitigation:
 - label normalized values;
 - show confidence and source;
 - keep corrections auditable.
+- treat ear label prime/circle ambiguity as identity-critical and send low-confidence cases to review.
 
 ### Mating and genotyping are under-modeled
 
@@ -630,6 +639,7 @@ Risk mitigation:
 - Source photos are always visible or one click away.
 - Raw extracted values are not overwritten by normalized values.
 - Low-confidence fields show confidence and review state.
+- Ear label raw notation and normalized code are shown separately when used for mouse identity.
 - Review items show source evidence, suggested value, and before/after.
 - High-risk changes require explicit reviewed application.
 - Internal IDs are hidden from normal users.
