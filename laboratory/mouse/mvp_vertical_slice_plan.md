@@ -87,6 +87,7 @@ Goal:
 Minimum behavior:
 
 - Accept a `.xlsx` distribution workbook such as `20260407 의대 수의대 분배현황표.xlsx`.
+- Convert the workbook with `npm run parse:distribution -- "path/to/분배현황표.xlsx" --out fixtures/parsed_distribution.json`, then import the JSON through `Import Distribution JSON`.
 - Preserve the original file name, received/import time, sheet name, row number, and parsed row values.
 - Parse repeated blocks with responsible person, mating type, cage count, and mating cage count.
 - Suggest candidate strain/master entries from `mating 종류` values without silently confirming them.

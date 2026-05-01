@@ -211,6 +211,8 @@ The system should treat this file as raw source evidence first. Rows from this w
 - optional strain-master suggestions,
 - review items when a distribution row conflicts with existing configured strains or active records.
 
+In the current prototype, the workbook is converted to parsed/intermediate JSON with `scripts/parse_distribution_workbook.py` and then loaded through `Import Distribution JSON`. The converted rows retain workbook filename, sheet name, source row number, and source cell coordinates. The Settings view groups `mating 종류` values into reviewable candidate strain suggestions; these suggestions must not become confirmed strain-master values without explicit review.
+
 The distribution workbook must not silently overwrite photo-backed colony state. It should help the user know what they are responsible for and which strain names should be pre-registered before processing photos.
 
 ## 6. Note And Strike-Through Rules
