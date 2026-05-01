@@ -656,13 +656,31 @@ def main() -> None:
                         WHERE event_type = 'moved' AND related_entity_type = 'cage'
                         """
                     ).fetchone()["count"]
+                    active_cage_assignment_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM mouse_cage_assignment
+                        WHERE mouse_id = ? AND status = 'active'
+                        """,
+                        (genotyping_target["mouse_id"],),
+                    ).fetchone()["count"]
+                    ended_cage_assignment_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM mouse_cage_assignment
+                        WHERE mouse_id = ? AND status = 'ended'
+                        """,
+                        (genotyping_target["mouse_id"],),
+                    ).fetchone()["count"]
                 assert_true(note_count >= 10, "Persisted note item evidence count is too low.")
                 assert_true(mouse_count >= 3, "Persisted mouse candidate count is too low.")
                 assert_true(moved_count >= 1, "Single-struck mouse note should create a moved candidate.")
                 assert_true(duplicate_leak_count == 0, "Duplicate active fixture should not create mouse candidates.")
                 assert_true(genotyping_action_count == 1, "Genotyping update should create an action log entry.")
-                assert_true(cage_move_action_count == 1, "Cage move should create an action log entry.")
+                assert_true(cage_move_action_count >= 2, "Each cage move should create an action log entry.")
                 assert_true(cage_move_event_count >= 1, "Cage move should create a mouse event.")
+                assert_true(active_cage_assignment_count == 1, "Cage moves should leave only one active assignment per mouse.")
+                assert_true(ended_cage_assignment_count >= 1, "Cage moves should close the previous active assignment.")
                 correction = client.post(
                     "/api/corrections",
                     json={

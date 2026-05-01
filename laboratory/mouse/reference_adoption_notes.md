@@ -19,6 +19,7 @@ References reviewed:
 - Local: `final_mouse_colony_prd.md`
 - Local: `design.md`
 - Local: `AGENTS.md`
+- Local: `mousedb_cli_first_review_ko.md`
 
 ## Overall Adoption Direction
 
@@ -39,6 +40,8 @@ This maps well to the existing PRD direction:
 - low-confidence, conflicting, or biologically unlikely values become review items;
 - mouse, mating, litter, genotype, and event records are canonical only after accepted by policy or review;
 - Excel files remain import/export views, not the source of truth.
+
+The CLI-first MouseDB direction should adopt the same pattern. MouseDB should remain an independent tool that can later be called by PaperPipe, a personal Research Assistant, an API, or an MCP server. PaperPipe should not be hard-coded into MouseDB; instead, future integration should call stable MouseDB services or CLI JSON outputs.
 
 ## Development References To Adopt
 
@@ -167,11 +170,14 @@ Adopt the role separation, not the exact agent terminology:
 - Canonical event/state writer.
 - Excel import/export.
 - Audit and export logs.
+- Stable CLI commands and JSON output contracts for future tool integration.
 
 Guidance:
 
 - Add abstractions only when they clarify the domain model or reduce meaningful duplication.
 - Keep strain, genotype, protocol, and date rules configurable.
+- Keep business logic in services that can be reused by CLI, web UI, API, and MCP wrappers.
+- State-changing operations that update current mouse state and write events should be transactional.
 
 ## Design References To Adopt
 

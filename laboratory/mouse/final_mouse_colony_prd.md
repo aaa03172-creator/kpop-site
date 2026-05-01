@@ -9,6 +9,7 @@ Adopted project documents:
 - `mouse_strain_colony_system_design_ko.md`: non-canonical Korean extension design for strain knowledge graph, colony tracking, evidence boundaries, review/correction, and visualization.
 - `reference_adoption_notes.md`: non-canonical reference adoption notes for development, design, and external tooling ideas.
 - `mvp_vertical_slice_plan.md`: non-canonical implementation planning note for the first end-to-end workflow.
+- `mousedb_cli_first_review_ko.md`: non-canonical review note for a standalone CLI-first MouseDB core that can later be called by PaperPipe, a personal Research Assistant, API, or MCP server.
 
 ## 1. Product Summary
 
@@ -1538,11 +1539,21 @@ Possible later additions:
 
 Recommended implementation:
 
-- Web app/PWA,
+- CLI-first MouseDB core with a thin web app/PWA layer when needed,
 - mobile-friendly upload flow,
 - desktop dashboard for review and export,
 - database-backed source of truth,
 - Excel import/export support.
+
+MouseDB should remain an independent tool, not a PaperPipe submodule. PaperPipe should manage papers, literature, and methods. MouseDB should manage strain, colony, mouse, cage, mating, litter, genotype, and event records. A future personal Research Assistant may call both tools as a control layer.
+
+The first durable implementation should keep business logic in services that can be called by CLI, web UI, API, or MCP wrappers:
+
+```text
+CLI or UI -> schemas/input validation -> services -> repositories -> models/db
+```
+
+The CLI is a public integration surface. Major commands should support stable `--json` output so later automation can call MouseDB without scraping human-readable tables.
 
 ### 18.2 Storage
 
@@ -1556,6 +1567,17 @@ The system must store:
 - action logs,
 - export history.
 
+For CLI-first MouseDB tables and commands, source/evidence traceability should be included from the beginning where feasible. Important canonical records and events should be able to reference a source photo, note item, imported Excel row, manual entry, or CLI action.
+
+Minimum traceability fields to consider on imported, parsed, canonical, or event records:
+
+- `source_type`,
+- `source_id`,
+- `confidence`,
+- `reviewed_status`,
+- `raw_value` where applicable,
+- `normalized_value` where applicable.
+
 ### 18.3 Safety
 
 Every auto-filled value should be traceable to:
@@ -1564,6 +1586,14 @@ Every auto-filled value should be traceable to:
 - parse result,
 - note line if applicable,
 - action log entry.
+
+State-changing operations that update current structured state and create history must be transactional. For example, cage movement should update the mouse's current cage and create a movement event in the same transaction. Genotype recording should create the genotype result and the related mouse event together. Partial writes are not acceptable for mouse-relevant state changes.
+
+MouseEvent or action log entries should be append-only by default. Corrections and inferred state changes should preserve previous and new values instead of silently rewriting history.
+
+`Mouse.current_genotype_summary` should be treated as a display/cache field. Authoritative genotype calls should live in structured `GenotypeResult` records.
+
+Controlled vocabularies such as status values, genotype categories, protocol names, date rules, and event types should be centralized and replaceable. They may start as seed/config values in MVP, but they should not be scattered as hard-coded domain logic.
 
 ## 19. Risks And Mitigations
 

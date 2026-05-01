@@ -4,7 +4,7 @@
 
 Layer classification: implementation planning / non-canonical project note.
 
-This document turns the current PRD, design notes, Korean extension design, and reference adoption notes into an implementation sequence. It does not define canonical schema or final product behavior. Canonical product behavior should continue to follow `final_mouse_colony_prd.md`, with `design.md`, `mouse_strain_colony_system_design_ko.md`, `reference_adoption_notes.md`, and `AGENTS.md` used as supporting guidance.
+This document turns the current PRD, design notes, Korean extension design, reference adoption notes, and CLI-first MouseDB review into an implementation sequence. It does not define canonical schema or final product behavior. Canonical product behavior should continue to follow `final_mouse_colony_prd.md`, with `design.md`, `mouse_strain_colony_system_design_ko.md`, `reference_adoption_notes.md`, `mousedb_cli_first_review_ko.md`, and `AGENTS.md` used as supporting guidance.
 
 ## Target Slice
 
@@ -55,6 +55,14 @@ The current prototype is static HTML. If the project moves into application code
 | `exporter` | Produce Excel previews and exports. |
 
 These names are planning labels, not required final file names.
+
+If the implementation moves toward a standalone MouseDB package, keep the core service layer independent from any UI:
+
+```text
+CLI or UI -> schemas/input validation -> services -> repositories -> models/db
+```
+
+The CLI should remain stable enough for a future Research Assistant, API, or MCP wrapper to call. Major commands should support `--json`, and JSON shapes used by tests should be treated as integration contracts.
 
 ## Implementation Sequence
 
@@ -180,6 +188,7 @@ Minimum behavior:
 - For newly separated mice, initialize genotyping workflow fields as not sampled with next action sample needed when genotyping is required.
 - Store line-level note evidence in `card_note_item_log` before writing mouse-level state.
 - Store current individual state in `mouse_master`, while preserving movement/death/genotype changes as action/event history.
+- Apply state changes and related event/action log writes in a single transaction.
 
 Acceptance checks:
 
@@ -188,6 +197,8 @@ Acceptance checks:
 - Mouse display ID is not globally unique by itself; duplicate display IDs remain candidate matches until strain/DOB/ear-label/source context resolves them.
 - Movement, death, mating, litter, and genotype updates are represented as events.
 - Internal IDs stay hidden from ordinary user-facing UI.
+- Partial writes cannot leave current mouse state updated without the corresponding event/action log, or vice versa.
+- Event/action log entries preserve source evidence and before/after values when correcting or inferring high-risk state changes.
 
 ### Step 5A: Genotyping Worklist Planning
 
@@ -287,6 +298,9 @@ Current verification command:
 - Do not treat Excel as the canonical database.
 - Do not create canonical records from OCR-only values unless explicit auto-fill policy allows it.
 - Treat any future LLM output as parsed/intermediate data, not canonical truth.
+- Keep Mouse genotype summaries as display/cache values; structured genotype records are the source of truth.
+- Treat CLI JSON output, where implemented, as a stable integration contract for future tools.
+- Write current-state changes and related event/action log entries transactionally.
 
 ## Open Decisions Before Real OCR
 
