@@ -4,7 +4,7 @@
 
 Layer classification: implementation planning / non-canonical project note.
 
-This document turns the current PRD, design notes, and reference adoption notes into an implementation sequence. It does not define canonical schema or final product behavior. Canonical product behavior should continue to follow `final_mouse_colony_prd.md`, with `design.md`, `reference_adoption_notes.md`, and `AGENTS.md` used as supporting guidance.
+This document turns the current PRD, design notes, Korean extension design, and reference adoption notes into an implementation sequence. It does not define canonical schema or final product behavior. Canonical product behavior should continue to follow `final_mouse_colony_prd.md`, with `design.md`, `mouse_strain_colony_system_design_ko.md`, `reference_adoption_notes.md`, and `AGENTS.md` used as supporting guidance.
 
 ## Target Slice
 
