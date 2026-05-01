@@ -435,6 +435,14 @@
     <section class="full">
       <h2>Export Readiness</h2>
       <p id="exportPreview"></p>
+      <table>
+        <thead><tr><th>Mouse</th><th>Strain</th><th>Genotype</th><th>DOB</th><th>Cage</th><th>Next action</th><th>Source note</th></tr></thead>
+        <tbody id="exportRows"></tbody>
+      </table>
+      <table>
+        <thead><tr><th>Blocker</th><th>Severity</th><th>Suggested</th><th>Reason</th></tr></thead>
+        <tbody id="exportBlockerRows"></tbody>
+      </table>
     </section>
   </main>
 
@@ -762,8 +770,29 @@
         ])
       ).join("") || row(["No mouse events yet", "", "", "", ""]);
       document.getElementById("exportPreview").textContent =
+        `Type: ${preview.export_type}. Expected file: ${preview.expected_filename}. ` +
         `Photos: ${preview.photos}. Parsed results: ${preview.parsed_results}. ` +
-        `Blocked review items: ${preview.blocked_review_items}. Ready: ${preview.ready ? "yes" : "no"}.`;
+        `Preview rows: ${preview.preview_row_count}. Blocked review items: ${preview.blocked_review_items}. ` +
+        `Ready: ${preview.ready ? "yes" : "no"}.`;
+      document.getElementById("exportRows").innerHTML = preview.preview_rows.map((item) =>
+        row([
+          item.display_id,
+          item.strain || "--",
+          item.genotype || "--",
+          item.dob || "--",
+          item.current_cage || "--",
+          item.next_action,
+          item.source_note_item_id || "--"
+        ])
+      ).join("") || row(["No export preview rows yet", "", "", "", "", "", ""]);
+      document.getElementById("exportBlockerRows").innerHTML = preview.review_blockers.map((item) =>
+        row([
+          item.issue,
+          item.severity,
+          item.suggested_value || "--",
+          item.review_reason || item.parse_id || "--"
+        ])
+      ).join("") || row(["No open review blockers", "", "", ""]);
     }
 
     document.getElementById("uploadButton").addEventListener("click", async () => {

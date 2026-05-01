@@ -246,6 +246,8 @@ def main() -> None:
                 assert_true("Cage View" in index_html, "Local UI should expose cage management.")
                 assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
                 assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
+                assert_true("exportRows" in index_html, "Local UI should expose export preview rows.")
+                assert_true("exportBlockerRows" in index_html, "Local UI should expose export blockers.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
                 assert_true("Distribution Assignment Import" in index_html, "Local UI should expose distribution import.")
                 assert_true("/[^a-z0-9가-힣]/g" in index_html, "Local UI strain matching key should preserve Korean strain text.")
@@ -520,6 +522,19 @@ def main() -> None:
                 csv_text = csv_response.text
                 assert_true("display_id" in csv_text and "MT321" in csv_text, "Mouse CSV export is missing expected rows.")
                 assert_true("MT323" not in csv_text, "Filtered mouse CSV export should exclude non-matching mice.")
+                export_preview = client.get("/api/export-preview").json()
+                assert_true(export_preview["source_layer"] == "export or view", "Export preview should stay an export/view layer.")
+                assert_true(export_preview["export_type"] == "separation_preview", "Export preview should identify its workbook-like shape.")
+                assert_true(export_preview["preview_row_count"] >= 3, "Export preview should include mouse candidate rows.")
+                assert_true(
+                    any(row["display_id"] == "MT321" and row["source_note_item_id"] for row in export_preview["preview_rows"]),
+                    "Export preview rows should preserve source note traceability.",
+                )
+                assert_true(
+                    export_preview["blocked_review_items"] >= len(export_preview["review_blockers"]),
+                    "Export preview should expose review blocker details up to its display limit.",
+                )
+                assert_true(export_preview["ready"] is False, "Open review blockers should keep export preview blocked.")
                 dashboard_before = client.get("/api/genotyping-dashboard")
                 assert_true(dashboard_before.status_code == 200, "Genotyping dashboard endpoint failed.")
                 dashboard_before_rows = {card["key"]: card["count"] for card in dashboard_before.json()}

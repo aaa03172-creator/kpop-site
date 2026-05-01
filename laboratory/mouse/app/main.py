@@ -1827,16 +1827,55 @@ def export_mice_csv(query: str = "") -> Response:
 def export_preview() -> dict[str, Any]:
     with connection() as conn:
         photos = conn.execute("SELECT COUNT(*) AS count FROM photo_log").fetchone()["count"]
+        review_rows = conn.execute(
+            """
+            SELECT review_id, parse_id, severity, issue, suggested_value, review_reason, created_at
+            FROM review_queue
+            WHERE status = 'open'
+            ORDER BY severity DESC, created_at DESC
+            LIMIT 10
+            """
+        ).fetchall()
         open_reviews = conn.execute(
             "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
         ).fetchone()["count"]
         parsed = conn.execute("SELECT COUNT(*) AS count FROM parse_result").fetchone()["count"]
+        mice = conn.execute(
+            f"""
+            {MOUSE_SELECT}
+            WHERE status IN ('active', 'moved')
+            ORDER BY raw_strain_text COLLATE NOCASE, dob_start, display_id COLLATE NOCASE
+            LIMIT 50
+            """
+        ).fetchall()
+    rows = []
+    for mouse in mice:
+        rows.append(
+            {
+                "mouse_id": mouse["mouse_id"],
+                "display_id": mouse["display_id"],
+                "strain": mouse["raw_strain_text"] or "",
+                "genotype": mouse["genotype_result"] or mouse["genotype"] or "",
+                "dob": mouse["dob_raw"] or mouse["dob_start"] or "",
+                "ear_label": mouse["ear_label_raw"] or mouse["ear_label_code"] or "",
+                "status": mouse["status"],
+                "current_cage": mouse["current_cage_label"] or "",
+                "next_action": mouse["next_action"],
+                "source_note_item_id": mouse["source_note_item_id"] or "",
+            }
+        )
     return {
         "source_layer": "export or view",
+        "export_type": "separation_preview",
+        "expected_filename": "mouse_records_preview.csv",
         "photos": photos,
         "parsed_results": parsed,
         "blocked_review_items": open_reviews,
-        "ready": open_reviews == 0 and parsed > 0,
+        "ready": open_reviews == 0 and bool(rows),
+        "preview_rows": rows,
+        "preview_row_count": len(rows),
+        "review_blockers": [dict(row) for row in review_rows],
+        "generated_at": utc_now(),
     }
 
 
