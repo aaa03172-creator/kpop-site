@@ -68,6 +68,92 @@ def connection() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def ensure_columns(conn: sqlite3.Connection, table_name: str, columns: dict[str, str]) -> None:
+    existing = {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    for column_name, definition in columns.items():
+        if column_name not in existing:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
+    ensure_columns(
+        conn,
+        "mouse_master",
+        {
+            "id_prefix": "TEXT NOT NULL DEFAULT ''",
+            "strain_id": "TEXT",
+            "raw_strain_text": "TEXT NOT NULL DEFAULT ''",
+            "sex": "TEXT",
+            "genotype": "TEXT",
+            "genotype_status": "TEXT NOT NULL DEFAULT 'unknown'",
+            "dob_raw": "TEXT",
+            "dob_start": "TEXT",
+            "dob_end": "TEXT",
+            "ear_label_raw": "TEXT",
+            "ear_label_code": "TEXT",
+            "ear_label_confidence": "REAL",
+            "ear_label_review_status": "TEXT NOT NULL DEFAULT 'auto_filled'",
+            "sample_id": "TEXT",
+            "sample_date": "TEXT",
+            "genotyping_status": "TEXT NOT NULL DEFAULT 'not_sampled'",
+            "genotype_result": "TEXT",
+            "genotype_result_date": "TEXT",
+            "target_match_status": "TEXT NOT NULL DEFAULT 'unknown'",
+            "use_category": "TEXT NOT NULL DEFAULT 'unknown'",
+            "next_action": "TEXT NOT NULL DEFAULT 'sample_needed'",
+            "source_note_item_id": "TEXT",
+            "current_card_snapshot_id": "TEXT",
+            "status": "TEXT NOT NULL DEFAULT 'active'",
+            "source_photo_id": "TEXT",
+            "created_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+    ensure_columns(
+        conn,
+        "card_note_item_log",
+        {
+            "photo_id": "TEXT",
+            "parse_id": "TEXT",
+            "card_snapshot_id": "TEXT",
+            "card_type": "TEXT NOT NULL DEFAULT 'unknown'",
+            "line_number": "INTEGER",
+            "raw_line_text": "TEXT NOT NULL DEFAULT ''",
+            "strike_status": "TEXT NOT NULL DEFAULT 'none'",
+            "parsed_type": "TEXT NOT NULL DEFAULT 'unknown'",
+            "interpreted_status": "TEXT NOT NULL DEFAULT 'unknown'",
+            "parsed_mouse_display_id": "TEXT",
+            "parsed_ear_label_raw": "TEXT",
+            "parsed_ear_label_code": "TEXT",
+            "parsed_ear_label_confidence": "REAL",
+            "parsed_ear_label_review_status": "TEXT NOT NULL DEFAULT 'auto_filled'",
+            "parsed_event_date": "TEXT",
+            "parsed_count": "INTEGER",
+            "confidence": "REAL NOT NULL DEFAULT 0",
+            "needs_review": "INTEGER NOT NULL DEFAULT 0",
+            "created_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+    ensure_columns(
+        conn,
+        "genotyping_record",
+        {
+            "submitted_date": "TEXT",
+            "target_name": "TEXT",
+            "raw_result": "TEXT",
+            "normalized_result": "TEXT",
+            "result_status": "TEXT NOT NULL DEFAULT 'pending'",
+            "source_photo_id": "TEXT",
+            "confidence": "REAL NOT NULL DEFAULT 0",
+            "notes": "TEXT",
+            "updated_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+
+
 def init_db() -> None:
     with connection() as conn:
         conn.executescript(
@@ -326,7 +412,11 @@ def init_db() -> None:
                 FOREIGN KEY (ear_label_code) REFERENCES ear_label_master(ear_label_code),
                 FOREIGN KEY (source_photo_id) REFERENCES photo_log(photo_id)
             );
-
+            """
+        )
+        ensure_schema_compatibility(conn)
+        conn.executescript(
+            """
             CREATE INDEX IF NOT EXISTS idx_card_note_item_log_photo_line
                 ON card_note_item_log(photo_id, line_number);
             CREATE INDEX IF NOT EXISTS idx_card_note_item_log_mouse
