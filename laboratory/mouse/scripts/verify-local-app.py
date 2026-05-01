@@ -752,6 +752,31 @@ def main() -> None:
                     corrections[0]["before_value"] == "" and corrections[0]["after_value"] == "PV-Cre line",
                     "Correction log should preserve before and after values.",
                 )
+                remaining_reviews = [
+                    item for item in client.get("/api/review-items").json() if item["status"] == "open"
+                ]
+                assert_true(remaining_reviews, "Fixture should still have open review blockers before final release.")
+                for item in remaining_reviews:
+                    release_review = client.post(
+                        f"/api/review-items/{item['review_id']}/resolve",
+                        json={
+                            "resolution_note": "Verified blocker before releasing ready CSV export.",
+                            "resolved_value": item.get("suggested_value") or item.get("current_value") or "",
+                        },
+                    )
+                    assert_true(release_review.status_code == 200, "Could not resolve remaining review blocker.")
+                ready_preview = client.get("/api/export-preview").json()
+                assert_true(ready_preview["ready"] is True, "Resolved review blockers should make export preview ready.")
+                assert_true(ready_preview["blocked_review_items"] == 0, "Ready export preview should have no blockers.")
+                ready_export = client.get("/api/exports/mice.csv", params={"query": "MT321", "require_ready": "true"})
+                assert_true(ready_export.status_code == 200, "Ready CSV export should succeed after review resolution.")
+                assert_true("MT321" in ready_export.text, "Ready CSV export should include the filtered mouse row.")
+                ready_export_log = client.get("/api/export-log").json()[0]
+                assert_true(ready_export_log["status"] == "generated", "Ready export should create a generated export log entry.")
+                assert_true(
+                    ready_export_log["blocked_review_count"] == 0,
+                    "Ready export log should record zero review blockers after resolution.",
+                )
 
     print("Local app scaffold verification passed.")
 
