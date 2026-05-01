@@ -64,6 +64,7 @@ def main() -> None:
                 "correction_log",
                 "mouse_event",
                 "genotyping_record",
+                "strain_target_genotype",
                 "my_assigned_strain",
                 "distribution_import",
                 "distribution_assignment_row",
@@ -181,6 +182,8 @@ def main() -> None:
                 assert_true("Source Evidence" in index_html, "Local UI should expose source evidence.")
                 assert_true("Mouse Events" in index_html, "Local UI should expose mouse events.")
                 assert_true("Correction Log" in index_html, "Local UI should expose correction history.")
+                assert_true("Search & CSV Export" in index_html, "Local UI should expose search and CSV export.")
+                assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
                 assert_true("Distribution Assignment Import" in index_html, "Local UI should expose distribution import.")
                 assert_true("/[^a-z0-9가-힣]/g" in index_html, "Local UI strain matching key should preserve Korean strain text.")
@@ -405,7 +408,46 @@ def main() -> None:
                     any(mouse["display_id"] == "MT323" and mouse["status"] == "moved" for mouse in mice),
                     "Mouse API should expose moved candidate from single-struck note line.",
                 )
+                filtered_mice = client.get("/api/mice", params={"query": "MT321"}).json()
+                assert_true(
+                    filtered_mice and all("MT321" in mouse["display_id"] for mouse in filtered_mice),
+                    "Mouse search filter should narrow candidate records by display ID.",
+                )
+                search_payload = client.get("/api/search", params={"query": "PV-Cre"}).json()
+                assert_true(search_payload["query"] == "PV-Cre", "Search endpoint should echo the active query.")
+                assert_true(
+                    any(strain["strain_name"] == "PV-Cre" for strain in search_payload["strains"]),
+                    "Search endpoint should include strain registry matches.",
+                )
+                csv_response = client.get("/api/exports/mice.csv", params={"query": "MT321"})
+                assert_true(csv_response.status_code == 200, "Mouse CSV export endpoint failed.")
+                assert_true(
+                    csv_response.headers["content-type"].startswith("text/csv"),
+                    "Mouse CSV export should return CSV content.",
+                )
+                csv_text = csv_response.text
+                assert_true("display_id" in csv_text and "MT321" in csv_text, "Mouse CSV export is missing expected rows.")
+                assert_true("MT323" not in csv_text, "Filtered mouse CSV export should exclude non-matching mice.")
                 genotyping_target = next(mouse for mouse in mice if mouse["display_id"] == "MT321")
+                target_rule = client.post(
+                    "/api/strain-target-genotypes",
+                    json={
+                        "strain_text": genotyping_target["raw_strain_text"],
+                        "target_genotype": "Tg/Tg",
+                        "purpose": "mating_candidate",
+                    },
+                )
+                assert_true(target_rule.status_code == 200, "Could not create configurable target genotype rule.")
+                target_rules = client.get("/api/strain-target-genotypes").json()
+                assert_true(
+                    any(
+                        rule["strain_text"] == genotyping_target["raw_strain_text"]
+                        and rule["target_genotype"] == "Tg/Tg"
+                        and rule["purpose"] == "mating_candidate"
+                        for rule in target_rules
+                    ),
+                    "Target genotype rule API should preserve configured rule values.",
+                )
                 genotyping_update = client.post(
                     "/api/genotyping/update",
                     json={
@@ -418,11 +460,32 @@ def main() -> None:
                 assert_true(genotyping_update.status_code == 200, "Could not update genotyping workflow state.")
                 genotyping_payload = genotyping_update.json()
                 assert_true(genotyping_payload["genotyping_status"] == "resulted", "Genotyping result should mark mouse resulted.")
-                assert_true(genotyping_payload["next_action"] == "review_result", "Genotyping result should request result review.")
+                assert_true(genotyping_payload["target_match_status"] == "matches_target", "Genotyping result should use configured target matching.")
+                assert_true(genotyping_payload["next_action"] == "consider_for_mating", "Matching target genotype should suggest a mating review action.")
                 genotyping_records = client.get("/api/genotyping-records").json()
                 assert_true(
                     any(record["mouse_id"] == genotyping_target["mouse_id"] and record["normalized_result"] == "Tg/Tg" for record in genotyping_records),
                     "Genotyping record history should preserve the entered result.",
+                )
+                filtered_mice = client.get("/api/mice", params={"query": "MT321"}).json()
+                assert_true(
+                    filtered_mice and all("MT321" in mouse["display_id"] for mouse in filtered_mice),
+                    "Mouse API query should filter mouse records.",
+                )
+                search = client.get("/api/search", params={"query": "Tg/Tg"}).json()
+                assert_true(
+                    any(mouse["display_id"] == "MT321" for mouse in search["mice"]),
+                    "Search API should include matching genotyping mouse records.",
+                )
+                csv_export = client.get("/api/exports/mice.csv", params={"query": "MT321"})
+                assert_true(csv_export.status_code == 200, "Mouse CSV export endpoint failed.")
+                assert_true(
+                    "mouse_records_filtered.csv" in csv_export.headers.get("content-disposition", ""),
+                    "Filtered CSV export should use the filtered filename.",
+                )
+                assert_true(
+                    "display_id" in csv_export.text and "MT321" in csv_export.text,
+                    "Mouse CSV export should include headers and filtered mouse rows.",
                 )
                 with db.connection() as conn:
                     note_count = conn.execute(

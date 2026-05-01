@@ -197,6 +197,16 @@ def init_db() -> None:
                 FOREIGN KEY (source_photo_id) REFERENCES photo_log(photo_id)
             );
 
+            CREATE TABLE IF NOT EXISTS strain_target_genotype (
+                target_id TEXT PRIMARY KEY,
+                strain_text TEXT NOT NULL,
+                target_genotype TEXT NOT NULL,
+                purpose TEXT NOT NULL DEFAULT 'unknown',
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                UNIQUE (strain_text, target_genotype, purpose)
+            );
+
             CREATE TABLE IF NOT EXISTS my_assigned_strain (
                 assigned_strain_id TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL,
@@ -339,6 +349,8 @@ def init_db() -> None:
                 ON mouse_event(mouse_id, event_date);
             CREATE INDEX IF NOT EXISTS idx_genotyping_record_mouse
                 ON genotyping_record(mouse_id, sample_id);
+            CREATE INDEX IF NOT EXISTS idx_strain_target_genotype_strain
+                ON strain_target_genotype(strain_text, active);
             """
         )
         conn.executemany(

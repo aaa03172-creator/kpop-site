@@ -208,6 +208,24 @@
       </table>
     </section>
 
+    <section class="full">
+      <h2>Search & CSV Export</h2>
+      <p>Search across mouse IDs, strains, genotyping fields, review issues, and source evidence.</p>
+      <div class="form-grid">
+        <label>
+          Search
+          <input id="searchQuery" type="text" placeholder="M0231, PV-Cre, genotyping pending, source label">
+        </label>
+        <button id="searchButton" type="button">Search</button>
+        <button id="exportMouseCsvButton" type="button">Download Mouse CSV</button>
+      </div>
+      <p class="muted" id="searchSummary">No active search.</p>
+      <table>
+        <thead><tr><th>Layer</th><th>ID</th><th>Primary</th><th>Detail</th></tr></thead>
+        <tbody id="searchRows"></tbody>
+      </table>
+    </section>
+
     <section>
       <h2>Photo Inbox</h2>
       <table>
@@ -259,6 +277,32 @@
       <p>Manual MVP path for tail sample collection and result entry.</p>
       <div class="form-grid">
         <label>
+          Target strain
+          <input id="targetStrainText" type="text" placeholder="ApoM Tg/Tg">
+        </label>
+        <label>
+          Target genotype
+          <input id="targetGenotypeText" type="text" placeholder="Tg/Tg">
+        </label>
+        <label>
+          Purpose
+          <select id="targetPurpose">
+            <option value="strain_maintenance">strain_maintenance</option>
+            <option value="mating_candidate">mating_candidate</option>
+            <option value="experimental_cross">experimental_cross</option>
+            <option value="backup">backup</option>
+            <option value="unknown">unknown</option>
+          </select>
+        </label>
+        <button id="targetGenotypeButton" type="button">Add Target</button>
+      </div>
+      <p class="muted" id="targetGenotypeMessage"></p>
+      <table>
+        <thead><tr><th>Strain</th><th>Target</th><th>Purpose</th><th>Status</th></tr></thead>
+        <tbody id="targetGenotypeRows"></tbody>
+      </table>
+      <div class="form-grid">
+        <label>
           Mouse
           <select id="genotypingMouse"></select>
         </label>
@@ -274,7 +318,7 @@
       </div>
       <p class="muted" id="genotypingMessage"></p>
       <table>
-        <thead><tr><th>Mouse</th><th>Sample</th><th>Status</th><th>Result</th><th>Next action</th></tr></thead>
+        <thead><tr><th>Mouse</th><th>Sample</th><th>Status</th><th>Result</th><th>Target</th><th>Use</th><th>Next action</th></tr></thead>
         <tbody id="genotypingRows"></tbody>
       </table>
     </section>
@@ -438,8 +482,28 @@
       return Object.entries(details).slice(0, 3).map(([key, value]) => `${key}: ${value}`).join("; ");
     }
 
+    let activeSearchQuery = "";
+
+    function searchResultRows(results) {
+      if (!results || !results.query) return row(["No search yet", "", "", ""]);
+      const rows = [];
+      results.mice.forEach((mouse) => {
+        rows.push(row(["mouse", mouse.mouse_id, mouse.display_id, `${mouse.raw_strain_text || "--"} / ${mouse.status}`]));
+      });
+      results.strains.forEach((strain) => {
+        rows.push(row(["strain", strain.strain_id, strain.strain_name, `${strain.gene || "--"} / ${strain.allele || "--"}`]));
+      });
+      results.reviews.forEach((review) => {
+        rows.push(row(["review", review.review_id, review.issue, `${review.severity} / ${review.status}`]));
+      });
+      results.sources.forEach((source) => {
+        rows.push(row(["source", source.source_record_id, source.source_label || source.source_type, source.note || source.source_uri || "--"]));
+      });
+      return rows.join("") || row(["No matches", "", "", ""]);
+    }
+
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, photos, reviews, mice, noteItems, mouseEvents, preview] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, photos, reviews, mice, noteItems, mouseEvents, targets, preview] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -448,13 +512,21 @@
         api("/api/distribution-imports"),
         api("/api/photos"),
         api("/api/review-items"),
-        api("/api/mice"),
+        api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
         api("/api/note-items"),
         api("/api/mouse-events"),
+        api("/api/strain-target-genotypes"),
         api("/api/export-preview")
       ]);
 
       document.getElementById("health").textContent = health.storage;
+      const searchResults = activeSearchQuery
+        ? await api(`/api/search?query=${encodeURIComponent(activeSearchQuery)}`)
+        : { query: "", mice: [], strains: [], reviews: [], sources: [] };
+      document.getElementById("searchRows").innerHTML = searchResultRows(searchResults);
+      document.getElementById("searchSummary").textContent = activeSearchQuery
+        ? `Search "${activeSearchQuery}" matched ${searchResults.mice.length} mice, ${searchResults.strains.length} strains, ${searchResults.reviews.length} review items, and ${searchResults.sources.length} source records. Colony Records is filtered to matching mice.`
+        : "No active search.";
       document.getElementById("assignedStrainRows").innerHTML = assignedStrains.map((strain) =>
         assignedStrainRow(strain)
       ).join("") || row(["No assigned strains yet", "", "", "", ""]);
@@ -559,9 +631,19 @@
           mouse.sample_id || "--",
           mouse.genotyping_status,
           mouse.genotype_result || "--",
+          mouse.target_match_status,
+          mouse.use_category,
           mouse.next_action
         ])
-      ).join("") || row(["No mouse candidates yet", "", "", "", ""]);
+      ).join("") || row(["No mouse candidates yet", "", "", "", "", "", ""]);
+      document.getElementById("targetGenotypeRows").innerHTML = targets.map((target) =>
+        row([
+          target.strain_text,
+          target.target_genotype,
+          target.purpose,
+          target.active ? "Active" : "Inactive"
+        ])
+      ).join("") || row(["No target genotypes configured", "", "", ""]);
       document.getElementById("noteRows").innerHTML = noteItems.map((item) =>
         row([
           item.parse_id || item.photo_id || "--",
@@ -672,6 +754,23 @@
       await refresh();
     });
 
+    document.getElementById("searchButton").addEventListener("click", async () => {
+      activeSearchQuery = document.getElementById("searchQuery").value.trim();
+      await refresh();
+    });
+
+    document.getElementById("searchQuery").addEventListener("keydown", async (event) => {
+      if (event.key === "Enter") {
+        activeSearchQuery = document.getElementById("searchQuery").value.trim();
+        await refresh();
+      }
+    });
+
+    document.getElementById("exportMouseCsvButton").addEventListener("click", () => {
+      const query = encodeURIComponent(activeSearchQuery);
+      window.location.href = `/api/exports/mice.csv${query ? `?query=${query}` : ""}`;
+    });
+
     document.getElementById("genotypingButton").addEventListener("click", async () => {
       const mouseId = document.getElementById("genotypingMouse").value;
       if (!mouseId) {
@@ -694,6 +793,26 @@
         `Updated sample ${updated.sample_id || "--"}; status ${updated.genotyping_status}.`;
       document.getElementById("genotypingSampleId").value = "";
       document.getElementById("genotypingResult").value = "";
+      await refresh();
+    });
+
+    document.getElementById("targetGenotypeButton").addEventListener("click", async () => {
+      const strainText = document.getElementById("targetStrainText").value.trim();
+      const targetGenotype = document.getElementById("targetGenotypeText").value.trim();
+      const purpose = document.getElementById("targetPurpose").value;
+      if (!strainText || !targetGenotype) {
+        document.getElementById("targetGenotypeMessage").textContent = "Enter strain and target genotype first.";
+        return;
+      }
+      const target = await api("/api/strain-target-genotypes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strain_text: strainText, target_genotype: targetGenotype, purpose })
+      });
+      document.getElementById("targetGenotypeMessage").textContent =
+        `Added target ${target.target_genotype} for ${target.strain_text}.`;
+      document.getElementById("targetStrainText").value = "";
+      document.getElementById("targetGenotypeText").value = "";
       await refresh();
     });
 
