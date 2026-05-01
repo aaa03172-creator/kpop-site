@@ -41,6 +41,64 @@ def main() -> None:
     if TestClient is not None:
         from app.main import app
 
+    with tempfile.TemporaryDirectory() as old_schema_dir:
+        db.DATA_DIR = Path(old_schema_dir)
+        db.DB_PATH = Path(old_schema_dir) / "mouse_lims.sqlite"
+        legacy_conn = sqlite3.connect(db.DB_PATH)
+        try:
+            legacy_conn.executescript(
+                """
+                CREATE TABLE mouse_master (
+                    mouse_id TEXT PRIMARY KEY,
+                    display_id TEXT NOT NULL
+                );
+                CREATE TABLE card_note_item_log (
+                    note_item_id TEXT PRIMARY KEY,
+                    raw_line_text TEXT NOT NULL
+                );
+                CREATE TABLE genotyping_record (
+                    genotyping_id TEXT PRIMARY KEY,
+                    mouse_id TEXT,
+                    sample_id TEXT,
+                    sample_date TEXT,
+                    result_date TEXT,
+                    created_at TEXT
+                );
+                """
+            )
+            legacy_conn.commit()
+        finally:
+            legacy_conn.close()
+        db.init_db()
+        migrated_conn = sqlite3.connect(db.DB_PATH)
+        try:
+            mouse_columns = {
+                row[1]
+                for row in migrated_conn.execute("PRAGMA table_info(mouse_master)").fetchall()
+            }
+            note_columns = {
+                row[1]
+                for row in migrated_conn.execute("PRAGMA table_info(card_note_item_log)").fetchall()
+            }
+            genotype_columns = {
+                row[1]
+                for row in migrated_conn.execute("PRAGMA table_info(genotyping_record)").fetchall()
+            }
+        finally:
+            migrated_conn.close()
+        assert_true(
+            {"target_match_status", "use_category", "next_action", "sample_id"}.issubset(mouse_columns),
+            "Existing mouse_master tables should migrate to the genotyping workflow schema.",
+        )
+        assert_true(
+            {"parsed_ear_label_code", "strike_status", "needs_review"}.issubset(note_columns),
+            "Existing card_note_item_log tables should migrate to the note parsing schema.",
+        )
+        assert_true(
+            {"target_name", "normalized_result", "result_status", "updated_at"}.issubset(genotype_columns),
+            "Existing genotyping_record tables should migrate to the result tracking schema.",
+        )
+
     with tempfile.TemporaryDirectory() as temp_dir:
         db.DATA_DIR = Path(temp_dir)
         db.DB_PATH = Path(temp_dir) / "mouse_lims.sqlite"
