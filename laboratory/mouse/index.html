@@ -1507,6 +1507,19 @@
               </thead>
               <tbody id="distributionRows"></tbody>
             </table>
+            <table aria-label="Distribution strain candidate review">
+              <thead>
+                <tr>
+                  <th>Candidate Mating Type</th>
+                  <th>Rows</th>
+                  <th>People</th>
+                  <th>Cage Scope</th>
+                  <th>Review Signal</th>
+                  <th>Boundary</th>
+                </tr>
+              </thead>
+              <tbody id="distributionSuggestionRows"></tbody>
+            </table>
           </div>
         </section>
 
@@ -1976,10 +1989,82 @@
           responsiblePersonRaw: row.responsible_person_raw || row.responsiblePersonRaw || "Unassigned",
           matingTypeRaw: row.mating_type_raw || row.matingTypeRaw || "Unknown mating type",
           cageCountRaw: row.cage_count_raw || row.cageCountRaw || "",
+          cageCountValue: numberOrNull(row.cage_count_value ?? row.cageCountValue ?? row.cage_count_raw ?? row.cageCountRaw),
           matingCageCountRaw: row.mating_cage_count_raw || row.matingCageCountRaw || "",
+          matingCageCountValue: numberOrNull(row.mating_cage_count_value ?? row.matingCageCountValue ?? row.mating_cage_count_raw ?? row.matingCageCountRaw),
+          sourceCells: row.source_cells || row.sourceCells || {},
           reviewStatus: row.review_status || row.reviewStatus || "candidate"
         }))
       };
+    }
+
+    function numberOrNull(value) {
+      if (value === null || value === undefined || value === "") return null;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    }
+
+    function strainKey(value) {
+      return String(value || "").trim().toLowerCase();
+    }
+
+    function compactStrainKey(value) {
+      return strainKey(value).replace(/[^a-z0-9]+/g, "");
+    }
+
+    function configuredStrainNames() {
+      return Array.from(new Set(
+        photos
+          .filter((photo) => photo.status === "auto")
+          .map((photo) => String(photo.matchedStrain || "").trim())
+          .filter((strain) => strain && !/review|unknown|not matched/i.test(strain))
+      )).sort((a, b) => a.localeCompare(b));
+    }
+
+    function distributionStrainSuggestions(distributionImport) {
+      if (!distributionImport) return [];
+      const configured = configuredStrainNames();
+      const exactConfigured = new Map(configured.map((strain) => [strainKey(strain), strain]));
+      const compactConfigured = new Map(configured.map((strain) => [compactStrainKey(strain), strain]));
+      const grouped = new Map();
+
+      distributionImport.rows.forEach((row) => {
+        const matingType = String(row.matingTypeRaw || "").trim();
+        if (!matingType || matingType === "Unknown mating type") return;
+        const key = strainKey(matingType);
+        if (!grouped.has(key)) {
+          const exactMatch = exactConfigured.get(key);
+          const possibleAlias = compactConfigured.get(compactStrainKey(matingType));
+          grouped.set(key, {
+            matingTypeRaw: matingType,
+            rows: [],
+            people: new Set(),
+            groups: new Set(),
+            cageTotal: 0,
+            matingCageTotal: 0,
+            exactMatch,
+            possibleAlias: exactMatch ? "" : possibleAlias
+          });
+        }
+        const suggestion = grouped.get(key);
+        suggestion.rows.push(row.sourceRowNumber);
+        suggestion.people.add(row.responsiblePersonRaw);
+        suggestion.groups.add(row.institutionOrGroup);
+        suggestion.cageTotal += row.cageCountValue || 0;
+        suggestion.matingCageTotal += row.matingCageCountValue || 0;
+      });
+
+      return Array.from(grouped.values()).sort((a, b) => a.matingTypeRaw.localeCompare(b.matingTypeRaw));
+    }
+
+    function distributionReviewSignal(suggestion) {
+      if (suggestion.exactMatch) {
+        return `Exact current value: ${suggestion.exactMatch}; still review before master update.`;
+      }
+      if (suggestion.possibleAlias) {
+        return `Possible alias for ${suggestion.possibleAlias}; review raw source before confirming.`;
+      }
+      return "New candidate; review against strain master before use.";
     }
 
     function addDistributionImport(distributionImport) {
@@ -2798,8 +2883,9 @@
     function renderSettings() {
       const latest = distributionImports[0];
       const rows = latest?.rows || [];
+      const suggestions = distributionStrainSuggestions(latest);
       document.getElementById("distributionSummary").textContent = latest
-        ? `${latest.sourceFileName} / ${latest.sheetName}: ${rows.length} parsed assignment row${rows.length === 1 ? "" : "s"} retained as non-canonical source.`
+        ? `${latest.sourceFileName} / ${latest.sheetName}: ${rows.length} parsed assignment row${rows.length === 1 ? "" : "s"} and ${suggestions.length} candidate mating type${suggestions.length === 1 ? "" : "s"} retained as non-canonical source.`
         : "No distribution workbook imported in this session.";
       document.getElementById("distributionRows").innerHTML = rows.length
         ? rows.map((row) => `
@@ -2814,6 +2900,18 @@
           </tr>
         `).join("")
         : `<tr><td colspan="7">No distribution assignment rows loaded yet.</td></tr>`;
+      document.getElementById("distributionSuggestionRows").innerHTML = suggestions.length
+        ? suggestions.map((suggestion) => `
+          <tr>
+            <td>${escapeHtml(suggestion.matingTypeRaw)}</td>
+            <td class="mono">${escapeHtml(suggestion.rows.map((row) => `r${row}`).join(", "))}</td>
+            <td>${escapeHtml(Array.from(suggestion.people).join(", "))}</td>
+            <td>${escapeHtml(`${suggestion.cageTotal || "--"} cage${suggestion.cageTotal === 1 ? "" : "s"}; ${suggestion.matingCageTotal || "--"} mating cage${suggestion.matingCageTotal === 1 ? "" : "s"}`)}</td>
+            <td>${escapeHtml(distributionReviewSignal(suggestion))}</td>
+            <td><span class="layer-chip">Review item</span></td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="6">No candidate mating types to review yet.</td></tr>`;
     }
 
     function renderCardImage(photo) {
