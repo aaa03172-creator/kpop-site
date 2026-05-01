@@ -58,14 +58,18 @@ def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
     photo_id = new_id("photo")
     stored_path = save_upload(file, photo_id)
     uploaded_at = utc_now()
-    with connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO photo_log (photo_id, original_filename, stored_path, uploaded_at, status)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (photo_id, file.filename, str(stored_path.relative_to(ROOT)), uploaded_at, "uploaded"),
-        )
+    try:
+        with connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log (photo_id, original_filename, stored_path, uploaded_at, status)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (photo_id, file.filename, str(stored_path.relative_to(ROOT)), uploaded_at, "uploaded"),
+            )
+    except Exception:
+        stored_path.unlink(missing_ok=True)
+        raise
     return {
         "photo_id": photo_id,
         "original_filename": file.filename,
