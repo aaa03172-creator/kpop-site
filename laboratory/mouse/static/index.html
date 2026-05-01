@@ -113,10 +113,41 @@
       gap: 10px;
       align-items: end;
     }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+      margin: 12px 0 14px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 92px;
+      background: #fbfdfc;
+    }
+    .metric strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1.1;
+      margin-bottom: 4px;
+    }
+    .metric span {
+      display: block;
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+    .metric small {
+      color: var(--muted);
+      display: block;
+      line-height: 1.35;
+    }
     @media (max-width: 900px) {
       main { grid-template-columns: 1fr; }
       .full { grid-column: auto; }
       .form-grid { grid-template-columns: 1fr; }
+      .metric-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -263,6 +294,7 @@
             <th>Ear label</th>
             <th>Code</th>
             <th>Status</th>
+            <th>Cage</th>
             <th>Genotyping</th>
             <th>Next action</th>
             <th>Source note</th>
@@ -273,8 +305,46 @@
     </section>
 
     <section class="full">
+      <h2>Cage View</h2>
+      <p>Current mouse location is tracked as source-backed cage assignment events.</p>
+      <div class="form-grid">
+        <label>
+          Cage label
+          <input id="cageLabel" type="text" placeholder="C-014">
+        </label>
+        <label>
+          Location
+          <input id="cageLocation" type="text" placeholder="Room A / Rack 2">
+        </label>
+        <button id="cageButton" type="button">Add Cage</button>
+      </div>
+      <p class="muted" id="cageMessage"></p>
+      <table>
+        <thead><tr><th>Cage</th><th>Location</th><th>Type</th><th>Status</th><th>Active mice</th></tr></thead>
+        <tbody id="cageRows"></tbody>
+      </table>
+      <div class="form-grid">
+        <label>
+          Mouse
+          <select id="cageMouse"></select>
+        </label>
+        <label>
+          Cage
+          <select id="cageSelect"></select>
+        </label>
+        <label>
+          Move note
+          <input id="cageMoveNote" type="text" placeholder="Moved after review">
+        </label>
+        <button id="moveCageButton" type="button">Move Mouse</button>
+      </div>
+      <p class="muted" id="moveCageMessage"></p>
+    </section>
+
+    <section class="full">
       <h2>Genotyping Worklist</h2>
       <p>Manual MVP path for tail sample collection and result entry.</p>
+      <div class="metric-grid" id="genotypingDashboard"></div>
       <div class="form-grid">
         <label>
           Target strain
@@ -503,7 +573,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, photos, reviews, mice, noteItems, mouseEvents, targets, preview] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, photos, reviews, mice, noteItems, mouseEvents, cages, targets, genotypingDashboard, preview] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -515,7 +585,9 @@
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
         api("/api/note-items"),
         api("/api/mouse-events"),
+        api("/api/cages"),
         api("/api/strain-target-genotypes"),
+        api("/api/genotyping-dashboard"),
         api("/api/export-preview")
       ]);
 
@@ -617,11 +689,27 @@
           mouse.ear_label_raw || "--",
           mouse.ear_label_code || "--",
           mouse.status,
+          mouse.current_cage_label || "--",
           mouse.genotyping_status,
           mouse.next_action,
           mouse.source_note_item_id || "--"
         ])
-      ).join("") || row(["No mouse candidates yet", "", "", "", "", "", "", "", ""]);
+      ).join("") || row(["No mouse candidates yet", "", "", "", "", "", "", "", "", ""]);
+      document.getElementById("cageRows").innerHTML = cages.map((cage) =>
+        row([
+          cage.cage_label,
+          cage.location || "--",
+          cage.cage_type,
+          cage.status,
+          cage.active_mouse_count
+        ])
+      ).join("") || row(["No cages yet", "", "", "", ""]);
+      document.getElementById("cageMouse").innerHTML = mice.map((mouse) =>
+        `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.current_cage_label || "")}</option>`
+      ).join("");
+      document.getElementById("cageSelect").innerHTML = cages.map((cage) =>
+        `<option value="${escapeHtml(cage.cage_id)}">${escapeHtml(cage.cage_label)}</option>`
+      ).join("");
       document.getElementById("genotypingMouse").innerHTML = mice.map((mouse) =>
         `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.ear_label_raw || "")}</option>`
       ).join("");
@@ -636,6 +724,13 @@
           mouse.next_action
         ])
       ).join("") || row(["No mouse candidates yet", "", "", "", "", "", ""]);
+      document.getElementById("genotypingDashboard").innerHTML = genotypingDashboard.map((card) => `
+        <div class="metric">
+          <strong>${escapeHtml(card.count)}</strong>
+          <span>${escapeHtml(card.label)}</span>
+          <small>${escapeHtml(card.meaning)}</small>
+        </div>
+      `).join("");
       document.getElementById("targetGenotypeRows").innerHTML = targets.map((target) =>
         row([
           target.strain_text,
@@ -769,6 +864,44 @@
     document.getElementById("exportMouseCsvButton").addEventListener("click", () => {
       const query = encodeURIComponent(activeSearchQuery);
       window.location.href = `/api/exports/mice.csv${query ? `?query=${query}` : ""}`;
+    });
+
+    document.getElementById("cageButton").addEventListener("click", async () => {
+      const cageLabel = document.getElementById("cageLabel").value.trim();
+      const location = document.getElementById("cageLocation").value.trim();
+      if (!cageLabel) {
+        document.getElementById("cageMessage").textContent = "Enter a cage label first.";
+        return;
+      }
+      const cage = await api("/api/cages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cage_label: cageLabel, location, cage_type: "holding", status: "active" })
+      });
+      document.getElementById("cageMessage").textContent =
+        `Added cage ${cage.cage_label} with source evidence ${cage.source_record_id}.`;
+      document.getElementById("cageLabel").value = "";
+      document.getElementById("cageLocation").value = "";
+      await refresh();
+    });
+
+    document.getElementById("moveCageButton").addEventListener("click", async () => {
+      const mouseId = document.getElementById("cageMouse").value;
+      const cageId = document.getElementById("cageSelect").value;
+      const note = document.getElementById("cageMoveNote").value.trim();
+      if (!mouseId || !cageId) {
+        document.getElementById("moveCageMessage").textContent = "Import mouse candidates and add a cage first.";
+        return;
+      }
+      const moved = await api(`/api/mice/${mouseId}/move-cage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cage_id: cageId, note })
+      });
+      document.getElementById("moveCageMessage").textContent =
+        `Moved mouse to ${moved.cage_label}; event ${moved.event_id}.`;
+      document.getElementById("cageMoveNote").value = "";
+      await refresh();
     });
 
     document.getElementById("genotypingButton").addEventListener("click", async () => {

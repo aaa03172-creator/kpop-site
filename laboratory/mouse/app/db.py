@@ -293,6 +293,35 @@ def init_db() -> None:
                 UNIQUE (strain_text, target_genotype, purpose)
             );
 
+            CREATE TABLE IF NOT EXISTS cage_registry (
+                cage_id TEXT PRIMARY KEY,
+                cage_label TEXT NOT NULL UNIQUE,
+                location TEXT NOT NULL DEFAULT '',
+                rack TEXT NOT NULL DEFAULT '',
+                shelf TEXT NOT NULL DEFAULT '',
+                cage_type TEXT NOT NULL DEFAULT 'holding',
+                status TEXT NOT NULL DEFAULT 'active',
+                note TEXT NOT NULL DEFAULT '',
+                source_record_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS mouse_cage_assignment (
+                assignment_id TEXT PRIMARY KEY,
+                mouse_id TEXT NOT NULL,
+                cage_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                assigned_at TEXT NOT NULL,
+                ended_at TEXT,
+                source_record_id TEXT,
+                note TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (mouse_id) REFERENCES mouse_master(mouse_id),
+                FOREIGN KEY (cage_id) REFERENCES cage_registry(cage_id),
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
             CREATE TABLE IF NOT EXISTS my_assigned_strain (
                 assigned_strain_id TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL,
@@ -441,6 +470,10 @@ def init_db() -> None:
                 ON genotyping_record(mouse_id, sample_id);
             CREATE INDEX IF NOT EXISTS idx_strain_target_genotype_strain
                 ON strain_target_genotype(strain_text, active);
+            CREATE INDEX IF NOT EXISTS idx_cage_registry_label
+                ON cage_registry(cage_label COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_mouse_cage_assignment_active
+                ON mouse_cage_assignment(mouse_id, status, assigned_at);
             """
         )
         conn.executemany(

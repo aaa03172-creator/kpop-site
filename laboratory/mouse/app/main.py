@@ -110,6 +110,22 @@ class StrainTargetGenotypeCreate(BaseModel):
     purpose: str = "strain_maintenance"
 
 
+class CageCreate(BaseModel):
+    cage_label: str = Field(min_length=1)
+    location: str = ""
+    rack: str = ""
+    shelf: str = ""
+    cage_type: str = "holding"
+    status: str = "active"
+    note: str = ""
+
+
+class MouseCageMove(BaseModel):
+    cage_id: str = Field(min_length=1)
+    note: str = ""
+    moved_at: str = ""
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
@@ -1344,6 +1360,197 @@ def create_strain_target_genotype(payload: StrainTargetGenotypeCreate) -> dict[s
     }
 
 
+@app.get("/api/cages")
+def list_cages() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.cage_id, c.cage_label, c.location, c.rack, c.shelf,
+                   c.cage_type, c.status, c.note, c.source_record_id,
+                   c.created_at, c.updated_at,
+                   COUNT(a.assignment_id) AS active_mouse_count
+            FROM cage_registry c
+            LEFT JOIN mouse_cage_assignment a
+                ON a.cage_id = c.cage_id AND a.status = 'active'
+            GROUP BY c.cage_id
+            ORDER BY c.status = 'active' DESC, c.cage_label COLLATE NOCASE
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.post("/api/cages")
+def create_cage(payload: CageCreate) -> dict[str, Any]:
+    cage_label = " ".join(payload.cage_label.split())
+    if not cage_label:
+        raise HTTPException(status_code=400, detail="Cage label is required.")
+    now = utc_now()
+    cage_id = new_id("cage")
+    raw_payload = payload.model_dump_json()
+    with connection() as conn:
+        duplicate = conn.execute(
+            "SELECT cage_id FROM cage_registry WHERE LOWER(cage_label) = LOWER(?)",
+            (cage_label,),
+        ).fetchone()
+        if duplicate is not None:
+            raise HTTPException(status_code=409, detail="Cage label already exists.")
+        source_record_id = create_source_record(
+            conn,
+            source_type="manual_entry",
+            source_label=f"Manual cage registry entry: {cage_label}",
+            raw_payload=raw_payload,
+            note="Created from local Cage View form.",
+        )
+        conn.execute(
+            """
+            INSERT INTO cage_registry
+                (cage_id, cage_label, location, rack, shelf, cage_type, status,
+                 note, source_record_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cage_id,
+                cage_label,
+                payload.location,
+                payload.rack,
+                payload.shelf,
+                payload.cage_type or "holding",
+                payload.status or "active",
+                payload.note,
+                source_record_id,
+                now,
+                now,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (new_id("action"), "cage_created", cage_id, None, raw_payload, now),
+        )
+    return {
+        "cage_id": cage_id,
+        "cage_label": cage_label,
+        "status": payload.status or "active",
+        "source_record_id": source_record_id,
+        "created_at": now,
+    }
+
+
+@app.post("/api/mice/{mouse_id}/move-cage")
+def move_mouse_to_cage(mouse_id: str, payload: MouseCageMove) -> dict[str, Any]:
+    moved_at = payload.moved_at or utc_now()
+    event_date = moved_at[:10]
+    with connection() as conn:
+        mouse = conn.execute(
+            "SELECT mouse_id, display_id FROM mouse_master WHERE mouse_id = ?",
+            (mouse_id,),
+        ).fetchone()
+        if mouse is None:
+            raise HTTPException(status_code=404, detail="Mouse not found.")
+        cage = conn.execute(
+            "SELECT cage_id, cage_label FROM cage_registry WHERE cage_id = ?",
+            (payload.cage_id,),
+        ).fetchone()
+        if cage is None:
+            raise HTTPException(status_code=404, detail="Cage not found.")
+        previous = conn.execute(
+            """
+            SELECT a.assignment_id, c.cage_id, c.cage_label
+            FROM mouse_cage_assignment a
+            JOIN cage_registry c ON c.cage_id = a.cage_id
+            WHERE a.mouse_id = ? AND a.status = 'active'
+            ORDER BY a.assigned_at DESC
+            LIMIT 1
+            """,
+            (mouse_id,),
+        ).fetchone()
+        source_record_id = create_source_record(
+            conn,
+            source_type="manual_entry",
+            source_label=f"Manual cage move: {mouse['display_id']} -> {cage['cage_label']}",
+            raw_payload=json.dumps(
+                {
+                    "mouse_id": mouse_id,
+                    "display_id": mouse["display_id"],
+                    "cage_id": payload.cage_id,
+                    "cage_label": cage["cage_label"],
+                    "note": payload.note,
+                },
+                ensure_ascii=False,
+            ),
+            note="Mouse cage assignment created from local Cage View form.",
+        )
+        conn.execute(
+            """
+            UPDATE mouse_cage_assignment
+            SET status = 'ended', ended_at = ?
+            WHERE mouse_id = ? AND status = 'active'
+            """,
+            (moved_at, mouse_id),
+        )
+        assignment_id = new_id("cage_assignment")
+        conn.execute(
+            """
+            INSERT INTO mouse_cage_assignment
+                (assignment_id, mouse_id, cage_id, status, assigned_at,
+                 source_record_id, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (assignment_id, mouse_id, payload.cage_id, "active", moved_at, source_record_id, payload.note),
+        )
+        event_id = new_id("event")
+        details = {
+            "display_id": mouse["display_id"],
+            "from_cage_label": previous["cage_label"] if previous else "",
+            "to_cage_label": cage["cage_label"],
+            "note": payload.note,
+        }
+        conn.execute(
+            """
+            INSERT INTO mouse_event
+                (event_id, mouse_id, event_type, event_date, related_entity_type,
+                 related_entity_id, source_record_id, details, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                mouse_id,
+                "moved",
+                event_date,
+                "cage",
+                payload.cage_id,
+                source_record_id,
+                json.dumps(details, ensure_ascii=False),
+                moved_at,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "mouse_cage_moved",
+                mouse_id,
+                json.dumps(dict(previous) if previous else {}, ensure_ascii=False),
+                json.dumps({"cage_id": payload.cage_id, "cage_label": cage["cage_label"]}, ensure_ascii=False),
+                moved_at,
+            ),
+        )
+    return {
+        "assignment_id": assignment_id,
+        "mouse_id": mouse_id,
+        "cage_id": payload.cage_id,
+        "cage_label": cage["cage_label"],
+        "source_record_id": source_record_id,
+        "event_id": event_id,
+        "assigned_at": moved_at,
+    }
+
+
 @app.get("/api/genotyping-records")
 def list_genotyping_records() -> list[dict[str, Any]]:
     with connection() as conn:
@@ -1357,6 +1564,63 @@ def list_genotyping_records() -> list[dict[str, Any]]:
             """
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+@app.get("/api/genotyping-dashboard")
+def genotyping_dashboard() -> list[dict[str, Any]]:
+    cards = [
+        (
+            "not_sampled",
+            "Not sampled",
+            "Separated active mice that still need tail sampling.",
+            "status = 'active' AND genotyping_status = 'not_sampled'",
+        ),
+        (
+            "awaiting_result",
+            "Awaiting result",
+            "Sampled or submitted mice without an accepted genotype result.",
+            "status = 'active' AND (genotyping_status IN ('sampled', 'submitted', 'pending') OR next_action = 'awaiting_result')",
+        ),
+        (
+            "failed_ambiguous",
+            "Failed / ambiguous",
+            "Genotyping records that need retry, interpretation, or review.",
+            "status = 'active' AND (genotyping_status = 'failed' OR next_action = 'review_result')",
+        ),
+        (
+            "target_confirmed",
+            "Target genotype confirmed",
+            "Mice whose result matches a configured strain-level target genotype.",
+            "status = 'active' AND genotyping_status = 'resulted' AND target_match_status = 'matches_target'",
+        ),
+        (
+            "non_target",
+            "Non-target genotype",
+            "Resulted mice that do not match configured target genotype.",
+            "status = 'active' AND genotyping_status = 'resulted' AND target_match_status = 'does_not_match_target'",
+        ),
+        (
+            "review_needed",
+            "Review needed",
+            "Mice with genotype workflow state that should not be acted on silently.",
+            "status = 'active' AND (next_action = 'review_needed' OR use_category = 'unknown' OR target_match_status = 'unknown')",
+        ),
+    ]
+    with connection() as conn:
+        result = []
+        for key, label, meaning, where in cards:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS count FROM mouse_master WHERE {where}"
+            ).fetchone()
+            result.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "count": row["count"],
+                    "meaning": meaning,
+                }
+            )
+    return result
 
 
 def contains_filter(columns: list[str], query: str) -> tuple[str, list[str]]:
@@ -1390,7 +1654,22 @@ MOUSE_SELECT = """
            genotype_result, genotype_result_date, target_match_status,
            use_category, next_action, source_note_item_id,
            current_card_snapshot_id, status, source_photo_id,
-           created_at, updated_at
+           created_at, updated_at,
+           (
+               SELECT a.cage_id
+               FROM mouse_cage_assignment a
+               WHERE a.mouse_id = mouse_master.mouse_id AND a.status = 'active'
+               ORDER BY a.assigned_at DESC
+               LIMIT 1
+           ) AS current_cage_id,
+           (
+               SELECT c.cage_label
+               FROM mouse_cage_assignment a
+               JOIN cage_registry c ON c.cage_id = a.cage_id
+               WHERE a.mouse_id = mouse_master.mouse_id AND a.status = 'active'
+               ORDER BY a.assigned_at DESC
+               LIMIT 1
+           ) AS current_cage_label
     FROM mouse_master
 """
 
@@ -1399,6 +1678,7 @@ def mouse_rows(conn: Any, query: str = "") -> list[Any]:
     params: list[str] = []
     where = ""
     if query.strip():
+        normalized = f"%{query.strip().lower()}%"
         clause, params = contains_filter(
             [
                 "display_id",
@@ -1419,7 +1699,18 @@ def mouse_rows(conn: Any, query: str = "") -> list[Any]:
             ],
             query.strip(),
         )
-        where = f"WHERE {clause}"
+        where = f"""
+        WHERE {clause}
+           OR EXISTS (
+               SELECT 1
+               FROM mouse_cage_assignment a
+               JOIN cage_registry c ON c.cage_id = a.cage_id
+               WHERE a.mouse_id = mouse_master.mouse_id
+                 AND a.status = 'active'
+                 AND LOWER(COALESCE(c.cage_label, '') || ' ' || COALESCE(c.location, '')) LIKE ?
+           )
+        """
+        params.append(normalized)
     return conn.execute(
         f"""
         {MOUSE_SELECT}
