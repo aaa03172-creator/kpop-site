@@ -167,6 +167,9 @@ def main() -> None:
             assert_true(count == 1, "Assigned strain scope table did not accept a row.")
         else:
             with TestClient(app) as client:
+                index_html = client.get("/").text
+                assert_true("Colony Records" in index_html, "Local UI should expose mouse records.")
+                assert_true("Parsed Note Evidence" in index_html, "Local UI should expose parsed note evidence.")
                 assert_true(client.get("/api/assigned-strains").json() == [], "Assigned strain scope should start empty.")
                 created = client.post(
                     "/api/assigned-strains",
