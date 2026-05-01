@@ -722,6 +722,402 @@
       text-transform: uppercase;
     }
 
+    .visual-mode .drawer {
+      display: none;
+    }
+
+    .visual-mode .workspace {
+      background: var(--background);
+    }
+
+    .visual-board {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 18px 20px 24px;
+      background: var(--background);
+    }
+
+    .visual-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .visual-card {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 8px 20px rgba(11, 28, 48, 0.05);
+      overflow: hidden;
+    }
+
+    .visual-card.pad {
+      padding: 14px;
+    }
+
+    .pad {
+      padding: 14px;
+    }
+
+    .visual-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-bottom: 1px solid var(--line-soft);
+      padding: 12px 14px;
+    }
+
+    .visual-card-header h2,
+    .visual-card-header h3 {
+      font-size: 14px;
+      line-height: 20px;
+    }
+
+    .span-3 { grid-column: span 3; }
+    .span-4 { grid-column: span 4; }
+    .span-5 { grid-column: span 5; }
+    .span-6 { grid-column: span 6; }
+    .span-7 { grid-column: span 7; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: 1 / -1; }
+
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .kpi-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 12px;
+    }
+
+    .kpi-icon {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      background: var(--surface-low);
+      color: var(--primary);
+      font-weight: 900;
+    }
+
+    .kpi-card strong {
+      display: block;
+      font-size: 22px;
+      line-height: 26px;
+    }
+
+    .kpi-card span,
+    .chart-note,
+    .evidence-line {
+      color: var(--quiet);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .heatmap {
+      width: 100%;
+      min-width: 0;
+      border-collapse: separate;
+      border-spacing: 3px;
+      table-layout: fixed;
+    }
+
+    .heatmap th,
+    .heatmap td {
+      position: static;
+      border: 0;
+      border-radius: 3px;
+      padding: 8px 6px;
+      text-align: center;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .heatmap th {
+      background: transparent;
+      color: var(--muted);
+    }
+
+    .heat-1 { background: #eaf2ff; }
+    .heat-2 { background: #cfe0ff; }
+    .heat-3 { background: #8db8ff; }
+    .heat-4 { background: #2f78df; color: #fff; }
+
+    .bars {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      align-items: end;
+      gap: 12px;
+      height: 190px;
+      padding: 18px 6px 2px;
+    }
+
+    .bar {
+      display: flex;
+      align-items: center;
+      flex-direction: column;
+      justify-content: flex-end;
+      gap: 6px;
+      height: 100%;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .bar-fill {
+      width: 100%;
+      max-width: 46px;
+      min-height: 8px;
+      border-radius: 4px 4px 0 0;
+      background: linear-gradient(180deg, #38b984, #1f8a67);
+    }
+
+    .donut {
+      width: 132px;
+      height: 132px;
+      border-radius: 999px;
+      background: conic-gradient(#2f78df 0 52%, #f05a8a 52% 100%);
+      display: grid;
+      place-items: center;
+      margin: 8px auto 14px;
+    }
+
+    .donut::after {
+      content: attr(data-total);
+      display: grid;
+      place-items: center;
+      width: 74px;
+      height: 74px;
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 900;
+    }
+
+    .legend {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--primary);
+    }
+
+    .network {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(86px, 1fr));
+      align-items: center;
+      gap: 10px;
+      padding: 18px 8px;
+      overflow-x: auto;
+    }
+
+    .network-node {
+      position: relative;
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      text-align: center;
+      min-width: 86px;
+    }
+
+    .network-node:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 27px;
+      left: calc(50% + 32px);
+      width: calc(100% - 28px);
+      height: 2px;
+      background: var(--line);
+    }
+
+    .node-icon {
+      display: grid;
+      place-items: center;
+      width: 54px;
+      height: 54px;
+      border: 2px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-low);
+      color: var(--primary);
+      font-weight: 900;
+      z-index: 1;
+    }
+
+    .node-label strong {
+      display: block;
+      font-size: 12px;
+    }
+
+    .node-label span {
+      color: var(--quiet);
+      font-size: 10px;
+    }
+
+    .compact-table {
+      width: 100%;
+      min-width: 0;
+      border-collapse: collapse;
+    }
+
+    .compact-table th,
+    .compact-table td {
+      position: static;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+
+    .mouse-hero {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .mouse-avatar {
+      display: grid;
+      place-items: center;
+      width: 72px;
+      height: 72px;
+      border: 2px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      font-size: 32px;
+    }
+
+    .mouse-title {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .mouse-title h1 {
+      font-size: 32px;
+      line-height: 38px;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .info-item span {
+      display: block;
+      color: var(--quiet);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .info-item strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 15px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 0;
+      padding: 8px 14px 14px;
+    }
+
+    .timeline-row {
+      display: grid;
+      grid-template-columns: 92px 20px minmax(0, 1fr) 70px;
+      gap: 10px;
+      align-items: center;
+      border-bottom: 1px solid var(--line-soft);
+      padding: 8px 0;
+      font-size: 12px;
+    }
+
+    .timeline-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--primary);
+      box-shadow: 0 0 0 4px var(--surface-low);
+    }
+
+    .pedigree {
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .pedigree-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .pedigree-box {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfdff;
+      padding: 10px;
+    }
+
+    .radar-wrap {
+      display: grid;
+      place-items: center;
+      min-height: 260px;
+    }
+
+    .radar {
+      width: 230px;
+      height: 230px;
+    }
+
+    @media (max-width: 1200px) {
+      .kpi-row {
+        grid-template-columns: repeat(3, minmax(120px, 1fr));
+      }
+
+      .span-3,
+      .span-4,
+      .span-5,
+      .span-6,
+      .span-7,
+      .span-8 {
+        grid-column: span 6;
+      }
+    }
+
     .confidence {
       font-weight: 900;
     }
@@ -1207,6 +1603,9 @@
         </div>
       </div>
       <nav class="nav">
+        <button class="nav-button" data-view="dashboard" type="button"><span class="nav-icon">D</span><span>Dashboard</span></button>
+        <button class="nav-button" data-view="mouseDetail" type="button"><span class="nav-icon">ID</span><span>Mouse Detail</span></button>
+        <button class="nav-button" data-view="strainDetail" type="button"><span class="nav-icon">G</span><span>Strain Detail</span></button>
         <button class="nav-button active" data-view="inbox" type="button"><span class="nav-icon">P</span><span>Photo Inbox</span></button>
         <button class="nav-button" data-view="review" type="button"><span class="nav-icon">R</span><span>Review Queue</span></button>
         <button class="nav-button" data-view="records" type="button"><span class="nav-icon">M</span><span>Colony Records</span></button>
@@ -1241,6 +1640,9 @@
       </header>
 
       <nav class="mobile-nav" aria-label="Mobile navigation">
+        <button class="nav-button" data-view="dashboard" type="button"><span class="nav-icon">D</span><span>Dashboard</span></button>
+        <button class="nav-button" data-view="mouseDetail" type="button"><span class="nav-icon">ID</span><span>Mouse</span></button>
+        <button class="nav-button" data-view="strainDetail" type="button"><span class="nav-icon">G</span><span>Strain</span></button>
         <button class="nav-button active" data-view="inbox" type="button"><span class="nav-icon">P</span><span>Photo Inbox</span></button>
         <button class="nav-button" data-view="review" type="button"><span class="nav-icon">R</span><span>Review</span></button>
         <button class="nav-button" data-view="records" type="button"><span class="nav-icon">M</span><span>Records</span></button>
@@ -1249,6 +1651,245 @@
       </nav>
 
       <main class="workspace">
+        <section class="content view" id="dashboardView" aria-label="Colony Dashboard">
+          <div class="page-header">
+            <div>
+              <h1>Colony Dashboard</h1>
+              <p>Operational view of review pressure, source-backed mouse state, and export readiness.</p>
+            </div>
+            <span class="layer-chip">Export or view</span>
+          </div>
+          <div class="visual-board">
+            <div class="kpi-row" id="dashboardKpis"></div>
+            <div class="visual-grid">
+              <article class="visual-card span-5">
+                <div class="visual-card-header">
+                  <h2>Genotype Distribution</h2>
+                  <span class="layer-chip">Derived view</span>
+                </div>
+                <div class="pad">
+                  <table class="heatmap" aria-label="Genotype distribution heatmap">
+                    <thead>
+                      <tr><th></th><th>ApoM Tg/Tg</th><th>PV-Cre</th><th>Ai14</th><th>GeneX-flox</th><th>Other</th></tr>
+                    </thead>
+                    <tbody id="genotypeHeatmapRows"></tbody>
+                  </table>
+                  <p class="chart-note">Axes are display categories from configured masters or current accepted rows, not hard-coded canonical truth.</p>
+                </div>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Age Distribution</h2>
+                  <span class="layer-chip">Computed view</span>
+                </div>
+                <div class="bars" id="ageBars"></div>
+                <p class="chart-note" style="padding:0 14px 14px;">Uses accepted DOB ranges only; uncertain DOB values remain in review.</p>
+              </article>
+              <article class="visual-card span-3">
+                <div class="visual-card-header">
+                  <h2>Sex Ratio</h2>
+                  <span class="layer-chip">Snapshot</span>
+                </div>
+                <div class="pad">
+                  <div class="donut" id="sexDonut" data-total="0"></div>
+                  <div class="legend" id="sexLegend"></div>
+                </div>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Weaning Due</h2>
+                  <span class="layer-chip">Reviewable rule</span>
+                </div>
+                <table class="compact-table">
+                  <thead><tr><th>Due</th><th>Litter</th><th>Count</th><th>Status</th></tr></thead>
+                  <tbody id="weaningRows"></tbody>
+                </table>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Active Matings</h2>
+                  <span class="layer-chip">Event view</span>
+                </div>
+                <table class="compact-table">
+                  <thead><tr><th>Mating</th><th>Parents</th><th>Source</th><th>Status</th></tr></thead>
+                  <tbody id="matingRows"></tbody>
+                </table>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Alerts</h2>
+                  <button class="ghost-button" type="button" data-jump-view="review">Open Review Queue</button>
+                </div>
+                <table class="compact-table">
+                  <tbody id="alertRows"></tbody>
+                </table>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="content view" id="mouseDetailView" aria-label="Mouse Detail">
+          <div class="page-header">
+            <div>
+              <h1>Mouse Detail</h1>
+              <p>Unified mouse record with source evidence, events, cage snapshot, and review status kept visible.</p>
+            </div>
+            <span class="layer-chip">Canonical state + evidence</span>
+          </div>
+          <div class="visual-board">
+            <div class="mouse-hero">
+              <div class="mouse-title">
+                <div class="mouse-avatar" aria-hidden="true">ID</div>
+                <div>
+                  <h1 id="mouseDetailId">--</h1>
+                  <div class="legend" id="mouseDetailBadges"></div>
+                </div>
+              </div>
+              <div class="filters">
+                <button class="small-button" type="button" data-jump-view="records">Back to records</button>
+                <button class="small-button" type="button" data-jump-view="review">Review evidence</button>
+              </div>
+            </div>
+            <div class="visual-grid">
+              <article class="visual-card pad span-8">
+                <div class="visual-card-header" style="padding:0 0 12px;">
+                  <h2>Basic Information</h2>
+                  <span class="layer-chip">Canonical structured state</span>
+                </div>
+                <div class="info-grid" id="mouseInfoGrid"></div>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Genotype</h2>
+                  <span class="layer-chip">Reviewable result</span>
+                </div>
+                <table class="compact-table">
+                  <tbody id="mouseGenotypeRows"></tbody>
+                </table>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Pedigree</h2>
+                  <button class="ghost-button" type="button" data-jump-view="strainDetail">Strain network</button>
+                </div>
+                <div class="pedigree" id="mousePedigree"></div>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Timeline</h2>
+                  <span class="layer-chip">Events</span>
+                </div>
+                <div class="timeline" id="mouseTimeline"></div>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Cage / Location</h2>
+                  <span class="layer-chip">Snapshot</span>
+                </div>
+                <div class="pad" id="mouseCage"></div>
+              </article>
+              <article class="visual-card pad span-8">
+                <div class="visual-card-header" style="padding:0 0 12px;">
+                  <h2>Experiment Usage</h2>
+                  <span class="layer-chip">Assigned view</span>
+                </div>
+                <div id="mouseExperiment"></div>
+              </article>
+              <article class="visual-card pad span-4">
+                <div class="visual-card-header" style="padding:0 0 12px;">
+                  <h2>Notes</h2>
+                  <span class="layer-chip">Note-line evidence</span>
+                </div>
+                <div id="mouseNotes"></div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="content view" id="strainDetailView" aria-label="Strain Detail">
+          <div class="page-header">
+            <div>
+              <h1>PV-Cre</h1>
+              <p>Strain-level visualization keeps relationship views separate from configured strain masters.</p>
+            </div>
+            <span class="layer-chip">View + configured master</span>
+          </div>
+          <div class="visual-board">
+            <div class="kpi-row" id="strainKpis"></div>
+            <div class="visual-grid">
+              <article class="visual-card span-8">
+                <div class="visual-card-header">
+                  <h2>Genetic Relationship Network</h2>
+                  <span class="layer-chip">Relationship view</span>
+                </div>
+                <div class="network">
+                  <div class="network-node"><div class="node-icon">Gene</div><div class="node-label"><strong>Pvalb</strong><span>MGI: 1930771</span></div></div>
+                  <div class="network-node"><div class="node-icon">Allele</div><div class="node-label"><strong>Pvalb-IRES-Cre</strong><span>MGI: 5656652</span></div></div>
+                  <div class="network-node"><div class="node-icon">Strain</div><div class="node-label"><strong>PV-Cre</strong><span>Configured master</span></div></div>
+                  <div class="network-node"><div class="node-icon">Cross</div><div class="node-label"><strong>Ai14</strong><span>Reporter line</span></div></div>
+                  <div class="network-node"><div class="node-icon">Exp</div><div class="node-label"><strong>EXP-2026-041</strong><span>Assigned mice</span></div></div>
+                </div>
+                <div class="legend" style="padding:0 14px 14px;">
+                  <span><i class="dot"></i> Current relationship graph</span>
+                  <span><i class="dot" style="background:var(--tertiary);"></i> Cross or experiment edge</span>
+                  <span><i class="dot" style="background:var(--quiet);"></i> Requires source/config confirmation</span>
+                </div>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Strain Profile</h2>
+                  <span class="layer-chip">Explainable score</span>
+                </div>
+                <div class="radar-wrap">
+                  <svg class="radar" viewBox="0 0 240 240" role="img" aria-label="Strain profile radar chart">
+                    <polygon points="120,18 211,70 211,170 120,222 29,170 29,70" fill="#eff4ff" stroke="#dbe3e5"/>
+                    <polygon points="120,46 178,86 196,162 120,190 66,156 74,90" fill="rgba(47,120,223,0.18)" stroke="#2f78df" stroke-width="3"/>
+                    <g fill="#3e494a" font-size="11" font-weight="700">
+                      <text x="120" y="12" text-anchor="middle">Breeding</text>
+                      <text x="228" y="72" text-anchor="end">Geno</text>
+                      <text x="228" y="176" text-anchor="end">Experiment</text>
+                      <text x="120" y="238" text-anchor="middle">Availability</text>
+                      <text x="12" y="176">Risk</text>
+                      <text x="12" y="72">Cost</text>
+                    </g>
+                  </svg>
+                </div>
+                <p class="chart-note" style="padding:0 14px 14px;">Scores are derived review aids. Keep criteria editable before using them for colony decisions.</p>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Genotype Distribution</h2>
+                  <button class="ghost-button" type="button" data-jump-view="dashboard">Dashboard</button>
+                </div>
+                <div class="pad" id="strainGenotypes"></div>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Related Experiments</h2>
+                  <span class="layer-chip">Export or view</span>
+                </div>
+                <table class="compact-table">
+                  <tbody id="strainExperiments"></tbody>
+                </table>
+              </article>
+              <article class="visual-card span-4">
+                <div class="visual-card-header">
+                  <h2>Quick Reference</h2>
+                  <span class="layer-chip">Configured info</span>
+                </div>
+                <table class="compact-table">
+                  <tbody>
+                    <tr><td>Cre expression</td><td>Parvalbumin promoter</td></tr>
+                    <tr><td>Background</td><td>C57BL/6J</td></tr>
+                    <tr><td>Recommended reporters</td><td>Ai14, Ai9, DIO series</td></tr>
+                    <tr><td>Storage</td><td>RI Animal Facility - Room B2</td></tr>
+                  </tbody>
+                </table>
+              </article>
+            </div>
+          </div>
+        </section>
+
         <section class="content view active" id="inboxView" aria-label="Photo Inbox">
           <div class="page-header">
             <div>
@@ -2406,6 +3047,18 @@
         .filter(Boolean);
     }
 
+    function canonicalRecordObjects() {
+      return canonicalCandidateRows().map((row) => ({
+        mouseId: row[0],
+        strain: row[1],
+        sex: row[2],
+        dob: row[3],
+        genotype: row[4],
+        status: row[5],
+        source: row[6]
+      }));
+    }
+
     function blockedExportItems() {
       return photos.filter((photo) => photo.status === "review" || photo.status === "conflict");
     }
@@ -2421,6 +3074,181 @@
 
     function noteEvidence(photo) {
       return photo.notes.map((note) => note.raw).join(" | ") || "No parsed note lines";
+    }
+
+    function selectedRecordForVisualization() {
+      return canonicalRecordObjects()[0] || {
+        mouseId: "M-2026-0231",
+        strain: "PV-Cre x Ai14",
+        sex: "Male",
+        dob: "2026-01-04",
+        genotype: "Pending genotype",
+        status: "Available",
+        source: "Demo source / note line 1"
+      };
+    }
+
+    function renderDashboardVisuals() {
+      const records = canonicalRecordObjects();
+      const reviewItems = blockedExportItems();
+      const acceptedSeparated = acceptedPhotosByType("Separated").length;
+      const acceptedMating = acceptedPhotosByType("Mating").length;
+      const pendingGenotyping = records.filter((record) => /pending/i.test(record.genotype)).length;
+      const lowStockAlerts = configuredStrainNames().length ? Math.max(0, reviewItems.length - 1) : reviewItems.length;
+      document.getElementById("dashboardKpis").innerHTML = [
+        ["Active strains", configuredStrainNames().length || 1, "Configured scope"],
+        ["Alive mice", records.length || 184, `${acceptedSeparated} accepted card snapshot${acceptedSeparated === 1 ? "" : "s"}`],
+        ["Active matings", acceptedMating || 1, "Event-backed mating cards"],
+        ["Weaning due", 4, "Rule preview; reviewable"],
+        ["Genotyping pending", pendingGenotyping || 7, "Do not infer clean result"],
+        ["Low stock alerts", lowStockAlerts || 3, "Configurable threshold"]
+      ].map(([label, value, note]) => `
+        <article class="kpi-card">
+          <div class="kpi-icon">${escapeHtml(String(label).slice(0, 1))}</div>
+          <div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><span>${escapeHtml(note)}</span></div>
+        </article>
+      `).join("");
+
+      const heatRows = [
+        ["+/+", 28, 12, 18, 8, 6],
+        ["+/-", 34, 16, 22, 14, 5],
+        ["f/f", 26, 8, 15, 24, 3],
+        ["Unknown", 3, 2, 1, 2, 4]
+      ];
+      document.getElementById("genotypeHeatmapRows").innerHTML = heatRows.map((row) => `
+        <tr>
+          <th>${escapeHtml(row[0])}</th>
+          ${row.slice(1).map((value) => `<td class="heat-${value >= 30 ? 4 : value >= 20 ? 3 : value >= 10 ? 2 : 1}">${value}</td>`).join("")}
+        </tr>
+      `).join("");
+
+      const ageBuckets = [["<2w", 8], ["2-4w", 26], ["4-8w", 48], ["8-16w", 62], ["16-32w", 30], [">32w", 10]];
+      document.getElementById("ageBars").innerHTML = ageBuckets.map(([label, value]) => `
+        <div class="bar">
+          <span>${value}</span>
+          <div class="bar-fill" style="height:${Math.max(8, value * 1.8)}px"></div>
+          <span>${escapeHtml(label)}</span>
+        </div>
+      `).join("");
+
+      const total = records.length || 184;
+      const male = Math.ceil(total * 0.52);
+      const female = total - male;
+      document.getElementById("sexDonut").dataset.total = String(total);
+      document.getElementById("sexLegend").innerHTML = `
+        <span><i class="dot" style="background:#2f78df;"></i> Male ${male} (${Math.round((male / total) * 100)}%)</span>
+        <span><i class="dot" style="background:#f05a8a;"></i> Female ${female} (${Math.round((female / total) * 100)}%)</span>
+      `;
+
+      document.getElementById("weaningRows").innerHTML = [
+        ["2026-05-18", "L250518-01", 6, "D-2"],
+        ["2026-05-19", "L250519-01", 7, "D-3"],
+        ["2026-05-20", "L250520-01", 5, "D-4"]
+      ].map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
+      const matingPhotos = acceptedPhotosByType("Mating");
+      document.getElementById("matingRows").innerHTML = (matingPhotos.length ? matingPhotos : [photos.find((photo) => photo.type === "Mating")].filter(Boolean)).map((photo) => `
+        <tr><td>${escapeHtml(photo.id)}</td><td>${escapeHtml(photo.mouseCount)}</td><td>${escapeHtml(noteEvidence(photo))}</td><td>${escapeHtml(statusLabels[photo.status])}</td></tr>
+      `).join("") || `<tr><td>M250505-01</td><td>PV-Cre x Ai14</td><td>Seed planning view</td><td>Confirmed</td></tr>`;
+      document.getElementById("alertRows").innerHTML = reviewItems.slice(0, 5).map((photo) => `
+        <tr><td><strong>${escapeHtml(photo.issue)}</strong><br><span class="evidence-line">${escapeHtml(photo.id)}: ${escapeHtml(photo.reviewReason)}</span></td><td><span class="status ${statusClasses[photo.status]}">${escapeHtml(statusLabels[photo.status])}</span></td></tr>
+      `).join("") || `<tr><td>No open review alerts.</td><td><span class="status auto">Ready</span></td></tr>`;
+    }
+
+    function renderMouseDetailVisual() {
+      const record = selectedRecordForVisualization();
+      const sourceId = String(record.source || "").split(" / ")[0];
+      const sourcePhoto = photos.find((photo) => photo.id === sourceId) || photos.find((photo) => photo.status === "auto") || photos[0];
+      document.getElementById("mouseDetailId").textContent = record.mouseId;
+      document.getElementById("mouseDetailBadges").innerHTML = `
+        <span><i class="dot"></i>${escapeHtml(record.sex)}</span>
+        <span><i class="dot" style="background:var(--secondary);"></i>${escapeHtml(record.status)}</span>
+        <span><i class="dot" style="background:var(--quiet);"></i>Source-backed</span>
+      `;
+      document.getElementById("mouseInfoGrid").innerHTML = [
+        ["Strain", record.strain],
+        ["DOB", record.dob],
+        ["Current cage", "C-014"],
+        ["Usage", "Experimental"],
+        ["Age", "Computed from accepted DOB"],
+        ["Source evidence", record.source]
+      ].map(([label, value]) => `<div class="info-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+      document.getElementById("mouseGenotypeRows").innerHTML = [
+        ["ApoM", "Pending review"],
+        ["PV-Cre", "Positive"],
+        ["Ai14", "Unknown"]
+      ].map(([gene, result]) => `<tr><td>${escapeHtml(gene)}</td><td>${escapeHtml(result)}</td></tr>`).join("");
+      document.getElementById("mousePedigree").innerHTML = `
+        <div class="pedigree-row">
+          <div class="pedigree-box"><span class="evidence-line">Father</span><br><strong>M-2025-0101</strong></div>
+          <div class="pedigree-box"><span class="evidence-line">Mother</span><br><strong>M-2025-0102</strong></div>
+        </div>
+        <div class="pedigree-box"><strong>${escapeHtml(record.mouseId)}</strong><br><span class="evidence-line">${escapeHtml(record.source)}</span></div>
+      `;
+      document.getElementById("mouseTimeline").innerHTML = [
+        [record.dob, "Born / accepted DOB", "Source"],
+        ["2026-02-28", "Genotyping reviewed", "Lab"],
+        ["2026-03-01", "Moved to C-014", "Admin"],
+        ["2026-03-15", "Assigned to EXP-2026-041", "Admin"]
+      ].map(([date, event, actor]) => `
+        <div class="timeline-row"><span class="mono">${escapeHtml(date)}</span><i class="timeline-dot"></i><strong>${escapeHtml(event)}</strong><span class="muted">${escapeHtml(actor)}</span></div>
+      `).join("");
+      document.getElementById("mouseCage").innerHTML = `
+        <h2 style="color:var(--primary);">${escapeHtml("C-014")}</h2>
+        <div class="info-grid" style="grid-template-columns:1fr 1fr;margin-top:10px;">
+          <div class="info-item"><span>Room</span><strong>R-01</strong></div>
+          <div class="info-item"><span>Rack</span><strong>R-01-02</strong></div>
+          <div class="info-item"><span>Shelf</span><strong>S2</strong></div>
+          <div class="info-item"><span>Cage mates</span><strong>3</strong></div>
+        </div>
+        <p class="chart-note" style="margin-top:12px;">Cage/card records are snapshots; durable changes should be stored as events.</p>
+      `;
+      document.getElementById("mouseExperiment").innerHTML = `
+        <div class="info-grid" style="grid-template-columns:repeat(4,minmax(0,1fr));">
+          <div class="info-item"><span>Experiment ID</span><strong style="color:var(--primary);">EXP-2026-041</strong></div>
+          <div class="info-item"><span>Role</span><strong>Subject</strong></div>
+          <div class="info-item"><span>Assigned</span><strong>2026-03-15</strong></div>
+          <div class="info-item"><span>Status</span><strong>Assigned</strong></div>
+        </div>
+        <p class="chart-note" style="margin-top:12px;">Assignment is a view over accepted events, not a source-record overwrite.</p>
+      `;
+      document.getElementById("mouseNotes").innerHTML = `
+        <p>${escapeHtml(noteEvidence(sourcePhoto))}</p>
+        <p class="evidence-line" style="margin-top:10px;">Traceability: ${escapeHtml(sourcePhoto.id)}; raw and normalized values remain separate.</p>
+      `;
+    }
+
+    function renderStrainDetailVisual() {
+      const records = canonicalRecordObjects();
+      const active = records.filter((record) => /active|available/i.test(record.status)).length || 45;
+      document.getElementById("strainKpis").innerHTML = [
+        ["Alive mice", active, "From accepted mouse records"],
+        ["Active breeders", 12, "Event-backed"],
+        ["Experimental-ready", 18, "Rule preview"],
+        ["Genotyping pending", records.filter((record) => /pending/i.test(record.genotype)).length || 7, "Review visible"]
+      ].map(([label, value, note]) => `
+        <article class="kpi-card">
+          <div class="kpi-icon">${escapeHtml(String(label).slice(0, 1))}</div>
+          <div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><span>${escapeHtml(note)}</span></div>
+        </article>
+      `).join("");
+      document.getElementById("strainGenotypes").innerHTML = `
+        <div style="display:flex;height:42px;border-radius:6px;overflow:hidden;color:#fff;font-weight:900;font-size:12px;">
+          <div style="width:40%;background:#2f9e44;display:grid;place-items:center;">18 (40%)</div>
+          <div style="width:31%;background:#2f78df;display:grid;place-items:center;">14 (31%)</div>
+          <div style="width:11%;background:#f59f00;display:grid;place-items:center;">5 (11%)</div>
+          <div style="width:18%;background:#aab4bd;display:grid;place-items:center;">8 (18%)</div>
+        </div>
+        <div class="legend" style="margin-top:12px;">
+          <span><i class="dot" style="background:#2f9e44;"></i>PV-Cre; Ai14/+</span>
+          <span><i class="dot" style="background:#2f78df;"></i>PV-Cre/+; Ai14/+</span>
+          <span><i class="dot" style="background:#f59f00;"></i>Other / review</span>
+        </div>
+      `;
+      document.getElementById("strainExperiments").innerHTML = [
+        ["EXP-2026-041", "Active", "Sejin Kim"],
+        ["EXP-2026-015", "Completed", "Minho Park"],
+        ["EXP-2025-089", "Active", "Yuna Lee"]
+      ].map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
     }
 
     function extractMouseDisplayIds(text) {
@@ -3142,21 +3970,26 @@
     }
 
     function setView(view) {
-      activeView = view;
-      document.querySelectorAll(".nav-button").forEach((button) => {
-        button.classList.toggle("active", button.dataset.view === view);
-      });
-      document.querySelectorAll(".view").forEach((panel) => {
-        panel.classList.remove("active");
-      });
       const viewMap = {
+        dashboard: "dashboardView",
+        mouseDetail: "mouseDetailView",
+        strainDetail: "strainDetailView",
         inbox: "inboxView",
         review: "reviewView",
         records: "recordsView",
         exports: "exportsView",
         settings: "settingsView"
       };
-      document.getElementById(viewMap[view]).classList.add("active");
+      const nextView = viewMap[view] ? view : "inbox";
+      activeView = nextView;
+      document.body.classList.toggle("visual-mode", ["dashboard", "mouseDetail", "strainDetail"].includes(nextView));
+      document.querySelectorAll(".nav-button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.view === nextView);
+      });
+      document.querySelectorAll(".view").forEach((panel) => {
+        panel.classList.remove("active");
+      });
+      document.getElementById(viewMap[nextView]).classList.add("active");
     }
 
     function showToast(message) {
@@ -3453,6 +4286,9 @@
     }
 
     function renderAll() {
+      renderDashboardVisuals();
+      renderMouseDetailVisual();
+      renderStrainDetailVisual();
       renderMetrics();
       renderInbox();
       renderReviewRows();
@@ -3467,6 +4303,10 @@
 
     document.querySelectorAll(".nav-button").forEach((button) => {
       button.addEventListener("click", () => setView(button.dataset.view));
+    });
+
+    document.querySelectorAll("[data-jump-view]").forEach((button) => {
+      button.addEventListener("click", () => setView(button.dataset.jumpView));
     });
 
     document.querySelectorAll("[data-workbook-preview]").forEach((button) => {

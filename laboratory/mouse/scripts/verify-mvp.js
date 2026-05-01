@@ -144,6 +144,15 @@ async function main() {
     (await page.locator("#assignedStrainRows tr").filter({ hasText: "ApoM Tg/Tg" }).filter({ hasText: "Canonical scope" }).count()) === 1,
     "My Assigned Strains seed scope missing."
   );
+  await page.locator('.sidebar [data-view="dashboard"]').click();
+  assert((await page.locator("#dashboardView.active").count()) === 1, "Dashboard visual view did not open.");
+  assert((await page.locator("body.visual-mode").count()) === 1, "Visual dashboard mode was not enabled.");
+  await page.locator('.sidebar [data-view="mouseDetail"]').click();
+  assert((await page.locator("#mouseDetailView.active").count()) === 1, "Mouse detail visual view did not open.");
+  await page.locator('.sidebar [data-view="strainDetail"]').click();
+  assert((await page.locator("#strainDetailView.active").count()) === 1, "Strain detail visual view did not open.");
+  await page.locator('.sidebar [data-view="inbox"]').click();
+  assert((await page.locator("#inboxView.active").count()) === 1, "Inbox view did not reopen after visual views.");
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator("#assignedStrainName").fill("GFAP Cre; S1PR1 fl/fl");
   await page.locator("#assignedStrainAliases").fill("GFAP S1PR1");
