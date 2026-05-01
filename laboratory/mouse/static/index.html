@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mouse Colony LIMS Local MVP</title>
+  <style>
+    :root {
+      --bg: #f7faf9;
+      --panel: #ffffff;
+      --line: #d6e0dc;
+      --ink: #12201b;
+      --muted: #667770;
+      --primary: #0f6b5f;
+      --warn: #8a5a00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      padding: 20px;
+    }
+    section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 16px;
+      min-width: 0;
+    }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: 22px; }
+    h2 { font-size: 16px; margin-bottom: 10px; }
+    p { color: var(--muted); }
+    button, input {
+      font: inherit;
+    }
+    button {
+      border: 1px solid var(--primary);
+      border-radius: 6px;
+      background: var(--primary);
+      color: #fff;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    input[type="file"] {
+      width: 100%;
+      margin: 8px 0 12px;
+    }
+    .muted { color: var(--muted); }
+    .status {
+      display: inline-flex;
+      border-radius: 999px;
+      background: #e4f3ef;
+      color: #0b554b;
+      padding: 4px 8px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .status.warn {
+      background: #fff4d7;
+      color: var(--warn);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 8px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .full { grid-column: 1 / -1; }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+      .full { grid-column: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Mouse Colony LIMS Local MVP</h1>
+      <p>Photos, cage card review, and Excel export readiness.</p>
+    </div>
+    <span class="status" id="health">Checking...</span>
+  </header>
+
+  <main>
+    <section>
+      <h2>Upload Source Photo</h2>
+      <p>Raw cage card evidence stays local.</p>
+      <input id="photoFile" type="file" accept="image/*">
+      <button id="uploadButton" type="button">Upload Photo</button>
+      <p class="muted" id="uploadMessage"></p>
+    </section>
+
+    <section>
+      <h2>Fixture Parse Results</h2>
+      <p>Imports sample parsed/intermediate records without OCR.</p>
+      <button id="fixtureButton" type="button">Import Sample Fixture</button>
+      <p class="muted" id="fixtureMessage"></p>
+    </section>
+
+    <section>
+      <h2>Photo Inbox</h2>
+      <table>
+        <thead><tr><th>ID</th><th>File</th><th>Status</th><th>Uploaded</th></tr></thead>
+        <tbody id="photoRows"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Review Queue</h2>
+      <table>
+        <thead><tr><th>Issue</th><th>Severity</th><th>Suggested</th><th>Status</th></tr></thead>
+        <tbody id="reviewRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
+      <h2>Export Readiness</h2>
+      <p id="exportPreview"></p>
+    </section>
+  </main>
+
+  <script>
+    async function api(path, options) {
+      const response = await fetch(path, options);
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || response.statusText);
+      }
+      return response.json();
+    }
+
+    function text(value) {
+      return String(value ?? "");
+    }
+
+    function row(cells) {
+      return `<tr>${cells.map((cell) => `<td>${text(cell).replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[ch]))}</td>`).join("")}</tr>`;
+    }
+
+    async function refresh() {
+      const [health, photos, reviews, preview] = await Promise.all([
+        api("/api/health"),
+        api("/api/photos"),
+        api("/api/review-items"),
+        api("/api/export-preview")
+      ]);
+
+      document.getElementById("health").textContent = health.storage;
+      document.getElementById("photoRows").innerHTML = photos.map((photo) =>
+        row([photo.photo_id, photo.original_filename, photo.status, photo.uploaded_at])
+      ).join("") || row(["No photos yet", "", "", ""]);
+      document.getElementById("reviewRows").innerHTML = reviews.map((item) =>
+        row([item.issue, item.severity, item.suggested_value, item.status])
+      ).join("") || row(["No review items", "", "", ""]);
+      document.getElementById("exportPreview").textContent =
+        `Photos: ${preview.photos}. Parsed results: ${preview.parsed_results}. ` +
+        `Blocked review items: ${preview.blocked_review_items}. Ready: ${preview.ready ? "yes" : "no"}.`;
+    }
+
+    document.getElementById("uploadButton").addEventListener("click", async () => {
+      const file = document.getElementById("photoFile").files[0];
+      if (!file) {
+        document.getElementById("uploadMessage").textContent = "Choose a photo first.";
+        return;
+      }
+      const form = new FormData();
+      form.append("file", file);
+      const result = await api("/api/photos", { method: "POST", body: form });
+      document.getElementById("uploadMessage").textContent = `Stored ${result.original_filename}.`;
+      document.getElementById("photoFile").value = "";
+      await refresh();
+    });
+
+    document.getElementById("fixtureButton").addEventListener("click", async () => {
+      const result = await api("/api/fixtures/import-sample", { method: "POST" });
+      document.getElementById("fixtureMessage").textContent =
+        `Imported ${result.imported_parse_results} parsed records; ` +
+        `${result.created_or_updated_review_items} review items open.`;
+      await refresh();
+    });
+
+    refresh().catch((error) => {
+      document.getElementById("health").textContent = "error";
+      document.getElementById("health").classList.add("warn");
+      console.error(error);
+    });
+  </script>
+</body>
+</html>
