@@ -78,6 +78,40 @@
       ]
     },
     {
+      "id": "FIXTURE-AUTO-MATING",
+      "uploaded": "Fixture import",
+      "type": "Mating",
+      "rawStrain": "ApoM Tg/Tg",
+      "matchedStrain": "ApoM Tg/Tg",
+      "dobRaw": "25.10.20",
+      "dobNormalized": "2025-10-20",
+      "mouseCount": "Sire MT321 / Dam MT322",
+      "confidence": 94,
+      "status": "auto",
+      "issue": "Fixture auto-filled by policy",
+      "severity": "Low",
+      "reviewField": "matchedStrain",
+      "currentValue": "ApoM Tg/Tg",
+      "suggestedValue": "ApoM Tg/Tg",
+      "reviewReason": "Fixture represents an accepted mating block for animalsheet preview.",
+      "notes": [
+        {
+          "raw": "26.04.13 - 10p",
+          "meaning": "Litter event, 10 pups",
+          "strike": "none"
+        },
+        {
+          "raw": "MT321 x MT322",
+          "meaning": "Parent IDs on mating card",
+          "strike": "none"
+        }
+      ],
+      "actions": [
+        "Create accepted mating block from parsed fixture.",
+        "Expose litter note evidence in animalsheet-style preview."
+      ]
+    },
+    {
       "id": "FIXTURE-COUNT-MISMATCH",
       "uploaded": "Fixture import",
       "type": "Separated",

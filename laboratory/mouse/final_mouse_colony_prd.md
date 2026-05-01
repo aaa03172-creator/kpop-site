@@ -605,6 +605,8 @@ Fields:
 
 The user uploads photos from phone or PC. Direct in-animal-room app use is not required for MVP.
 
+Batch upload should be a first-class path because the user will often upload many cage card/name tag photos at once after animal-room work. Each upload batch should have a `batch_id`, preserve per-photo source evidence, and show per-batch progress across processing, review, accepted, and blocked states. A failed or low-confidence photo in a batch must not prevent the rest of the batch from being stored, parsed, reviewed, or exported when ready.
+
 ### 9.2 Image Quality Check
 
 The system should check:
@@ -632,7 +634,13 @@ Because cage cards have a consistent layout, parsing should use regions of inter
 
 This should be more accurate than treating the whole card as one OCR block.
 
-### 9.4 Card Type Classification
+### 9.4 LLM-Optional Parse Assist
+
+The core parsing pipeline should not require an LLM. MVP should work with local/manual inputs, OCR or fixture text, configurable masters, deterministic parsing, validation, review, and export previews.
+
+An LLM may be added later as an approval-gated Parse Assist for ambiguous note lines, card-type suggestions, or review explanations. LLM output remains parsed/intermediate data and must not silently create canonical records, new strains, genotype categories, or biological state changes. External LLM use must minimize payloads and avoid sending unnecessary full colony records.
+
+### 9.5 Card Type Classification
 
 The system classifies the card:
 
@@ -649,7 +657,7 @@ Signals:
 - note lines look like dates/pup counts,
 - note lines look like mouse IDs/ear labels.
 
-### 9.5 Note Line Parsing
+### 9.6 Note Line Parsing
 
 Each note line should be:
 
@@ -746,6 +754,8 @@ If the same mouse appears active in multiple current card records:
 
 - create high-severity review item,
 - suggest moved event if previous card line was single-struck,
+- require a dedicated movement resolution with evidence before accepting the duplicate-active source,
+- preserve the previous active state and reviewed after state in the action log,
 - block or flag dead-to-active contradictions.
 
 ### 11.4 Date Logic
@@ -824,7 +834,7 @@ If a mouse that was previously in a separated cage appears as a parent in a mati
 
 1. User writes cage card by hand as usual.
 2. User takes photos.
-3. User uploads photos later from phone or PC.
+3. User uploads one or many photos later from phone or PC.
 4. System stores photo and performs quality checks.
 5. System parses ROI fields and note lines.
 6. System auto-fills records.
@@ -891,6 +901,40 @@ These outputs should be generated from structured records. They should not be th
 
 Current lab examples use `animal sheet.xlsx` for mating cage status and `분리 현황표.xlsx` for separated cage status. Existing lab workbooks can be imported as previous snapshots or template references. They should be reconciled against photo-backed records and must not silently overwrite newer accepted source-photo-derived state.
 
+Before generating a file, the web app should show workbook-like previews for both output types so the user can inspect the current accepted rows, blocked review items, and traceability without opening Excel.
+
+The user may manage multiple assigned strains at the same time. Export previews and downloads should therefore be grouped or filtered by selected strain, and the selected strain must be visible before download because it is part of the required filename.
+
+### 15.1.1 Template Mapping From Current Lab Examples
+
+The current ApoM TgTg examples map to the following output shapes:
+
+| Output | Template columns | Source records |
+| --- | --- | --- |
+| `animal sheet.xlsx` | `Cage No.`, `Strain`, `Sex`, `I.D`, `genotype`, `DOB`, `Mating date`, `Pubs` plus optional right-side template notes | Accepted mating card snapshots, parent mouse IDs, mating date, and litter note events |
+| `분리 현황표.xlsx` | `Strain`, `Genotype`, `total`, `DOB`, `Genotype` split into `WT` / `Tg`, optional blank spacer, `Sampling point` | Accepted separated/stock card snapshots, sex/count, DOB, configured genotype counts, and sampling or age-rule notes |
+
+For `animal sheet.xlsx`, a mating cage should render as a block:
+
+- parent rows for sire/dam IDs;
+- litter rows such as `F1`, `F2`, with pup count/status in `I.D` or `genotype` and litter DOB in `DOB`;
+- `Pubs` values for open litter notes where applicable.
+
+For `분리 현황표.xlsx`, separated cages should render one summary row per accepted separated/stock card snapshot, with sex/count in `total` and genotype count columns derived from accepted genotype state or left blank/pending when not yet reviewed.
+
+### 15.1.2 Multi-Strain Senior Workbook Findings
+
+The senior-provided examples show that the system must support more than one template layout and more than one strain per operational file:
+
+- `(수의대) animalsheet 김상보 24.10.31.xlsx` has strain-like sheet tabs such as `GFAP Cre; S1PR1 flox`, `GFAP Cre; S1PR1 flox; td tomato`, and `ptgs2 S565A flox`.
+- `분리.xlsx` has researcher/person tabs, with multiple strain blocks inside many tabs.
+- Header naming varies across sheets (`SEX`, `Sex`, `Total`, `성별 및 총 마리수`, `genotyping 결과`, `비고`, `place`, usage/status columns).
+- Some sheets use merged cells to mark strain blocks; others repeat or leave strain blank until the next block.
+
+Implementation consequence: imported Excel rows should be preserved as raw source rows first, then mapped through configurable export templates and strain aliases. The app must not assume one global ApoM-style output, one sheet per workbook, or a single genotype split such as `WT`/`Tg` for every strain.
+
+For MVP exports, it is acceptable to generate one selected-strain workbook at a time using the current selected preview. Later versions may support batch download of one file per strain.
+
 ### 15.2 Separation Output
 
 Should summarize by card snapshot:
@@ -922,7 +966,7 @@ Should summarize:
 
 Every export should be logged with date, type, and file path.
 
-Exports are generated on demand by the user, not automatically on a monthly schedule. The expected filename pattern is:
+Exports are generated on demand by the user, not automatically on a monthly schedule. The web app should support direct `.xlsx` downloads for both current workbook previews and show the expected filenames before the user downloads. The expected filename pattern is:
 
 - `{update_date} {strain} animal sheet.xlsx`
 - `{update_date} {strain} 분리 현황표.xlsx`
@@ -953,11 +997,11 @@ Must include:
 
 Parsing can be semi-automated at first:
 
-- AI suggests parsed fields,
+- local/manual input, fixture text, or OCR suggests parsed fields,
 - auto-fill normal values,
 - review only uncertain/conflicting cases.
 
-Perfect OCR is not required for MVP, but source photo and confidence must always be preserved.
+Perfect OCR is not required for MVP, and an LLM is not required for MVP. Source photo and confidence must always be preserved.
 
 ### 16.3 Out Of Scope For MVP
 
