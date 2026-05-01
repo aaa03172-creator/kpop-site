@@ -258,8 +258,9 @@ Design principle:
 Adopt:
 
 - Strain Master.
+- My Assigned Strains as the user's active matching scope.
 - Strain Alias Master.
-- Distribution Import Master for periodic assignment workbooks.
+- Distribution Import as an occasional helper for assignment changes.
 - Genotype Category Master.
 - Management Rule Master.
 - Card Type Rules.
@@ -269,7 +270,7 @@ UX guidance:
 
 - Unknown parsed values should create review items.
 - Adding a new strain/genotype/rule should feel deliberate, not automatic.
-- Periodic distribution workbooks should update assignment scope and candidate strain suggestions, not overwrite accepted cage/card state.
+- Periodic distribution workbooks should help update My Assigned Strains when assignments change, not overwrite accepted cage/card state.
 
 ## External References Worth Evaluating
 
