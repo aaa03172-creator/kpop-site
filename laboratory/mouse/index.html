@@ -1,0 +1,2432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mouse Colony LIMS - Photo Inbox</title>
+  <style>
+    :root {
+      --background: #f8f9ff;
+      --surface: #ffffff;
+      --surface-low: #eff4ff;
+      --surface-mid: #e5eeff;
+      --surface-high: #dce9ff;
+      --line: #bec8ca;
+      --line-soft: #dbe3e5;
+      --ink: #0b1c30;
+      --muted: #3e494a;
+      --quiet: #6f797a;
+      --primary: #00535b;
+      --primary-2: #006d77;
+      --secondary: #236863;
+      --secondary-bg: #a9ece5;
+      --tertiary: #713d10;
+      --tertiary-bg: #ffdcc5;
+      --error: #ba1a1a;
+      --error-bg: #ffdad6;
+      --shadow: 0 12px 30px rgba(11, 28, 48, 0.08);
+      --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      background: var(--background);
+      color: var(--ink);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+      height: 100vh;
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+      background: #f8fafc;
+      min-width: 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 56px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      background: var(--primary);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .brand-title {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .brand-title strong {
+      font-size: 15px;
+      line-height: 18px;
+    }
+
+    .brand-title span {
+      color: var(--quiet);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .nav {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 4px;
+      padding: 14px 10px;
+      overflow-y: auto;
+    }
+
+    .nav-button {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      min-height: 36px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: #526166;
+      padding: 8px 10px;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .nav-button:hover {
+      background: #eef3f6;
+      color: var(--primary);
+    }
+
+    .nav-button.active {
+      background: #e8f4f3;
+      color: var(--primary);
+      box-shadow: inset 3px 0 0 var(--primary);
+    }
+
+    .nav-icon {
+      display: grid;
+      place-items: center;
+      width: 20px;
+      height: 20px;
+      border: 1px solid currentColor;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .sidebar-footer {
+      border-top: 1px solid var(--line-soft);
+      padding: 14px 18px;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      height: 100vh;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      height: 56px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      padding: 0 20px;
+      flex-shrink: 0;
+    }
+
+    .search {
+      position: relative;
+      width: min(420px, 42vw);
+    }
+
+    .search input {
+      width: 100%;
+      height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface-low);
+      padding: 0 12px 0 34px;
+      color: var(--ink);
+      outline: none;
+    }
+
+    .search::before {
+      content: "";
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      width: 11px;
+      height: 11px;
+      border: 2px solid var(--quiet);
+      border-radius: 999px;
+      transform: translateY(-58%);
+    }
+
+    .search::after {
+      content: "";
+      position: absolute;
+      left: 23px;
+      top: 20px;
+      width: 7px;
+      height: 2px;
+      border-radius: 2px;
+      background: var(--quiet);
+      transform: rotate(45deg);
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mobile-nav {
+      display: none;
+      align-items: center;
+      gap: 4px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      padding: 6px 8px;
+    }
+
+    .icon-button,
+    .small-button,
+    .primary-button,
+    .ghost-button,
+    .danger-button {
+      min-height: 32px;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      font-weight: 800;
+    }
+
+    .icon-button {
+      width: 32px;
+      padding: 0;
+    }
+
+    .small-button,
+    .primary-button,
+    .ghost-button,
+    .danger-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 12px;
+      font-size: 12px;
+    }
+
+    .primary-button {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .ghost-button {
+      color: var(--primary);
+    }
+
+    .danger-button {
+      border-color: #efb6b1;
+      color: var(--error);
+    }
+
+    .workspace {
+      display: flex;
+      min-height: 0;
+      flex: 1;
+    }
+
+    .content {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--background);
+      flex-shrink: 0;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 24px;
+      line-height: 32px;
+      letter-spacing: 0;
+    }
+
+    .page-header p {
+      margin-top: 3px;
+      color: var(--muted);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      gap: 10px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--background);
+      flex-shrink: 0;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      padding: 10px 12px;
+      min-width: 0;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--quiet);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 22px;
+      line-height: 26px;
+    }
+
+    .metric.review {
+      border-left: 4px solid var(--tertiary);
+    }
+
+    .metric.conflict {
+      border-left: 4px solid var(--error);
+    }
+
+    .metric.valid {
+      border-left: 4px solid var(--secondary);
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+
+    .quick-start {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+      gap: 12px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdff;
+      flex-shrink: 0;
+    }
+
+    .quick-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 6px;
+      background: var(--surface);
+      padding: 10px 12px;
+      min-width: 0;
+    }
+
+    .quick-card strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .quick-card span {
+      display: block;
+      margin-top: 2px;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .filters {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .filters select {
+      height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface);
+      padding: 0 28px 0 9px;
+      color: var(--ink);
+      outline: none;
+    }
+
+    .table-wrap {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      background: var(--surface);
+    }
+
+    table {
+      width: 100%;
+      min-width: 980px;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-low);
+      color: var(--muted);
+      padding: 9px 10px;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 8px 10px;
+      vertical-align: middle;
+      font-size: 13px;
+    }
+
+    tr {
+      cursor: pointer;
+    }
+
+    tbody tr:hover {
+      background: #f7fbff;
+    }
+
+    tbody tr.selected {
+      background: var(--surface-mid);
+      box-shadow: inset 3px 0 0 var(--primary);
+    }
+
+    .thumb {
+      position: relative;
+      width: 42px;
+      height: 32px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background:
+        repeating-linear-gradient(0deg, transparent 0 8px, rgba(49, 95, 157, 0.14) 9px 10px),
+        #fdfefe;
+    }
+
+    .thumb::before {
+      content: "";
+      position: absolute;
+      top: 6px;
+      left: 7px;
+      width: 27px;
+      height: 4px;
+      background: rgba(11, 28, 48, 0.32);
+      box-shadow: 0 9px 0 rgba(11, 28, 48, 0.22), 0 18px 0 rgba(11, 28, 48, 0.18);
+      transform: rotate(-3deg);
+    }
+
+    .thumb.has-photo {
+      background: #fdfefe;
+    }
+
+    .thumb.has-photo::before {
+      display: none;
+    }
+
+    .thumb img,
+    .source-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .mono {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    .muted {
+      color: var(--quiet);
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .status.auto {
+      background: #dff4ef;
+      color: #145248;
+    }
+
+    .status.review {
+      background: var(--tertiary-bg);
+      color: var(--tertiary);
+    }
+
+    .status.conflict {
+      background: var(--error-bg);
+      color: var(--error);
+    }
+
+    .status.processing {
+      background: var(--surface-high);
+      color: var(--muted);
+    }
+
+    .status.dismissed {
+      background: #edf0f1;
+      color: var(--quiet);
+    }
+
+    .layer-chip {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-height: 20px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface-low);
+      color: var(--muted);
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .confidence {
+      font-weight: 900;
+    }
+
+    .confidence.good {
+      color: var(--secondary);
+    }
+
+    .confidence.warn {
+      color: var(--tertiary);
+    }
+
+    .confidence.bad {
+      color: var(--error);
+    }
+
+    .drawer {
+      display: flex;
+      flex-direction: column;
+      width: 430px;
+      border-left: 1px solid var(--line);
+      background: var(--surface);
+      box-shadow: -8px 0 28px rgba(11, 28, 48, 0.04);
+      flex-shrink: 0;
+    }
+
+    .drawer-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdff;
+    }
+
+    .drawer-title {
+      display: grid;
+      gap: 5px;
+    }
+
+    .drawer-title h2 {
+      font-size: 18px;
+      line-height: 24px;
+    }
+
+    .drawer-title .meta {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .drawer-body {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-low);
+      padding: 9px 10px;
+    }
+
+    .panel-title h3 {
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .panel-body {
+      padding: 12px;
+    }
+
+    .card-image {
+      position: relative;
+      min-height: 252px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background:
+        linear-gradient(#dce9ff 0 0) 0 0 / 100% 38px no-repeat,
+        repeating-linear-gradient(0deg, transparent 0 34px, rgba(0, 83, 91, 0.14) 35px 36px),
+        #fff;
+      padding: 50px 16px 14px;
+      box-shadow: 0 8px 20px rgba(11, 28, 48, 0.08);
+    }
+
+    .card-image.has-photo {
+      display: grid;
+      gap: 10px;
+      padding: 50px 16px 14px;
+    }
+
+    .card-image::before {
+      content: "RAW SOURCE PHOTO";
+      position: absolute;
+      top: 12px;
+      left: 16px;
+      color: var(--primary);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.07em;
+    }
+
+    .source-preview {
+      height: 168px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #f8fafc;
+    }
+
+    .photo-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(0, 83, 91, 0.12);
+      font-size: 13px;
+    }
+
+    .photo-line span {
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    .roi {
+      position: relative;
+      border: 2px solid var(--tertiary);
+      background: rgba(255, 220, 197, 0.45);
+      border-radius: 3px;
+      padding: 1px 5px;
+    }
+
+    .roi::after {
+      content: attr(data-roi);
+      position: absolute;
+      left: 0;
+      top: -18px;
+      border-radius: 2px;
+      background: var(--tertiary);
+      color: #fff;
+      padding: 1px 4px;
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .field-grid {
+      display: grid;
+      gap: 8px;
+    }
+
+    .field-card {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--line);
+      border-radius: 4px;
+      padding: 9px;
+      background: #fff;
+    }
+
+    .field-card.review {
+      border-left-color: var(--tertiary);
+      background: #fffbf4;
+    }
+
+    .field-card.conflict {
+      border-left-color: var(--error);
+      background: #fff7f7;
+    }
+
+    .field-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .field-values {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 7px;
+    }
+
+    .value-box {
+      border: 1px solid var(--line-soft);
+      border-radius: 4px;
+      background: var(--surface);
+      padding: 7px;
+      min-width: 0;
+    }
+
+    .value-box span {
+      display: block;
+      color: var(--quiet);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .value-box strong,
+    .value-box input {
+      display: block;
+      width: 100%;
+      margin-top: 3px;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 800;
+      outline: none;
+    }
+
+    .review-box {
+      display: grid;
+      gap: 10px;
+      border: 1px solid #e6b9a7;
+      border-radius: 6px;
+      background: #fff8f5;
+      padding: 12px;
+    }
+
+    .review-box strong {
+      color: var(--error);
+    }
+
+    .before-after {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .reason-box {
+      display: grid;
+      gap: 4px;
+    }
+
+    .reason-box textarea {
+      min-height: 58px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      padding: 7px 8px;
+      color: var(--ink);
+      outline: none;
+    }
+
+    .mini-label {
+      color: var(--quiet);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .note-list,
+    .log-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .note-list li,
+    .log-list li {
+      display: grid;
+      gap: 3px;
+      border: 1px solid var(--line-soft);
+      border-radius: 4px;
+      background: #fff;
+      padding: 8px;
+      font-size: 12px;
+    }
+
+    .drawer-footer {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--line);
+      background: #fbfdff;
+    }
+
+    .drawer-footer button {
+      flex: 1;
+    }
+
+    .view {
+      display: none;
+    }
+
+    .view.active {
+      display: flex;
+    }
+
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 30;
+      max-width: 360px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--secondary);
+      border-radius: 6px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 12px 14px;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 160ms ease, transform 160ms ease;
+      pointer-events: none;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .hidden-file {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      clip-path: inset(50%);
+    }
+
+    @media (max-width: 1100px) {
+      .app {
+        grid-template-columns: 72px minmax(0, 1fr);
+      }
+
+      .brand-title,
+      .nav-button span:last-child,
+      .sidebar-footer {
+        display: none;
+      }
+
+      .brand {
+        justify-content: center;
+        padding: 0;
+      }
+
+      .nav-button {
+        justify-content: center;
+      }
+
+      .drawer {
+        width: 390px;
+      }
+
+      .metrics {
+        grid-template-columns: repeat(3, minmax(120px, 1fr));
+      }
+    }
+
+    @media (max-width: 840px) {
+      body {
+        overflow: auto;
+      }
+
+      .app {
+        display: block;
+        height: auto;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .main {
+        height: auto;
+        min-height: 100vh;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+      }
+
+      .mobile-nav {
+        display: flex;
+        position: sticky;
+        top: 56px;
+        z-index: 19;
+      }
+
+      .mobile-nav .nav-button {
+        width: auto;
+        min-width: max-content;
+        justify-content: flex-start;
+        padding: 7px 9px;
+      }
+
+      .mobile-nav .nav-button span:last-child {
+        display: inline;
+      }
+
+      .workspace,
+      .view.active {
+        display: block;
+      }
+
+      .content {
+        min-height: auto;
+        overflow: visible;
+      }
+
+      .drawer {
+        width: auto;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .table-wrap {
+        max-height: 420px;
+      }
+
+      .metrics {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+      }
+
+      .quick-start {
+        grid-template-columns: 1fr;
+      }
+
+      .search {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Main navigation">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">LC</div>
+        <div class="brand-title">
+          <strong>LabCentral</strong>
+          <span>Mouse Colony LIMS</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-button active" data-view="inbox" type="button"><span class="nav-icon">P</span><span>Photo Inbox</span></button>
+        <button class="nav-button" data-view="review" type="button"><span class="nav-icon">R</span><span>Review Queue</span></button>
+        <button class="nav-button" data-view="records" type="button"><span class="nav-icon">M</span><span>Colony Records</span></button>
+        <button class="nav-button" data-view="exports" type="button"><span class="nav-icon">X</span><span>Exports</span></button>
+        <button class="nav-button" data-view="settings" type="button"><span class="nav-icon">S</span><span>Settings</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        Raw photos remain evidence. Excel remains an export view.
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="search">
+          <input id="searchInput" type="search" placeholder="Search photos, mouse IDs, raw text...">
+        </div>
+        <div class="top-actions">
+          <button class="small-button" type="button" id="designLink">Design Notes</button>
+          <button class="small-button" type="button" id="refsLink">Reference Notes</button>
+          <button class="small-button" type="button" id="sliceLink">MVP Slice</button>
+          <button class="small-button" type="button" id="prdLink">PRD</button>
+          <button class="small-button" type="button" id="loadSampleButton">Load Sample Fixture</button>
+          <button class="small-button" type="button" id="importParseButton">Import Parse JSON</button>
+          <button class="small-button" type="button" id="resetSessionButton">Reset Local</button>
+          <button class="primary-button" type="button" id="uploadButton">Upload Photos</button>
+          <input class="hidden-file" id="photoInput" type="file" accept="image/*" multiple>
+          <input class="hidden-file" id="parseInput" type="file" accept="application/json,.json">
+        </div>
+      </header>
+
+      <nav class="mobile-nav" aria-label="Mobile navigation">
+        <button class="nav-button active" data-view="inbox" type="button"><span class="nav-icon">P</span><span>Photo Inbox</span></button>
+        <button class="nav-button" data-view="review" type="button"><span class="nav-icon">R</span><span>Review</span></button>
+        <button class="nav-button" data-view="records" type="button"><span class="nav-icon">M</span><span>Records</span></button>
+        <button class="nav-button" data-view="exports" type="button"><span class="nav-icon">X</span><span>Exports</span></button>
+        <button class="nav-button" data-view="settings" type="button"><span class="nav-icon">S</span><span>Settings</span></button>
+      </nav>
+
+      <main class="workspace">
+        <section class="content view active" id="inboxView" aria-label="Photo Inbox">
+          <div class="page-header">
+            <div>
+              <h1>Photo Inbox</h1>
+              <p>Review parsed cage card photos while keeping raw values, normalized values, and evidence separate.</p>
+            </div>
+            <span class="layer-chip">Raw source + parsed result</span>
+          </div>
+
+          <div class="metrics" id="metrics"></div>
+
+          <div class="toolbar">
+            <div class="filters">
+              <select id="statusFilter" aria-label="Status filter">
+                <option value="all">All statuses</option>
+                <option value="review">Needs Review</option>
+                <option value="conflict">Conflict</option>
+                <option value="auto">Auto-filled</option>
+                <option value="processing">Processing</option>
+                <option value="dismissed">Dismissed</option>
+              </select>
+              <select id="typeFilter" aria-label="Card type filter">
+                <option value="all">All card types</option>
+                <option value="Separated">Separated</option>
+                <option value="Mating">Mating</option>
+                <option value="Genotyping">Genotyping</option>
+              </select>
+            </div>
+            <span class="muted" id="resultCount"></span>
+          </div>
+
+          <div class="quick-start" aria-label="Quick workflow actions">
+            <div class="quick-card">
+              <div>
+                <strong>Fastest test path</strong>
+                <span>Load fixture parse results, open review, apply a correction, then check export blocks.</span>
+              </div>
+              <button class="small-button" type="button" id="loadSampleInline">Load Sample</button>
+            </div>
+            <div class="quick-card">
+              <div>
+                <strong>Boundary check</strong>
+                <span>Imported JSON stays parsed/intermediate until review or explicit auto-fill policy.</span>
+              </div>
+              <span class="layer-chip">Non-canonical</span>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table aria-label="Parsed photo inbox">
+              <thead>
+                <tr>
+                  <th>Photo</th>
+                  <th>Uploaded</th>
+                  <th>Card Type</th>
+                  <th>Raw Strain</th>
+                  <th>Matched Strain</th>
+                  <th>DOB</th>
+                  <th>Mouse / Count</th>
+                  <th>Confidence</th>
+                  <th>Status</th>
+                  <th>Issue</th>
+                </tr>
+              </thead>
+              <tbody id="inboxRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="content view" id="reviewView" aria-label="Review Queue">
+          <div class="page-header">
+            <div>
+              <h1>Review Queue</h1>
+              <p>Resolve low-confidence, conflicting, or biologically unlikely parsed values with source evidence in view.</p>
+            </div>
+            <span class="layer-chip">Review item</span>
+          </div>
+          <div class="toolbar">
+            <strong id="reviewSummary">0 pending review items</strong>
+            <span class="muted" id="reviewImpact">0 exports blocked</span>
+            <button class="small-button" type="button" id="jumpFirstReview">Open first pending item</button>
+          </div>
+          <div class="table-wrap">
+            <table aria-label="Review queue">
+              <thead>
+                <tr>
+                  <th>Severity</th>
+                  <th>Issue Type</th>
+                  <th>Source</th>
+                  <th>Current Value</th>
+                  <th>Suggested Value</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="reviewRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="content view" id="recordsView" aria-label="Colony Records">
+          <div class="page-header">
+            <div>
+              <h1>Colony Records</h1>
+              <p>Canonical mouse state stays traceable to source photos, parsed note lines, and accepted actions.</p>
+            </div>
+            <span class="layer-chip">Canonical structured state</span>
+          </div>
+          <div class="table-wrap">
+            <table aria-label="Canonical mouse records">
+              <thead>
+                <tr>
+                  <th>Mouse ID</th>
+                  <th>Strain</th>
+                  <th>Sex</th>
+                  <th>DOB</th>
+                  <th>Genotype</th>
+                  <th>Status</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody id="recordRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="content view" id="exportsView" aria-label="Exports">
+          <div class="page-header">
+            <div>
+              <h1>Export Center</h1>
+              <p>Export readiness updates after accepted uploads and reviews. Excel workbooks are generated on demand from structured records, never the only source of truth.</p>
+            </div>
+            <span class="layer-chip">Export or view</span>
+          </div>
+          <div class="metrics">
+            <article class="metric valid"><span>Separation workbook</span><strong>Ready</strong></article>
+            <article class="metric review"><span>Animalsheet</span><strong>2 blocks</strong></article>
+            <article class="metric conflict"><span>Blocked exports</span><strong id="blockedExports">0</strong></article>
+          </div>
+          <div class="toolbar">
+            <button class="primary-button" type="button" id="generateExport">Generate Separation CSV</button>
+            <button class="small-button" type="button" id="previewAnimalsheet">Preview Animalsheet</button>
+          </div>
+          <div class="table-wrap">
+            <table aria-label="Export preview">
+              <thead>
+                <tr>
+                  <th>Export View</th>
+                  <th>Source Layer</th>
+                  <th>Included Rows</th>
+                  <th>Blocked Rows</th>
+                  <th>Traceability</th>
+                </tr>
+              </thead>
+              <tbody id="exportRows"></tbody>
+            </table>
+            <table aria-label="Export attempt log">
+              <thead>
+                <tr>
+                  <th>Attempt</th>
+                  <th>View</th>
+                  <th>Included</th>
+                  <th>Blocked</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody id="exportLogRows"></tbody>
+            </table>
+            <table aria-label="Blocked export rows">
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Issue</th>
+                  <th>Current Value</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody id="blockedExportRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="content view" id="settingsView" aria-label="Settings">
+          <div class="page-header">
+            <div>
+              <h1>Settings</h1>
+              <p>Configurable masters prevent strain names, genotype categories, protocols, and date rules from being hard-coded.</p>
+            </div>
+            <span class="layer-chip">Canonical configuration state</span>
+          </div>
+          <div class="table-wrap">
+            <table aria-label="Strain alias examples">
+              <thead>
+                <tr>
+                  <th>Master</th>
+                  <th>Example Entry</th>
+                  <th>Purpose</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>Strain Master</td><td class="mono">Configured strain</td><td>Allowed target for raw strain matching.</td></tr>
+                <tr><td>OCR Alias</td><td class="mono">Raw handwritten text</td><td>Maps repeated OCR variants to a configured strain.</td></tr>
+                <tr><td>Genotype Categories</td><td class="mono">Configured category</td><td>Blocks unexpected genotype values until review.</td></tr>
+                <tr><td>Management Rules</td><td class="mono">Min/max age days</td><td>Creates warnings without hard-coded date rules.</td></tr>
+                <tr><td>External Inference Policy</td><td class="mono">Local-only by default</td><td>Blocks external OCR or LLM payloads until approved.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <aside class="drawer" aria-label="Selected photo evidence and review">
+          <div class="drawer-header">
+            <div class="drawer-title">
+              <span class="layer-chip" id="drawerLayer">Raw source</span>
+              <h2 id="drawerTitle">Card Snapshot</h2>
+              <div class="meta" id="drawerMeta"></div>
+            </div>
+            <button class="icon-button" type="button" id="nextItem" aria-label="Next item">Next</button>
+          </div>
+
+          <div class="drawer-body">
+            <section class="panel">
+              <div class="panel-title">
+                <h3>Source Photo</h3>
+                <span class="layer-chip">Raw source</span>
+              </div>
+              <div class="panel-body">
+                <div class="card-image" id="cardImage"></div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>Extracted Fields</h3>
+                <span class="layer-chip">Parsed result</span>
+              </div>
+              <div class="panel-body">
+                <div class="field-grid" id="fieldCards"></div>
+              </div>
+            </section>
+
+            <section class="review-box" id="reviewBox">
+              <div>
+                <div class="mini-label">Review item</div>
+                <strong id="reviewIssue">No review needed</strong>
+                <p class="muted" id="reviewReason"></p>
+              </div>
+              <div class="before-after">
+                <div class="value-box">
+                  <span>Before</span>
+                  <strong id="beforeValue">--</strong>
+                </div>
+                <div class="value-box">
+                  <span>After</span>
+                  <input id="afterValue" type="text" value="">
+                </div>
+              </div>
+              <div class="reason-box">
+                <span class="mini-label">Dismiss reason</span>
+                <textarea id="dismissReason" placeholder="Required when dismissing a review item"></textarea>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>Parsed Note Lines</h3>
+                <span class="layer-chip">Structured evidence</span>
+              </div>
+              <div class="panel-body">
+                <ul class="note-list" id="noteList"></ul>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>Action Log Preview</h3>
+                <span class="layer-chip">Traceability</span>
+              </div>
+              <div class="panel-body">
+                <ul class="log-list" id="actionLog"></ul>
+              </div>
+            </section>
+          </div>
+
+          <div class="drawer-footer">
+            <button class="ghost-button" type="button" id="dismissButton">Dismiss With Reason</button>
+            <button class="primary-button" type="button" id="applyButton">Apply Reviewed Changes</button>
+          </div>
+        </aside>
+      </main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const photos = [
+      {
+        id: "IMG-8924",
+        uploaded: "Today 10:42",
+        type: "Separated",
+        rawStrain: "ApoM Tg/Tg",
+        matchedStrain: "ApoM Tg/Tg",
+        dobRaw: "25.10.20-28",
+        dobNormalized: "2025-10-20 to 2025-10-28",
+        mouseCount: "2 active / 2",
+        confidence: 96,
+        status: "auto",
+        issue: "None",
+        severity: "Low",
+        reviewField: "matchedStrain",
+        currentValue: "ApoM Tg/Tg",
+        suggestedValue: "ApoM Tg/Tg",
+        reviewReason: "High-confidence match to configured strain alias.",
+        notes: [
+          { raw: "MT318 R'", meaning: "Mouse MT318, right ear notch", strike: "none" },
+          { raw: "MT319 L'", meaning: "Mouse MT319, left ear notch", strike: "none" },
+          { raw: "MT320 R'L'", meaning: "Mouse MT320, both ears notched; moved out on reviewed card", strike: "single" }
+        ],
+        actions: [
+          "Create or update card snapshot from source photo.",
+          "Attach note lines as structured evidence.",
+          "Create active mouse records if IDs do not already exist."
+        ]
+      },
+      {
+        id: "IMG-8925",
+        uploaded: "Today 09:15",
+        type: "Separated",
+        rawStrain: "B6.Cg-Tg",
+        matchedStrain: "B6.Cg-Tg?",
+        dobRaw: "26.04.13",
+        dobNormalized: "2026-04-13",
+        mouseCount: "4 total",
+        confidence: 68,
+        status: "review",
+        issue: "Unknown strain alias",
+        severity: "Medium",
+        reviewField: "matchedStrain",
+        currentValue: "B6.Cg-Tg?",
+        suggestedValue: "Review against Strain Master",
+        reviewReason: "Raw strain text does not confidently match a configured strain or confirmed alias.",
+        notes: [
+          { raw: "318 R'", meaning: "Possible mouse ID 318, right ear notch", strike: "none" },
+          { raw: "319 L'", meaning: "Possible mouse ID 319, left ear notch", strike: "none" },
+          { raw: "320 R'L'", meaning: "Possible mouse ID 320, both ears notched", strike: "none" }
+        ],
+        actions: [
+          "Keep raw strain text.",
+          "Create review item before accepting normalized strain.",
+          "Do not create new strain automatically."
+        ]
+      },
+      {
+        id: "IMG-8926",
+        uploaded: "Yesterday 16:20",
+        type: "Mating",
+        rawStrain: "GH line",
+        matchedStrain: "GH line",
+        dobRaw: "25.12.01",
+        dobNormalized: "2025-12-01",
+        mouseCount: "Sire GH70 / Dam GH83",
+        confidence: 81,
+        status: "conflict",
+        issue: "Duplicate active mouse",
+        severity: "High",
+        reviewField: "mouseId",
+        currentValue: "GH70 active in Card Snapshot #41",
+        suggestedValue: "Assign GH70 to mating after reviewed move",
+        reviewReason: "Mouse GH70 appears active in another current card snapshot. Movement needs reviewed before/after state.",
+        notes: [
+          { raw: "26.04.13 - 10p", meaning: "Litter event, 10 pups", strike: "none" },
+          { raw: "GH70 x GH83", meaning: "Parent IDs on mating card", strike: "none" }
+        ],
+        actions: [
+          "Create high-severity review item.",
+          "Require reviewed movement action before mating assignment.",
+          "Link event to source photo and note line."
+        ]
+      },
+      {
+        id: "IMG-8927",
+        uploaded: "Yesterday 11:08",
+        type: "Genotyping",
+        rawStrain: "ApoM",
+        matchedStrain: "ApoM Tg/Tg",
+        dobRaw: "--",
+        dobNormalized: "--",
+        mouseCount: "Sample 14 / MT319",
+        confidence: 74,
+        status: "review",
+        issue: "Genotype outside configured category",
+        severity: "Medium",
+        reviewField: "genotype",
+        currentValue: "Tg?",
+        suggestedValue: "Add category or correct result",
+        reviewReason: "Parsed genotype result is not in the configured genotype categories for the matched strain.",
+        notes: [
+          { raw: "Sample 14 MT319 Tg?", meaning: "Uncertain genotype result", strike: "none" }
+        ],
+        actions: [
+          "Keep raw band/result text.",
+          "Block genotype update until reviewed.",
+          "Offer path to add category in Settings if legitimate."
+        ]
+      },
+      {
+        id: "IMG-8928",
+        uploaded: "Yesterday 09:03",
+        type: "Separated",
+        rawStrain: "C57",
+        matchedStrain: "C57BL/6J",
+        dobRaw: "25.09.14",
+        dobNormalized: "2025-09-14",
+        mouseCount: "Pending OCR",
+        confidence: 0,
+        status: "processing",
+        issue: "OCR still running",
+        severity: "Low",
+        reviewField: "status",
+        currentValue: "Processing",
+        suggestedValue: "Wait for parsed result",
+        reviewReason: "Source photo is stored, but ROI extraction is still incomplete.",
+        notes: [],
+        actions: [
+          "Do not create canonical updates yet.",
+          "Keep source photo retryable if parsing fails."
+        ]
+      }
+    ];
+
+    let selectedId = photos[0].id;
+    let activeView = "inbox";
+    let searchTerm = "";
+    let statusFilter = "all";
+    let typeFilter = "all";
+    let generatedRecordSequence = 0;
+    const storageKey = "mouse-colony-lims-mvp-session-v1";
+    const actionLogEntries = [
+      "Session opened: raw source photos loaded.",
+      "No destructive overwrite permitted without review."
+    ];
+    const exportLogEntries = [
+      {
+        time: "Session start",
+        view: "Separation workbook CSV",
+        included: 0,
+        blocked: 0,
+        result: "No export attempted yet"
+      }
+    ];
+
+    const statusLabels = {
+      auto: "Auto-filled",
+      review: "Needs Review",
+      conflict: "Conflict",
+      processing: "Processing",
+      dismissed: "Dismissed"
+    };
+
+    const statusClasses = {
+      auto: "auto",
+      review: "review",
+      conflict: "conflict",
+      processing: "processing",
+      dismissed: "dismissed"
+    };
+
+    const sampleParseFixtureRecords = [
+      {
+        type: "Separated",
+        rawStrain: "B6 Cg Tg?",
+        matchedStrain: "Review against Strain Master",
+        dobRaw: "26.04.13",
+        dobNormalized: "2026-04-13",
+        mouseCount: "318 R', 319 L', 320 R'L'",
+        confidence: 61,
+        status: "review",
+        issue: "Low-confidence strain alias",
+        severity: "Medium",
+        reviewField: "matchedStrain",
+        currentValue: "Review against Strain Master",
+        suggestedValue: "Select configured strain",
+        reviewReason: "Raw strain text is uncertain and must not create a new strain automatically.",
+        notes: [
+          { raw: "318 R'", meaning: "Possible mouse ID 318, right ear notch", strike: "none" },
+          { raw: "319 L'", meaning: "Possible mouse ID 319, left ear notch", strike: "none" },
+          { raw: "320 R'L'", meaning: "Possible mouse ID 320, both ears notched", strike: "none" }
+        ],
+        actions: [
+          "Keep raw strain text as parsed evidence.",
+          "Create review item before accepting normalized strain.",
+          "Do not create new strain automatically."
+        ]
+      },
+      {
+        type: "Mating",
+        rawStrain: "GH line",
+        matchedStrain: "GH line",
+        dobRaw: "25.12.01",
+        dobNormalized: "2025-12-01",
+        mouseCount: "Sire GH70 / Dam GH83",
+        confidence: 82,
+        status: "conflict",
+        issue: "Duplicate active mouse",
+        severity: "High",
+        reviewField: "mouseId",
+        currentValue: "GH70 active in another card snapshot",
+        suggestedValue: "Apply reviewed movement before mating assignment",
+        reviewReason: "A mouse ID appears active in more than one current card snapshot.",
+        notes: [
+          { raw: "26.04.13 - 10p", meaning: "Litter event, 10 pups", strike: "none" },
+          { raw: "GH70 x GH83", meaning: "Parent IDs on mating card", strike: "none" }
+        ],
+        actions: [
+          "Create high-severity review item.",
+          "Require reviewed movement action before mating assignment.",
+          "Link event to source photo and note line."
+        ]
+      },
+      {
+        type: "Separated",
+        rawStrain: "ApoM Tg/Tg",
+        matchedStrain: "ApoM Tg/Tg",
+        dobRaw: "25.10.20-28",
+        dobNormalized: "2025-10-20 to 2025-10-28",
+        mouseCount: "2M, 1F / 3",
+        confidence: 95,
+        status: "auto",
+        issue: "Fixture auto-filled by policy",
+        severity: "Low",
+        reviewField: "matchedStrain",
+        currentValue: "ApoM Tg/Tg",
+        suggestedValue: "ApoM Tg/Tg",
+        reviewReason: "Fixture represents a high-confidence configured strain alias.",
+        notes: [
+          { raw: "MT318 R'", meaning: "Mouse MT318, right ear notch", strike: "none" },
+          { raw: "MT319 L'", meaning: "Mouse MT319, left ear notch", strike: "none" }
+        ],
+        actions: [
+          "Create or update card snapshot from parsed fixture.",
+          "Attach note lines as structured evidence.",
+          "Keep export traceability to fixture source."
+        ]
+      }
+    ];
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[character]));
+    }
+
+    function persistSession() {
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify({
+          version: 1,
+          selectedId,
+          generatedRecordSequence,
+          photos,
+          actionLogEntries,
+          exportLogEntries
+        }));
+      } catch (error) {
+        console.warn("Local session could not be persisted.", error);
+      }
+    }
+
+    function restoreSession() {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(storageKey) || "null");
+        if (!saved || saved.version !== 1 || !Array.isArray(saved.photos)) {
+          return;
+        }
+        photos.splice(0, photos.length, ...saved.photos);
+        if (Array.isArray(saved.actionLogEntries)) {
+          actionLogEntries.splice(0, actionLogEntries.length, ...saved.actionLogEntries);
+        }
+        if (Array.isArray(saved.exportLogEntries)) {
+          exportLogEntries.splice(0, exportLogEntries.length, ...saved.exportLogEntries);
+        }
+        generatedRecordSequence = Number(saved.generatedRecordSequence || 0);
+        selectedId = photos.some((photo) => photo.id === saved.selectedId) ? saved.selectedId : photos[0]?.id;
+      } catch (error) {
+        console.warn("Local session could not be restored.", error);
+      }
+    }
+
+    function resetLocalSession() {
+      window.localStorage.removeItem(storageKey);
+      showToast("Local prototype session cleared. Reloading seed fixture data.");
+      window.setTimeout(() => window.location.reload(), 350);
+    }
+
+    function todayLabel() {
+      return new Intl.DateTimeFormat("en", {
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(new Date());
+    }
+
+    function timestampLabel() {
+      return new Intl.DateTimeFormat("en", {
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(new Date());
+    }
+
+    function formatUploadId(index) {
+      generatedRecordSequence += 1;
+      return `UPLOAD-${String(generatedRecordSequence).padStart(4, "0")}-${String(index + 1).padStart(2, "0")}`;
+    }
+
+    function formatImportedParseId(index) {
+      generatedRecordSequence += 1;
+      return `PARSE-${String(generatedRecordSequence).padStart(4, "0")}-${String(index + 1).padStart(2, "0")}`;
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.addEventListener("load", () => resolve(String(reader.result || "")));
+        reader.addEventListener("error", () => reject(reader.error));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function buildUploadedPhoto(file, index) {
+      const id = formatUploadId(index);
+      const sourceUrl = await readFileAsDataUrl(file);
+      return {
+        id,
+        uploaded: `Today ${todayLabel()}`,
+        type: "Separated",
+        rawStrain: "Pending local parse",
+        matchedStrain: "Not matched yet",
+        dobRaw: "Pending OCR",
+        dobNormalized: "--",
+        mouseCount: "Pending OCR",
+        confidence: 0,
+        status: "processing",
+        issue: "Local parse queued",
+        severity: "Low",
+        reviewField: "matchedStrain",
+        currentValue: "Not matched yet",
+        suggestedValue: "Review against Strain Master",
+        reviewReason: "Raw source photo is stored locally. Parsed values will stay intermediate until reviewed.",
+        sourceName: file.name,
+        sourceUrl,
+        notes: [],
+        actions: [
+          "Store uploaded file as raw source evidence.",
+          "Run local-only parsing placeholder; no external OCR payload is sent.",
+          "Route uncertain parsed values to review before canonical updates."
+        ]
+      };
+    }
+
+    function buildImportedParseRecord(record, index, sourceName) {
+      const confidence = Number(record.confidence ?? 0);
+      const status = record.status || (confidence >= 90 ? "auto" : "review");
+      const id = record.id || formatImportedParseId(index);
+      return validateParsedRecord({
+        id,
+        uploaded: record.uploaded || `Imported ${todayLabel()}`,
+        type: record.type || "Separated",
+        rawStrain: record.rawStrain || "Unknown raw strain",
+        matchedStrain: record.matchedStrain || "Review against Strain Master",
+        dobRaw: record.dobRaw || "--",
+        dobNormalized: record.dobNormalized || "--",
+        mouseCount: record.mouseCount || "Needs review",
+        confidence,
+        status,
+        issue: record.issue || (status === "auto" ? "Fixture auto-filled by policy" : "Imported parse needs review"),
+        severity: record.severity || (status === "conflict" ? "High" : "Medium"),
+        reviewField: record.reviewField || "matchedStrain",
+        currentValue: record.currentValue || record.matchedStrain || "Unreviewed parsed value",
+        suggestedValue: record.suggestedValue || "Review against configured masters",
+        reviewReason: record.reviewReason || "Imported parsed result remains non-canonical until review or explicit auto-fill policy allows it.",
+        sourceName,
+        notes: Array.isArray(record.notes) ? record.notes : [],
+        actions: Array.isArray(record.actions) ? record.actions : [
+          "Import parsed result as intermediate data.",
+          "Keep raw and normalized values separate.",
+          "Route uncertain values to review before canonical updates."
+        ]
+      });
+    }
+
+    function completeLocalParse(photo) {
+      photo.rawStrain = "Uncertain handwritten strain";
+      photo.matchedStrain = "Review against Strain Master";
+      photo.dobRaw = "Unreadable";
+      photo.dobNormalized = "--";
+      photo.mouseCount = "Count needs review";
+      photo.confidence = 42;
+      photo.status = "review";
+      photo.issue = "Low-confidence local parse";
+      photo.severity = "Medium";
+      photo.currentValue = photo.matchedStrain;
+      photo.suggestedValue = "Select configured strain";
+      photo.notes = [
+        { raw: "Note area requires manual review", meaning: "Source photo retained; parsed line is not trusted", strike: "unclear" }
+      ];
+      photo.actions.push("Create review item instead of updating canonical colony state.");
+    }
+
+    function expectedMouseCount(mouseCountText) {
+      const totalMatch = String(mouseCountText || "").match(/\b(\d+)\s*(?:total|mice|mouse)\b/i);
+      if (totalMatch) return Number(totalMatch[1]);
+      const slashMatch = String(mouseCountText || "").match(/\/\s*(\d+)\b/);
+      if (slashMatch) return Number(slashMatch[1]);
+      return null;
+    }
+
+    function activeNoteLineCount(notes) {
+      return (notes || []).filter((note) => note.strike === "none" && extractMouseDisplayId(note.raw)).length;
+    }
+
+    function validateParsedRecord(photo) {
+      if (photo.type !== "Separated") return photo;
+      const expectedCount = expectedMouseCount(photo.mouseCount);
+      if (expectedCount === null) return photo;
+      const activeCount = activeNoteLineCount(photo.notes);
+      if (!activeCount || expectedCount === activeCount) return photo;
+
+      photo.status = "review";
+      photo.issue = "Count mismatch";
+      photo.severity = photo.severity === "High" ? "High" : "Medium";
+      photo.reviewField = "mouseCount";
+      photo.currentValue = photo.mouseCount;
+      photo.suggestedValue = `${activeCount} active note line${activeCount === 1 ? "" : "s"}`;
+      photo.reviewReason = `Sex/count field indicates ${expectedCount}, but ${activeCount} active mouse note line${activeCount === 1 ? "" : "s"} were parsed.`;
+      photo.actions = (photo.actions || []).concat("Create review item for count mismatch before export or canonical candidate creation.");
+      return photo;
+    }
+
+    function activeMouseIds(photo) {
+      if (photo.type !== "Separated") return [];
+      return (photo.notes || [])
+        .filter((note) => note.strike === "none")
+        .map((note) => extractMouseDisplayId(note.raw))
+        .filter(Boolean);
+    }
+
+    function markDuplicateMouseReview(photo, mouseId, otherSourceId) {
+      photo.status = "conflict";
+      photo.issue = "Duplicate active mouse";
+      photo.severity = "High";
+      photo.reviewField = "mouseId";
+      photo.currentValue = `${mouseId} active in ${photo.id}`;
+      photo.suggestedValue = `Review movement before accepting ${mouseId}`;
+      photo.reviewReason = `Mouse ${mouseId} appears active in both ${photo.id} and ${otherSourceId}.`;
+      photo.actions = (photo.actions || []).concat(`Create high-severity duplicate active mouse review for ${mouseId}.`);
+    }
+
+    function validateDuplicateActiveMice(scopePhotos) {
+      const activeByMouse = new Map();
+      photos
+        .filter((photo) => photo.status === "auto" && photo.type === "Separated")
+        .forEach((photo) => {
+          activeMouseIds(photo).forEach((mouseId) => {
+            if (!activeByMouse.has(mouseId)) {
+              activeByMouse.set(mouseId, []);
+            }
+            activeByMouse.get(mouseId).push(photo);
+          });
+        });
+
+      activeByMouse.forEach((sources, mouseId) => {
+        if (sources.length < 2) return;
+        sources.forEach((photo) => {
+          if (!scopePhotos.includes(photo)) return;
+          const other = sources.find((source) => source.id !== photo.id);
+          if (other) {
+            markDuplicateMouseReview(photo, mouseId, other.id);
+          }
+        });
+      });
+    }
+
+    function selectedPhoto() {
+      return photos.find((photo) => photo.id === selectedId) || photos[0];
+    }
+
+    function filteredPhotos() {
+      return photos.filter((photo) => {
+        const haystack = [
+          photo.id,
+          photo.type,
+          photo.rawStrain,
+          photo.matchedStrain,
+          photo.mouseCount,
+          photo.issue
+        ].join(" ").toLowerCase();
+        const matchesSearch = !searchTerm || haystack.includes(searchTerm.toLowerCase());
+        const matchesStatus = statusFilter === "all" || photo.status === statusFilter;
+        const matchesType = typeFilter === "all" || photo.type === typeFilter;
+        return matchesSearch && matchesStatus && matchesType;
+      });
+    }
+
+    function confidenceClass(value) {
+      if (value >= 90) return "good";
+      if (value >= 65) return "warn";
+      return "bad";
+    }
+
+    function extractMouseDisplayId(rawNoteLine) {
+      const match = String(rawNoteLine || "").match(/\b[A-Za-z]{0,4}\d+[A-Za-z0-9-]*\b/);
+      return match ? match[0] : "";
+    }
+
+    function noteStatus(note) {
+      if (note.strike === "double") return "Dead candidate";
+      if (note.strike === "single") return "Moved candidate";
+      if (note.strike === "none") return "Active candidate";
+      return "Review needed";
+    }
+
+    function canonicalCandidateRows() {
+      return photos
+        .filter((photo) => photo.type === "Separated" && photo.status === "auto")
+        .flatMap((photo) => photo.notes.map((note, index) => {
+          const mouseDisplayId = extractMouseDisplayId(note.raw);
+          if (!mouseDisplayId) return null;
+          return [
+            mouseDisplayId,
+            photo.matchedStrain,
+            "From note",
+            photo.dobNormalized,
+            "Pending genotype",
+            noteStatus(note),
+            `${photo.id} / note line ${index + 1}`
+          ];
+        }))
+        .filter(Boolean);
+    }
+
+    function blockedExportItems() {
+      return photos.filter((photo) => photo.status === "review" || photo.status === "conflict");
+    }
+
+    function renderMetrics() {
+      const uploaded = photos.length;
+      const auto = photos.filter((photo) => photo.status === "auto").length;
+      const review = photos.filter((photo) => photo.status === "review").length;
+      const conflicts = photos.filter((photo) => photo.status === "conflict").length;
+      const processing = photos.filter((photo) => photo.status === "processing").length;
+      document.getElementById("metrics").innerHTML = [
+        ["Photos uploaded", uploaded, ""],
+        ["Auto-filled", auto, "valid"],
+        ["Pending review", review, "review"],
+        ["High conflicts", conflicts, "conflict"],
+        ["Processing", processing, ""]
+      ].map(([label, value, className]) => `
+        <article class="metric ${className}">
+          <span>${label}</span>
+          <strong>${value}</strong>
+        </article>
+      `).join("");
+      document.getElementById("blockedExports").textContent = review + conflicts;
+    }
+
+    function renderInbox() {
+      const rows = filteredPhotos();
+      document.getElementById("resultCount").textContent = `${rows.length} of ${photos.length} source photos`;
+      document.getElementById("inboxRows").innerHTML = rows.map((photo) => `
+        <tr class="${photo.id === selectedId ? "selected" : ""}" data-id="${photo.id}">
+          <td><div class="thumb ${photo.sourceUrl ? "has-photo" : ""}" aria-label="Cage card thumbnail">${photo.sourceUrl ? `<img src="${photo.sourceUrl}" alt="">` : ""}</div></td>
+          <td>${escapeHtml(photo.uploaded)}<br><span class="muted mono">${escapeHtml(photo.id)}</span></td>
+          <td>${escapeHtml(photo.type)}</td>
+          <td class="mono">${escapeHtml(photo.rawStrain)}</td>
+          <td>${escapeHtml(photo.matchedStrain)}</td>
+          <td>${escapeHtml(photo.dobNormalized)}</td>
+          <td>${escapeHtml(photo.mouseCount)}</td>
+          <td class="confidence ${confidenceClass(photo.confidence)}">${photo.confidence ? `${photo.confidence}%` : "--"}</td>
+          <td><span class="status ${statusClasses[photo.status]}">${statusLabels[photo.status]}</span></td>
+          <td>${escapeHtml(photo.issue)}</td>
+        </tr>
+      `).join("");
+      document.querySelectorAll("#inboxRows tr").forEach((row) => {
+        row.addEventListener("click", () => {
+          selectedId = row.dataset.id;
+          renderAll();
+        });
+      });
+    }
+
+    function renderReviewRows() {
+      const reviewItems = blockedExportItems();
+      document.getElementById("reviewSummary").textContent = `${reviewItems.length} pending review items`;
+      document.getElementById("reviewImpact").textContent = `${reviewItems.length} export block${reviewItems.length === 1 ? "" : "s"} from review/conflict items`;
+      document.getElementById("reviewRows").innerHTML = reviewItems.map((photo) => `
+        <tr class="${photo.id === selectedId ? "selected" : ""}" data-id="${photo.id}">
+          <td>${escapeHtml(photo.severity)}</td>
+          <td>${escapeHtml(photo.issue)}</td>
+          <td class="mono">${escapeHtml(photo.id)}</td>
+          <td>${escapeHtml(photo.currentValue)}</td>
+          <td>${escapeHtml(photo.suggestedValue)}</td>
+          <td><span class="status ${statusClasses[photo.status]}">${statusLabels[photo.status]}</span></td>
+        </tr>
+      `).join("");
+      document.querySelectorAll("#reviewRows tr").forEach((row) => {
+        row.addEventListener("click", () => {
+          selectedId = row.dataset.id;
+          setView("review");
+          renderAll();
+        });
+      });
+    }
+
+    function renderRecords() {
+      const records = canonicalCandidateRows();
+      document.getElementById("recordRows").innerHTML = records.map((record) => `
+        <tr>
+          <td class="mono">${escapeHtml(record[0])}</td>
+          <td>${escapeHtml(record[1])}</td>
+          <td>${escapeHtml(record[2])}</td>
+          <td>${escapeHtml(record[3])}</td>
+          <td>${escapeHtml(record[4])}</td>
+          <td>${escapeHtml(record[5])}</td>
+          <td>${escapeHtml(record[6])}</td>
+        </tr>
+      `).join("") || `
+        <tr>
+          <td colspan="7">No reviewed mouse candidates yet.</td>
+        </tr>
+      `;
+    }
+
+    function renderExports() {
+      const separationReady = photos.filter((photo) => photo.type === "Separated" && photo.status === "auto").length;
+      const animalsheetReady = photos.filter((photo) => photo.type === "Mating" && photo.status === "auto").length;
+      const blockedItems = blockedExportItems();
+      const blocked = blockedItems.length;
+      const rows = [
+        ["Separation workbook CSV", "Accepted canonical structured state", separationReady, blocked, "Source photo + parsed note line per row; filename follows date + strain + 분리 현황표"],
+        ["Animalsheet preview", "Accepted mating/litter events", animalsheetReady, blocked, "Parent IDs and litter notes remain linked; filename follows date + strain + animal sheet"],
+        ["Review block list", "Review item", blocked, 0, "Low-confidence and conflict rows excluded from exports"]
+      ];
+      document.getElementById("exportRows").innerHTML = rows.map((row) => `
+        <tr>
+          <td>${escapeHtml(row[0])}</td>
+          <td>${escapeHtml(row[1])}</td>
+          <td>${escapeHtml(row[2])}</td>
+          <td>${escapeHtml(row[3])}</td>
+          <td>${escapeHtml(row[4])}</td>
+        </tr>
+      `).join("");
+      document.getElementById("exportLogRows").innerHTML = exportLogEntries.slice(-5).reverse().map((entry) => `
+        <tr>
+          <td>${escapeHtml(entry.time)}</td>
+          <td>${escapeHtml(entry.view)}</td>
+          <td>${escapeHtml(entry.included)}</td>
+          <td>${escapeHtml(entry.blocked)}</td>
+          <td>${escapeHtml(entry.result)}</td>
+        </tr>
+      `).join("");
+      document.getElementById("blockedExportRows").innerHTML = blockedItems.map((photo) => `
+        <tr data-id="${escapeHtml(photo.id)}">
+          <td class="mono">${escapeHtml(photo.id)}</td>
+          <td><span class="status ${statusClasses[photo.status]}">${statusLabels[photo.status]}</span></td>
+          <td>${escapeHtml(photo.issue)}</td>
+          <td>${escapeHtml(photo.currentValue)}</td>
+          <td>${escapeHtml(photo.reviewReason)}</td>
+        </tr>
+      `).join("") || `
+        <tr>
+          <td colspan="5">No blocked export rows.</td>
+        </tr>
+      `;
+      document.querySelectorAll("#blockedExportRows tr[data-id]").forEach((row) => {
+        row.addEventListener("click", () => {
+          selectedId = row.dataset.id;
+          setView("review");
+          renderAll();
+        });
+      });
+    }
+
+    function renderCardImage(photo) {
+      const lines = [
+        ["Strain", photo.rawStrain, "STRAIN"],
+        ["D.O.B", photo.dobRaw, "DOB"],
+        ["I.D", photo.mouseCount, "ID / COUNT"],
+        ["Note", photo.notes[0] ? photo.notes[0].raw : "Pending OCR", "NOTE"]
+      ];
+      const photoPreview = photo.sourceUrl
+        ? `<div class="source-preview"><img src="${photo.sourceUrl}" alt="${escapeHtml(photo.sourceName || photo.id)}"></div>`
+        : "";
+      const cardImage = document.getElementById("cardImage");
+      cardImage.classList.toggle("has-photo", Boolean(photo.sourceUrl));
+      cardImage.innerHTML = photoPreview + lines.map(([label, value, roi]) => `
+        <div class="photo-line">
+          <span>${escapeHtml(label)}</span>
+          <strong class="${label === "Note" || photo.status !== "auto" ? "roi" : ""}" data-roi="${escapeHtml(roi)}">${escapeHtml(value)}</strong>
+        </div>
+      `).join("");
+    }
+
+    function fieldCard(label, raw, normalized, confidence, status) {
+      const cardClass = status === "conflict" ? "conflict" : status === "review" ? "review" : "";
+      return `
+        <div class="field-card ${cardClass}">
+          <div class="field-label">
+            <span>${escapeHtml(label)}</span>
+            <span class="confidence ${confidenceClass(confidence)}">${confidence ? `${confidence}%` : "--"}</span>
+          </div>
+          <div class="field-values">
+            <div class="value-box">
+              <span>Raw</span>
+              <strong>${escapeHtml(raw)}</strong>
+            </div>
+            <div class="value-box">
+              <span>Normalized</span>
+              <strong>${escapeHtml(normalized)}</strong>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDrawer() {
+      const photo = selectedPhoto();
+      document.getElementById("drawerTitle").textContent = photo.id;
+      document.getElementById("drawerMeta").textContent = `${photo.type} card - ${photo.uploaded} - ${statusLabels[photo.status]}`;
+      document.getElementById("drawerLayer").textContent = photo.status === "auto" ? "Parsed result" : "Review item";
+      renderCardImage(photo);
+      document.getElementById("fieldCards").innerHTML = [
+        fieldCard("Strain", photo.rawStrain, photo.matchedStrain, photo.confidence, photo.status),
+        fieldCard("DOB", photo.dobRaw, photo.dobNormalized, photo.confidence >= 80 ? 92 : photo.confidence, photo.status === "conflict" ? "review" : "auto"),
+        fieldCard("Mouse / Count", photo.mouseCount, photo.mouseCount, photo.confidence >= 80 ? 88 : photo.confidence, photo.status)
+      ].join("");
+
+      document.getElementById("reviewIssue").textContent = photo.issue;
+      document.getElementById("reviewReason").textContent = photo.reviewReason;
+      document.getElementById("beforeValue").textContent = photo.currentValue;
+      document.getElementById("afterValue").value = photo.suggestedValue;
+      document.getElementById("dismissReason").value = photo.dismissReason || "";
+      document.getElementById("reviewBox").style.display = photo.status === "auto" ? "none" : "grid";
+
+      document.getElementById("noteList").innerHTML = photo.notes.length
+        ? photo.notes.map((note, index) => `
+          <li>
+            <strong class="mono">${index + 1}. ${escapeHtml(note.raw)}</strong>
+            <span>${escapeHtml(note.meaning)} - strike: ${escapeHtml(note.strike)}</span>
+          </li>
+        `).join("")
+        : `<li><strong>OCR pending</strong><span>No parsed note lines yet.</span></li>`;
+
+      const logs = photo.actions.concat(actionLogEntries.slice(-3));
+      document.getElementById("actionLog").innerHTML = logs.map((entry) => `
+        <li><strong>${escapeHtml(entry)}</strong><span>Will be linked to ${escapeHtml(photo.id)} before any high-risk update.</span></li>
+      `).join("");
+    }
+
+    function setView(view) {
+      activeView = view;
+      document.querySelectorAll(".nav-button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.view === view);
+      });
+      document.querySelectorAll(".view").forEach((panel) => {
+        panel.classList.remove("active");
+      });
+      const viewMap = {
+        inbox: "inboxView",
+        review: "reviewView",
+        records: "recordsView",
+        exports: "exportsView",
+        settings: "settingsView"
+      };
+      document.getElementById(viewMap[view]).classList.add("active");
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      window.setTimeout(() => toast.classList.remove("show"), 2200);
+    }
+
+    async function handlePhotoUpload(event) {
+      const files = Array.from(event.target.files || []);
+      if (!files.length) return;
+      try {
+        const uploadedPhotos = await Promise.all(files.map(buildUploadedPhoto));
+        photos.unshift(...uploadedPhotos);
+        selectedId = uploadedPhotos[0].id;
+        setView("inbox");
+        persistSession();
+        renderAll();
+        showToast(`${uploadedPhotos.length} raw source photo${uploadedPhotos.length > 1 ? "s" : ""} stored locally.`);
+        uploadedPhotos.forEach((photo, index) => {
+          window.setTimeout(() => {
+            completeLocalParse(photo);
+            if (selectedId === photo.id) {
+              setView("review");
+            }
+            persistSession();
+            renderAll();
+            showToast(`${photo.id} parsed locally and sent to review.`);
+          }, 700 + index * 300);
+        });
+      } catch (error) {
+        showToast("Could not store uploaded source photo locally.");
+      } finally {
+        event.target.value = "";
+      }
+    }
+
+    function handleParseImport(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.addEventListener("load", () => {
+        try {
+          const parsed = JSON.parse(String(reader.result || ""));
+          const records = Array.isArray(parsed) ? parsed : parsed.records;
+          if (!Array.isArray(records) || !records.length) {
+            showToast("Parse JSON must contain a non-empty records array.");
+            return;
+          }
+          const imported = records.map((record, index) => buildImportedParseRecord(record, index, file.name));
+          photos.unshift(...imported);
+          validateDuplicateActiveMice(imported);
+          selectedId = imported[0].id;
+          setView(imported.some((photo) => photo.status === "review" || photo.status === "conflict") ? "review" : "inbox");
+          actionLogEntries.push(`Imported ${imported.length} parsed fixture record${imported.length === 1 ? "" : "s"} from ${file.name}.`);
+          persistSession();
+          renderAll();
+          showToast(`${imported.length} parsed fixture record${imported.length === 1 ? "" : "s"} imported as intermediate results.`);
+        } catch (error) {
+          showToast("Could not import parse JSON. Check the fixture format.");
+        } finally {
+          event.target.value = "";
+        }
+      });
+      reader.readAsText(file);
+    }
+
+    function loadSampleFixture() {
+      const imported = sampleParseFixtureRecords.map((record, index) => buildImportedParseRecord(record, index, "embedded sample fixture"));
+      photos.unshift(...imported);
+      validateDuplicateActiveMice(imported);
+      selectedId = imported[0].id;
+      setView("review");
+      actionLogEntries.push(`Loaded ${imported.length} embedded parsed fixture records.`);
+      persistSession();
+      renderAll();
+      showToast("Embedded parsed fixture loaded as intermediate results.");
+    }
+
+    function csvCell(value) {
+      return `"${String(value ?? "").replace(/"/g, '""')}"`;
+    }
+
+    function generateSeparationCsv() {
+      const blocked = blockedExportItems().length;
+      const rows = photos
+        .filter((photo) => photo.type === "Separated" && photo.status === "auto")
+        .map((photo) => [
+          photo.id,
+          photo.matchedStrain,
+          photo.dobNormalized,
+          photo.mouseCount,
+          photo.notes.map((note) => note.raw).join(" | "),
+          "source photo retained"
+        ]);
+      if (!rows.length) {
+        exportLogEntries.push({
+          time: timestampLabel(),
+          view: "Separation workbook CSV",
+          included: 0,
+          blocked,
+          result: "Blocked: no reviewed separation rows"
+        });
+        renderExports();
+        persistSession();
+        showToast("No reviewed separation rows are ready for export.");
+        return;
+      }
+      const header = ["source_photo", "matched_strain", "dob", "mouse_count", "note_line_evidence", "traceability"];
+      const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "separation_export_preview.csv";
+      link.click();
+      URL.revokeObjectURL(link.href);
+      exportLogEntries.push({
+        time: timestampLabel(),
+        view: "Separation workbook CSV",
+        included: rows.length,
+        blocked,
+        result: blocked ? "Preview generated; blocked rows excluded" : "Preview generated"
+      });
+      actionLogEntries.push(`Generated separation CSV preview with ${rows.length} included row${rows.length === 1 ? "" : "s"} and ${blocked} blocked review item${blocked === 1 ? "" : "s"}.`);
+      renderExports();
+      persistSession();
+      showToast("Separation CSV generated from reviewed rows only.");
+    }
+
+    function previewAnimalsheet() {
+      setView("exports");
+      const matingCount = photos.filter((photo) => photo.type === "Mating").length;
+      showToast(`${matingCount} mating source block${matingCount === 1 ? "" : "s"} available; conflicts remain blocked.`);
+    }
+
+    function applyReviewedChange() {
+      const photo = selectedPhoto();
+      if (photo.status === "auto") {
+        showToast("This item is already auto-filled; no review action is required.");
+        return;
+      }
+      if (photo.reviewField === "mouseId" && photo.issue === "Duplicate active mouse") {
+        showToast("Resolve the mouse movement before accepting this duplicate active mouse.");
+        return;
+      }
+      const afterValue = document.getElementById("afterValue").value.trim();
+      if (!afterValue) {
+        showToast("Enter a reviewed value before applying changes.");
+        return;
+      }
+      const beforeValue = photo.currentValue;
+      photo.currentValue = afterValue;
+      if (photo.reviewField === "matchedStrain") {
+        photo.matchedStrain = afterValue;
+      }
+      if (photo.reviewField === "genotype") {
+        photo.issue = "Genotype reviewed";
+      }
+      photo.status = "auto";
+      photo.issue = "Reviewed correction applied";
+      photo.confidence = Math.max(photo.confidence, 90);
+      actionLogEntries.push(`User applied reviewed change on ${photo.id}: "${beforeValue}" -> "${afterValue}".`);
+      persistSession();
+      renderAll();
+      showToast("Reviewed change applied with before/after action log entry.");
+    }
+
+    function dismissWithReason() {
+      const photo = selectedPhoto();
+      if (photo.status === "auto") {
+        showToast("No review issue to dismiss for this source photo.");
+        return;
+      }
+      const reason = document.getElementById("dismissReason").value.trim();
+      if (!reason) {
+        showToast("Enter a dismiss reason before removing this review item.");
+        return;
+      }
+      photo.issue = "Dismissed with reason";
+      photo.status = "dismissed";
+      photo.dismissReason = reason;
+      photo.reviewReason = `Dismissed review item remains non-canonical and is excluded from export. Reason: ${reason}`;
+      actionLogEntries.push(`Review item dismissed for ${photo.id}: "${reason}".`);
+      persistSession();
+      renderAll();
+      showToast("Review item dismissed without creating canonical records.");
+    }
+
+    function selectNextItem() {
+      const index = photos.findIndex((photo) => photo.id === selectedId);
+      selectedId = photos[(index + 1) % photos.length].id;
+      renderAll();
+    }
+
+    function renderAll() {
+      renderMetrics();
+      renderInbox();
+      renderReviewRows();
+      renderRecords();
+      renderExports();
+      renderDrawer();
+    }
+
+    document.querySelectorAll(".nav-button").forEach((button) => {
+      button.addEventListener("click", () => setView(button.dataset.view));
+    });
+
+    document.getElementById("searchInput").addEventListener("input", (event) => {
+      searchTerm = event.target.value;
+      renderInbox();
+    });
+
+    document.getElementById("statusFilter").addEventListener("change", (event) => {
+      statusFilter = event.target.value;
+      renderInbox();
+    });
+
+    document.getElementById("typeFilter").addEventListener("change", (event) => {
+      typeFilter = event.target.value;
+      renderInbox();
+    });
+
+    document.getElementById("applyButton").addEventListener("click", applyReviewedChange);
+    document.getElementById("dismissButton").addEventListener("click", dismissWithReason);
+    document.getElementById("nextItem").addEventListener("click", selectNextItem);
+    document.getElementById("uploadButton").addEventListener("click", () => document.getElementById("photoInput").click());
+    document.getElementById("photoInput").addEventListener("change", handlePhotoUpload);
+    document.getElementById("loadSampleButton").addEventListener("click", loadSampleFixture);
+    document.getElementById("loadSampleInline").addEventListener("click", loadSampleFixture);
+    document.getElementById("resetSessionButton").addEventListener("click", resetLocalSession);
+    document.getElementById("importParseButton").addEventListener("click", () => document.getElementById("parseInput").click());
+    document.getElementById("parseInput").addEventListener("change", handleParseImport);
+    document.getElementById("generateExport").addEventListener("click", generateSeparationCsv);
+    document.getElementById("previewAnimalsheet").addEventListener("click", previewAnimalsheet);
+    document.getElementById("jumpFirstReview").addEventListener("click", () => {
+      const first = photos.find((photo) => photo.status === "review" || photo.status === "conflict");
+      if (first) {
+        selectedId = first.id;
+        renderAll();
+      }
+    });
+    document.getElementById("designLink").addEventListener("click", () => {
+      window.location.href = "design.md";
+    });
+    document.getElementById("refsLink").addEventListener("click", () => {
+      window.location.href = "reference_adoption_notes.md";
+    });
+    document.getElementById("sliceLink").addEventListener("click", () => {
+      window.location.href = "mvp_vertical_slice_plan.md";
+    });
+    document.getElementById("prdLink").addEventListener("click", () => {
+      window.location.href = "final_mouse_colony_prd.md";
+    });
+
+    restoreSession();
+    renderAll();
+  </script>
+</body>
+</html>
