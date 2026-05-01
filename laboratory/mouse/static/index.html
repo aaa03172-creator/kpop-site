@@ -249,7 +249,10 @@
         </label>
         <button id="searchButton" type="button">Search</button>
         <button id="exportMouseCsvButton" type="button">Download Mouse CSV</button>
+        <button id="exportGenotypingCsvButton" type="button">Download Genotyping Worklist</button>
+        <button id="exportReadyMouseCsvButton" type="button">Download Ready CSV</button>
       </div>
+      <p class="muted" id="exportDownloadMessage"></p>
       <p class="muted" id="searchSummary">No active search.</p>
       <table>
         <thead><tr><th>Layer</th><th>ID</th><th>Primary</th><th>Detail</th></tr></thead>
@@ -444,7 +447,7 @@
         <tbody id="exportBlockerRows"></tbody>
       </table>
       <table>
-        <thead><tr><th>File</th><th>Type</th><th>Rows</th><th>Blocked</th><th>Generated</th><th>Filter</th></tr></thead>
+        <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Rows</th><th>Blocked</th><th>Generated</th><th>Filter</th></tr></thead>
         <tbody id="exportLogRows"></tbody>
       </table>
     </section>
@@ -802,12 +805,13 @@
         row([
           item.filename,
           item.export_type,
+          item.status,
           item.row_count,
           item.blocked_review_count,
           item.exported_at,
           item.query || "--"
         ])
-      ).join("") || row(["No exports generated yet", "", "", "", "", ""]);
+      ).join("") || row(["No exports generated yet", "", "", "", "", "", ""]);
     }
 
     document.getElementById("uploadButton").addEventListener("click", async () => {
@@ -908,6 +912,36 @@
     document.getElementById("exportMouseCsvButton").addEventListener("click", () => {
       const query = encodeURIComponent(activeSearchQuery);
       window.location.href = `/api/exports/mice.csv${query ? `?query=${query}` : ""}`;
+    });
+
+    document.getElementById("exportGenotypingCsvButton").addEventListener("click", () => {
+      const query = encodeURIComponent(activeSearchQuery);
+      window.location.href = `/api/exports/genotyping-worklist.csv${query ? `?query=${query}` : ""}`;
+    });
+
+    document.getElementById("exportReadyMouseCsvButton").addEventListener("click", async () => {
+      const query = encodeURIComponent(activeSearchQuery);
+      const response = await fetch(`/api/exports/mice.csv?require_ready=true${query ? `&query=${query}` : ""}`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const detail = payload.detail || {};
+        document.getElementById("exportDownloadMessage").textContent =
+          detail.message || "Export blocked by open review items.";
+        await refresh();
+        return;
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : "mouse_records.csv";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      document.getElementById("exportDownloadMessage").textContent = `Downloaded ${filename}.`;
+      await refresh();
     });
 
     document.getElementById("cageButton").addEventListener("click", async () => {

@@ -1789,7 +1789,7 @@ def search_records(query: str = "") -> dict[str, Any]:
 
 
 @app.get("/api/exports/mice.csv")
-def export_mice_csv(query: str = "") -> Response:
+def export_mice_csv(query: str = "", require_ready: bool = False) -> Response:
     output = io.StringIO()
     fieldnames = [
         "mouse_id",
@@ -1802,15 +1802,21 @@ def export_mice_csv(query: str = "") -> Response:
         "ear_label_raw",
         "ear_label_code",
         "status",
+        "current_cage_label",
         "genotyping_status",
         "sample_id",
+        "sample_date",
         "genotype_result",
+        "genotype_result_date",
+        "target_match_status",
+        "use_category",
         "next_action",
         "source_note_item_id",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     row_count = 0
+    blocked_error: dict[str, Any] | None = None
     with connection() as conn:
         for row in mouse_rows(conn, query):
             payload = dict(row)
@@ -1821,6 +1827,12 @@ def export_mice_csv(query: str = "") -> Response:
         ).fetchone()["count"]
         suffix = "_filtered" if query.strip() else ""
         filename = f"mouse_records{suffix}.csv"
+        export_status = "blocked" if require_ready and blocked_review_count else "generated"
+        note = (
+            "Blocked final CSV export because open review items remain."
+            if export_status == "blocked"
+            else "Generated from local mouse records CSV endpoint."
+        )
         conn.execute(
             """
             INSERT INTO export_log
@@ -1835,9 +1847,100 @@ def export_mice_csv(query: str = "") -> Response:
                 query.strip(),
                 row_count,
                 blocked_review_count,
+                export_status,
+                utc_now(),
+                note,
+            ),
+        )
+        if export_status == "blocked":
+            blocked_error = {
+                "blocked_review_count": blocked_review_count,
+                "filename": filename,
+                "source_layer": "export or view",
+            }
+
+    if blocked_error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Resolve open review items before final export.",
+                **blocked_error,
+            },
+        )
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/exports/genotyping-worklist.csv")
+def export_genotyping_worklist_csv(query: str = "") -> Response:
+    output = io.StringIO()
+    fieldnames = [
+        "display_id",
+        "ear_label",
+        "strain",
+        "dob",
+        "current_cage",
+        "sample_id",
+        "sample_date",
+        "genotyping_status",
+        "genotype_result",
+        "genotype_result_date",
+        "target_match_status",
+        "use_category",
+        "next_action",
+        "source_note_item_id",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    row_count = 0
+    with connection() as conn:
+        for row in mouse_rows(conn, query):
+            payload = dict(row)
+            writer.writerow(
+                {
+                    "display_id": payload.get("display_id", ""),
+                    "ear_label": payload.get("ear_label_raw") or payload.get("ear_label_code") or "",
+                    "strain": payload.get("raw_strain_text", ""),
+                    "dob": payload.get("dob_raw") or payload.get("dob_start") or "",
+                    "current_cage": payload.get("current_cage_label") or "",
+                    "sample_id": payload.get("sample_id") or "",
+                    "sample_date": payload.get("sample_date") or "",
+                    "genotyping_status": payload.get("genotyping_status") or "",
+                    "genotype_result": payload.get("genotype_result") or "",
+                    "genotype_result_date": payload.get("genotype_result_date") or "",
+                    "target_match_status": payload.get("target_match_status") or "",
+                    "use_category": payload.get("use_category") or "",
+                    "next_action": payload.get("next_action") or "",
+                    "source_note_item_id": payload.get("source_note_item_id") or "",
+                }
+            )
+            row_count += 1
+        blocked_review_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
+        ).fetchone()["count"]
+        suffix = "_filtered" if query.strip() else ""
+        filename = f"genotyping_worklist{suffix}.csv"
+        conn.execute(
+            """
+            INSERT INTO export_log
+                (export_id, export_type, filename, query, row_count,
+                 blocked_review_count, status, exported_at, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("export"),
+                "genotyping_worklist_csv",
+                filename,
+                query.strip(),
+                row_count,
+                blocked_review_count,
                 "generated",
                 utc_now(),
-                "Generated from local mouse records CSV endpoint.",
+                "Generated as a companion genotyping worklist export without changing lab workbook shape.",
             ),
         )
 
@@ -1856,7 +1959,7 @@ def list_export_log() -> list[dict[str, Any]]:
             SELECT export_id, export_type, filename, query, row_count,
                    blocked_review_count, status, exported_at, source_layer, note
             FROM export_log
-            ORDER BY exported_at DESC
+            ORDER BY exported_at DESC, rowid DESC
             LIMIT 25
             """
         ).fetchall()

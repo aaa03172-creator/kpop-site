@@ -244,6 +244,8 @@ def main() -> None:
                 assert_true("Mouse Events" in index_html, "Local UI should expose mouse events.")
                 assert_true("Correction Log" in index_html, "Local UI should expose correction history.")
                 assert_true("Search & CSV Export" in index_html, "Local UI should expose search and CSV export.")
+                assert_true("Download Genotyping Worklist" in index_html, "Local UI should expose genotyping worklist export.")
+                assert_true("Download Ready CSV" in index_html, "Local UI should expose gated final CSV export.")
                 assert_true("Cage View" in index_html, "Local UI should expose cage management.")
                 assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
                 assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
@@ -531,6 +533,16 @@ def main() -> None:
                 assert_true(export_log[0]["query"] == "MT321", "Export log should preserve the export filter.")
                 assert_true(export_log[0]["row_count"] == len(filtered_mice), "Export log should preserve exported row count.")
                 assert_true(export_log[0]["source_layer"] == "export or view", "Export log should stay in the export/view layer.")
+                blocked_export = client.get("/api/exports/mice.csv", params={"query": "MT321", "require_ready": "true"})
+                assert_true(blocked_export.status_code == 409, "Final CSV export should be blocked by open review items.")
+                blocked_payload = blocked_export.json()["detail"]
+                assert_true(
+                    blocked_payload["source_layer"] == "export or view" and blocked_payload["blocked_review_count"] > 0,
+                    "Blocked final export should report export/view layer and blocker count.",
+                )
+                blocked_log = client.get("/api/export-log").json()[0]
+                assert_true(blocked_log["status"] == "blocked", "Blocked final export should create a blocked export log entry.")
+                assert_true(blocked_log["filename"] == "mouse_records_filtered.csv", "Blocked export log should preserve intended filename.")
                 export_preview = client.get("/api/export-preview").json()
                 assert_true(export_preview["source_layer"] == "export or view", "Export preview should stay an export/view layer.")
                 assert_true(export_preview["export_type"] == "separation_preview", "Export preview should identify its workbook-like shape.")
@@ -620,6 +632,23 @@ def main() -> None:
                 assert_true(
                     any(record["mouse_id"] == genotyping_target["mouse_id"] and record["normalized_result"] == "Tg/Tg" for record in genotyping_records),
                     "Genotyping record history should preserve the entered result.",
+                )
+                genotyping_export = client.get("/api/exports/genotyping-worklist.csv", params={"query": "MT321"})
+                assert_true(genotyping_export.status_code == 200, "Genotyping worklist CSV export endpoint failed.")
+                assert_true(
+                    "genotyping_worklist_filtered.csv" in genotyping_export.headers.get("content-disposition", ""),
+                    "Filtered genotyping worklist should use the filtered filename.",
+                )
+                assert_true(
+                    "target_match_status" in genotyping_export.text
+                    and "matches_target" in genotyping_export.text
+                    and "consider_for_mating" in genotyping_export.text,
+                    "Genotyping worklist export should include target match and next action fields.",
+                )
+                genotyping_export_log = client.get("/api/export-log").json()
+                assert_true(
+                    genotyping_export_log[0]["export_type"] == "genotyping_worklist_csv",
+                    "Export log should record companion genotyping worklist exports.",
                 )
                 filtered_mice = client.get("/api/mice", params={"query": "MT321"}).json()
                 assert_true(
