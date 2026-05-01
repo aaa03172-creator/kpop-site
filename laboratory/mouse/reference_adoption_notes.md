@@ -204,6 +204,7 @@ Adopt:
 
 - Dense source list on the left.
 - Source photo preview and parsed field comparison on the right.
+- Batch upload summary for common sessions where many cage card/name tag photos are uploaded together.
 - Raw values and normalized suggestions shown side by side.
 - Per-field confidence, not only per-photo confidence.
 - Quality issues visible: blurry, cropped, glare, missing note area, low confidence.
@@ -244,6 +245,8 @@ Adopt:
 - Export preview.
 - Failed export log.
 - On-demand generation using the lab filename pattern, rather than a scheduled monthly automation.
+- Multi-strain operation: choose a strain before preview/download, and later support batch generation of one workbook per strain when needed.
+- Senior workbook examples should be treated as raw source/template references because animalsheet tabs can be strain-based while separation tabs can be person-based with many strain blocks.
 
 Design principle:
 
@@ -256,6 +259,7 @@ Adopt:
 
 - Strain Master.
 - Strain Alias Master.
+- Distribution Import Master for periodic assignment workbooks.
 - Genotype Category Master.
 - Management Rule Master.
 - Card Type Rules.
@@ -265,6 +269,7 @@ UX guidance:
 
 - Unknown parsed values should create review items.
 - Adding a new strain/genotype/rule should feel deliberate, not automatic.
+- Periodic distribution workbooks should update assignment scope and candidate strain suggestions, not overwrite accepted cage/card state.
 
 ## External References Worth Evaluating
 
@@ -286,6 +291,7 @@ Safety note:
 
 - Before using any external OCR, LLM, or inference service, minimize payloads and avoid sending unnecessary full records.
 - If payload safety is unclear, treat it as local-only until the user approves otherwise.
+- The base workflow should remain LLM-optional: local/manual parsing, OCR, rules, validation, review, and export must still work without an LLM.
 
 ## References To Avoid Or Treat Carefully
 

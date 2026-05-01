@@ -54,6 +54,11 @@
       cursor: pointer;
     }
 
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.52;
+    }
+
     .app {
       display: grid;
       grid-template-columns: 248px minmax(0, 1fr);
@@ -382,6 +387,134 @@
       background: var(--surface);
       border-bottom: 1px solid var(--line);
       flex-shrink: 0;
+    }
+
+    .workbook-preview {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 260px;
+      max-height: 42vh;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    .workbook-preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--line-soft);
+      background: #fbfdff;
+    }
+
+    .workbook-preview-title strong {
+      display: block;
+      font-size: 13px;
+      line-height: 18px;
+    }
+
+    .workbook-preview-title span {
+      display: block;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .segmented-control {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+
+    .segment-button {
+      min-height: 30px;
+      border: 0;
+      border-right: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .segment-button:last-child {
+      border-right: 0;
+    }
+
+    .segment-button.active {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .spreadsheet-frame {
+      overflow: auto;
+      background:
+        linear-gradient(#f3f6f7 0 0) 0 0 / 42px 28px no-repeat,
+        var(--surface);
+    }
+
+    .spreadsheet-table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 12px;
+    }
+
+    .spreadsheet-table th,
+    .spreadsheet-table td {
+      min-width: 104px;
+      height: 30px;
+      border-right: 1px solid #cfd8dc;
+      border-bottom: 1px solid #cfd8dc;
+      padding: 6px 8px;
+      white-space: nowrap;
+      background: #fff;
+      font-size: 12px;
+    }
+
+    .spreadsheet-table .corner,
+    .spreadsheet-table .column-letter,
+    .spreadsheet-table .row-number {
+      position: sticky;
+      z-index: 4;
+      background: #edf2f4;
+      color: var(--quiet);
+      text-align: center;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .spreadsheet-table .corner {
+      left: 0;
+      top: 0;
+      min-width: 42px;
+      width: 42px;
+    }
+
+    .spreadsheet-table .column-letter {
+      top: 0;
+    }
+
+    .spreadsheet-table .row-number {
+      left: 0;
+      min-width: 42px;
+      width: 42px;
+    }
+
+    .spreadsheet-table .sheet-header {
+      background: #e8f4f3;
+      color: var(--primary);
+      font-weight: 900;
+    }
+
+    .spreadsheet-table .blocked-cell {
+      background: var(--error-bg);
+      color: var(--error);
+      font-weight: 800;
     }
 
     .quick-start {
@@ -843,7 +976,9 @@
       gap: 4px;
     }
 
-    .reason-box textarea {
+    .reason-box textarea,
+    .movement-box textarea,
+    .movement-box select {
       min-height: 58px;
       resize: vertical;
       border: 1px solid var(--line);
@@ -852,6 +987,20 @@
       padding: 7px 8px;
       color: var(--ink);
       outline: none;
+    }
+
+    .movement-box {
+      display: grid;
+      gap: 8px;
+      border: 1px solid #f2c9a4;
+      border-radius: 4px;
+      background: #fffdf9;
+      padding: 10px;
+    }
+
+    .movement-box select {
+      min-height: 34px;
+      resize: none;
     }
 
     .mini-label {
@@ -1132,10 +1281,10 @@
             </div>
             <div class="quick-card">
               <div>
-                <strong>Boundary check</strong>
-                <span>Imported JSON stays parsed/intermediate until review or explicit auto-fill policy.</span>
+                <strong>Latest batch</strong>
+                <span id="latestBatchSummary">No uploaded batch in this session.</span>
               </div>
-              <span class="layer-chip">Non-canonical</span>
+              <span class="layer-chip">Batch intake</span>
             </div>
           </div>
 
@@ -1145,6 +1294,7 @@
                 <tr>
                   <th>Photo</th>
                   <th>Uploaded</th>
+                  <th>Batch</th>
                   <th>Card Type</th>
                   <th>Raw Strain</th>
                   <th>Matched Strain</th>
@@ -1225,14 +1375,52 @@
             <span class="layer-chip">Export or view</span>
           </div>
           <div class="metrics">
-            <article class="metric valid"><span>Separation workbook</span><strong>Ready</strong></article>
-            <article class="metric review"><span>Animalsheet</span><strong>2 blocks</strong></article>
+            <article class="metric valid"><span>Separation workbook</span><strong id="separationExportStatus">0 rows</strong></article>
+            <article class="metric review"><span>Animalsheet</span><strong id="animalsheetExportStatus">0 rows</strong></article>
             <article class="metric conflict"><span>Blocked exports</span><strong id="blockedExports">0</strong></article>
           </div>
           <div class="toolbar">
+            <div class="filters" aria-label="Export strain controls">
+              <select id="exportStrainSelect" aria-label="Export strain">
+                <option value="">No accepted strains yet</option>
+              </select>
+            </div>
             <button class="primary-button" type="button" id="generateExport">Generate Separation CSV</button>
             <button class="small-button" type="button" id="previewAnimalsheet">Preview Animalsheet</button>
+            <button class="small-button" type="button" id="downloadSeparationXlsx">Download Separation XLSX</button>
+            <button class="small-button" type="button" id="downloadAnimalsheetXlsx">Download Animal Sheet XLSX</button>
           </div>
+          <div class="quick-start" aria-label="Expected export filenames">
+            <div class="quick-card">
+              <div>
+                <strong>Separation filename</strong>
+                <span class="mono" id="separationFilenamePreview">No accepted separation rows yet.</span>
+              </div>
+              <span class="layer-chip">XLSX</span>
+            </div>
+            <div class="quick-card">
+              <div>
+                <strong>Animal sheet filename</strong>
+                <span class="mono" id="animalsheetFilenamePreview">No accepted mating rows yet.</span>
+              </div>
+              <span class="layer-chip">XLSX</span>
+            </div>
+          </div>
+          <section class="workbook-preview" aria-label="Excel workbook preview">
+            <div class="workbook-preview-header">
+              <div class="workbook-preview-title">
+                <strong id="workbookPreviewTitle">Separation workbook preview</strong>
+                <span id="workbookPreviewMeta">Accepted rows only; review/conflict items stay blocked.</span>
+              </div>
+              <div class="segmented-control" aria-label="Workbook preview type">
+                <button class="segment-button active" type="button" data-workbook-preview="separation">&#48516;&#47532; &#54788;&#54889;&#54364;</button>
+                <button class="segment-button" type="button" data-workbook-preview="animalsheet">Animal sheet</button>
+              </div>
+            </div>
+            <div class="spreadsheet-frame">
+              <table class="spreadsheet-table" aria-label="Workbook-like accepted export rows" id="workbookPreviewTable"></table>
+            </div>
+          </section>
           <div class="table-wrap">
             <table aria-label="Export preview">
               <thead>
@@ -1295,7 +1483,8 @@
                 <tr><td>OCR Alias</td><td class="mono">Raw handwritten text</td><td>Maps repeated OCR variants to a configured strain.</td></tr>
                 <tr><td>Genotype Categories</td><td class="mono">Configured category</td><td>Blocks unexpected genotype values until review.</td></tr>
                 <tr><td>Management Rules</td><td class="mono">Min/max age days</td><td>Creates warnings without hard-coded date rules.</td></tr>
-                <tr><td>External Inference Policy</td><td class="mono">Local-only by default</td><td>Blocks external OCR or LLM payloads until approved.</td></tr>
+                <tr><td>Distribution Import</td><td class="mono">Periodic assignment workbook</td><td>Registers assigned people, mating types, cage counts, and candidate strain names as raw Excel source before review.</td></tr>
+                <tr><td>Parse Assist Policy</td><td class="mono">LLM-optional</td><td>Core parsing runs locally/manual-first; external OCR or LLM payloads stay blocked until approved.</td></tr>
               </tbody>
             </table>
           </div>
@@ -1352,6 +1541,16 @@
                 <span class="mini-label">Dismiss reason</span>
                 <textarea id="dismissReason" placeholder="Required when dismissing a review item"></textarea>
               </div>
+              <div class="movement-box" id="movementBox">
+                <span class="mini-label">Duplicate active mouse resolution</span>
+                <select id="movementResolutionType">
+                  <option value="previous_snapshot_closed">Previous card closed; accept incoming active mouse</option>
+                  <option value="incoming_moved">Incoming note marks the mouse moved</option>
+                  <option value="incoming_dead">Incoming note marks the mouse dead</option>
+                  <option value="ocr_duplicate">OCR duplicate; keep this source non-canonical</option>
+                </select>
+                <textarea id="movementReason" placeholder="Required: note the cage card evidence or lab decision"></textarea>
+              </div>
             </section>
 
             <section class="panel">
@@ -1377,6 +1576,7 @@
 
           <div class="drawer-footer">
             <button class="ghost-button" type="button" id="dismissButton">Dismiss With Reason</button>
+            <button class="small-button" type="button" id="resolveMovementButton">Resolve Mouse Movement</button>
             <button class="primary-button" type="button" id="applyButton">Apply Reviewed Changes</button>
           </div>
         </aside>
@@ -1527,6 +1727,11 @@
     let searchTerm = "";
     let statusFilter = "all";
     let typeFilter = "all";
+    let activeWorkbookPreview = "separation";
+    const activeExportStrainByType = {
+      separation: "",
+      animalsheet: ""
+    };
     let generatedRecordSequence = 0;
     const storageKey = "mouse-colony-lims-mvp-session-v1";
     const actionLogEntries = [
@@ -1559,84 +1764,7 @@
       dismissed: "dismissed"
     };
 
-    const sampleParseFixtureRecords = [
-      {
-        type: "Separated",
-        rawStrain: "B6 Cg Tg?",
-        matchedStrain: "Review against Strain Master",
-        dobRaw: "26.04.13",
-        dobNormalized: "2026-04-13",
-        mouseCount: "318 R', 319 L', 320 R'L'",
-        confidence: 61,
-        status: "review",
-        issue: "Low-confidence strain alias",
-        severity: "Medium",
-        reviewField: "matchedStrain",
-        currentValue: "Review against Strain Master",
-        suggestedValue: "Select configured strain",
-        reviewReason: "Raw strain text is uncertain and must not create a new strain automatically.",
-        notes: [
-          { raw: "318 R'", meaning: "Possible mouse ID 318, right ear notch", strike: "none" },
-          { raw: "319 L'", meaning: "Possible mouse ID 319, left ear notch", strike: "none" },
-          { raw: "320 R'L'", meaning: "Possible mouse ID 320, both ears notched", strike: "none" }
-        ],
-        actions: [
-          "Keep raw strain text as parsed evidence.",
-          "Create review item before accepting normalized strain.",
-          "Do not create new strain automatically."
-        ]
-      },
-      {
-        type: "Mating",
-        rawStrain: "GH line",
-        matchedStrain: "GH line",
-        dobRaw: "25.12.01",
-        dobNormalized: "2025-12-01",
-        mouseCount: "Sire GH70 / Dam GH83",
-        confidence: 82,
-        status: "conflict",
-        issue: "Duplicate active mouse",
-        severity: "High",
-        reviewField: "mouseId",
-        currentValue: "GH70 active in another card snapshot",
-        suggestedValue: "Apply reviewed movement before mating assignment",
-        reviewReason: "A mouse ID appears active in more than one current card snapshot.",
-        notes: [
-          { raw: "26.04.13 - 10p", meaning: "Litter event, 10 pups", strike: "none" },
-          { raw: "GH70 x GH83", meaning: "Parent IDs on mating card", strike: "none" }
-        ],
-        actions: [
-          "Create high-severity review item.",
-          "Require reviewed movement action before mating assignment.",
-          "Link event to source photo and note line."
-        ]
-      },
-      {
-        type: "Separated",
-        rawStrain: "ApoM Tg/Tg",
-        matchedStrain: "ApoM Tg/Tg",
-        dobRaw: "25.10.20-28",
-        dobNormalized: "2025-10-20 to 2025-10-28",
-        mouseCount: "2M, 1F / 3",
-        confidence: 95,
-        status: "auto",
-        issue: "Fixture auto-filled by policy",
-        severity: "Low",
-        reviewField: "matchedStrain",
-        currentValue: "ApoM Tg/Tg",
-        suggestedValue: "ApoM Tg/Tg",
-        reviewReason: "Fixture represents a high-confidence configured strain alias.",
-        notes: [
-          { raw: "MT318 R'", meaning: "Mouse MT318, right ear notch", strike: "none" },
-          { raw: "MT319 L'", meaning: "Mouse MT319, left ear notch", strike: "none" }
-        ],
-        actions: [
-          "Create or update card snapshot from parsed fixture.",
-          "Attach note lines as structured evidence.",
-          "Keep export traceability to fixture source."
-        ]
-      }
-    ];
+    const sampleParseFixtureRecords = JSON.parse(`[{"id":"FIXTURE-LOW-STRAIN","uploaded":"Fixture import","type":"Separated","rawStrain":"B6 Cg Tg?","matchedStrain":"Review against Strain Master","dobRaw":"26.04.13","dobNormalized":"2026-04-13","mouseCount":"318 R', 319 L', 320 R'L'","confidence":61,"status":"review","issue":"Low-confidence strain alias","severity":"Medium","reviewField":"matchedStrain","currentValue":"Review against Strain Master","suggestedValue":"Select configured strain","reviewReason":"Raw strain text is uncertain and must not create a new strain automatically.","notes":[{"raw":"318 R'","meaning":"Possible mouse ID 318, right ear notch","strike":"none"},{"raw":"319 L'","meaning":"Possible mouse ID 319, left ear notch","strike":"none"},{"raw":"320 R'L'","meaning":"Possible mouse ID 320, both ears notched","strike":"none"}],"actions":["Keep raw strain text as parsed evidence.","Create review item before accepting normalized strain.","Do not create new strain automatically."]},{"id":"FIXTURE-MATING-CONFLICT","uploaded":"Fixture import","type":"Mating","rawStrain":"GH line","matchedStrain":"GH line","dobRaw":"25.12.01","dobNormalized":"2025-12-01","mouseCount":"Sire GH70 / Dam GH83","confidence":82,"status":"conflict","issue":"Duplicate active mouse","severity":"High","reviewField":"mouseId","currentValue":"GH70 active in another card snapshot","suggestedValue":"Apply reviewed movement before mating assignment","reviewReason":"A mouse ID appears active in more than one current card snapshot.","notes":[{"raw":"26.04.13 - 10p","meaning":"Litter event, 10 pups","strike":"none"},{"raw":"GH70 x GH83","meaning":"Parent IDs on mating card","strike":"none"}],"actions":["Create high-severity review item.","Require reviewed movement action before mating assignment.","Link event to source photo and note line."]},{"id":"FIXTURE-AUTO-MATING","uploaded":"Fixture import","type":"Mating","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.10.20","dobNormalized":"2025-10-20","mouseCount":"Sire MT321 / Dam MT322","confidence":94,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"matchedStrain","currentValue":"ApoM Tg/Tg","suggestedValue":"ApoM Tg/Tg","reviewReason":"Fixture represents an accepted mating block for animalsheet preview.","notes":[{"raw":"26.04.13 - 10p","meaning":"Litter event, 10 pups","strike":"none"},{"raw":"MT321 x MT322","meaning":"Parent IDs on mating card","strike":"none"}],"actions":["Create accepted mating block from parsed fixture.","Expose litter note evidence in animalsheet-style preview."]},{"id":"FIXTURE-COUNT-MISMATCH","uploaded":"Fixture import","type":"Separated","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.11.02","dobNormalized":"2025-11-02","mouseCount":"4 total","confidence":93,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"mouseCount","currentValue":"4 total","suggestedValue":"4 total","reviewReason":"Fixture intentionally contains a count mismatch to exercise validation.","notes":[{"raw":"MT401 R'","meaning":"Mouse MT401, right ear notch","strike":"none"},{"raw":"MT402 L'","meaning":"Mouse MT402, left ear notch","strike":"none"},{"raw":"MT403 R'L'","meaning":"Mouse MT403, both ears notched","strike":"none"}],"actions":["Import as parsed result.","Run count mismatch validation before canonical candidate creation."]},{"id":"FIXTURE-AUTO-SEPARATED","uploaded":"Fixture import","type":"Separated","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.10.20-28","dobNormalized":"2025-10-20 to 2025-10-28","mouseCount":"2 total","confidence":95,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"matchedStrain","currentValue":"ApoM Tg/Tg","suggestedValue":"ApoM Tg/Tg","reviewReason":"Fixture represents a high-confidence configured strain alias.","notes":[{"raw":"MT321 R'","meaning":"Mouse MT321, right ear notch","strike":"none"},{"raw":"MT322 L'","meaning":"Mouse MT322, left ear notch","strike":"none"},{"raw":"MT323 R'L'","meaning":"Mouse MT323, both ears notched; moved out on reviewed card","strike":"single"}],"actions":["Create or update card snapshot from parsed fixture.","Attach note lines as structured evidence.","Keep export traceability to fixture source."]},{"id":"FIXTURE-DUPLICATE-ACTIVE","uploaded":"Fixture import","type":"Separated","rawStrain":"ApoM Tg/Tg","matchedStrain":"ApoM Tg/Tg","dobRaw":"25.10.20","dobNormalized":"2025-10-20","mouseCount":"1 total","confidence":94,"status":"auto","issue":"Fixture auto-filled by policy","severity":"Low","reviewField":"mouseId","currentValue":"MT318","suggestedValue":"MT318","reviewReason":"Fixture intentionally duplicates an active seed mouse ID.","notes":[{"raw":"MT318 R'","meaning":"Mouse MT318, right ear notch","strike":"none"}],"actions":["Import as parsed result.","Run duplicate active mouse validation before canonical candidate creation."]}]`);
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -1715,6 +1843,11 @@
       return `PARSE-${String(generatedRecordSequence).padStart(4, "0")}-${String(index + 1).padStart(2, "0")}`;
     }
 
+    function formatBatchId() {
+      const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      return `BATCH-${ymd}-${String(Date.now()).slice(-5)}`;
+    }
+
     function readFileAsDataUrl(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -1724,11 +1857,14 @@
       });
     }
 
-    async function buildUploadedPhoto(file, index) {
+    async function buildUploadedPhoto(file, index, batchId, batchSize) {
       const id = formatUploadId(index);
       const sourceUrl = await readFileAsDataUrl(file);
       return {
         id,
+        batchId,
+        batchIndex: index + 1,
+        batchSize,
         uploaded: `Today ${todayLabel()}`,
         type: "Separated",
         rawStrain: "Pending local parse",
@@ -1759,7 +1895,7 @@
       const confidence = Number(record.confidence ?? 0);
       const status = record.status || (confidence >= 90 ? "auto" : "review");
       const id = record.id || formatImportedParseId(index);
-      return validateParsedRecord({
+      return validateImportedRecord({
         id,
         uploaded: record.uploaded || `Imported ${todayLabel()}`,
         type: record.type || "Separated",
@@ -1834,6 +1970,26 @@
       return photo;
     }
 
+    function validateMatingRecord(photo) {
+      if (photo.type !== "Mating" || photo.status !== "auto") return photo;
+      const ids = parsedMatingIds(photo);
+      if (photo.confidence >= 80 && ids.sire && ids.dam) return photo;
+
+      photo.status = "review";
+      photo.issue = "Mating mapping review";
+      photo.severity = photo.confidence < 80 ? "Medium" : "Low";
+      photo.reviewField = "mouseCount";
+      photo.currentValue = photo.mouseCount;
+      photo.suggestedValue = ids.sire || ids.dam ? `${ids.sire || "Review sire"} x ${ids.dam || "Review dam"}` : "Review parent IDs";
+      photo.reviewReason = "Accepted mating records require reviewable parent IDs before animalsheet preview or export.";
+      photo.actions = (photo.actions || []).concat("Create review item for ambiguous mating parent mapping before animalsheet export.");
+      return photo;
+    }
+
+    function validateImportedRecord(photo) {
+      return validateMatingRecord(validateParsedRecord(photo));
+    }
+
     function activeMouseIds(photo) {
       if (photo.type !== "Separated") return [];
       return (photo.notes || [])
@@ -1847,6 +2003,8 @@
       photo.issue = "Duplicate active mouse";
       photo.severity = "High";
       photo.reviewField = "mouseId";
+      photo.duplicateMouseId = mouseId;
+      photo.duplicateOtherSourceId = otherSourceId;
       photo.currentValue = `${mouseId} active in ${photo.id}`;
       photo.suggestedValue = `Review movement before accepting ${mouseId}`;
       photo.reviewReason = `Mouse ${mouseId} appears active in both ${photo.id} and ${otherSourceId}.`;
@@ -1910,6 +2068,43 @@
       return match ? match[0] : "";
     }
 
+    function isDuplicateActiveReview(photo) {
+      return photo && photo.reviewField === "mouseId" && photo.issue === "Duplicate active mouse";
+    }
+
+    function duplicateMouseId(photo) {
+      return photo.duplicateMouseId || extractMouseDisplayId(`${photo.currentValue} ${photo.reviewReason}`);
+    }
+
+    function duplicateOtherSourceId(photo) {
+      if (photo.duplicateOtherSourceId) return photo.duplicateOtherSourceId;
+      const match = String(photo.reviewReason || "").match(/\band\s+([A-Z0-9-]+)\.?$/i);
+      return match ? match[1] : "";
+    }
+
+    function movementResolutionLabel(value) {
+      const labels = {
+        previous_snapshot_closed: "Previous card closed",
+        incoming_moved: "Incoming mouse moved",
+        incoming_dead: "Incoming mouse dead",
+        ocr_duplicate: "OCR duplicate"
+      };
+      return labels[value] || "Movement reviewed";
+    }
+
+    function movementClosuresBySource() {
+      return photos
+        .filter((photo) => photo.status === "auto" && photo.movementResolution?.type === "previous_snapshot_closed")
+        .reduce((closures, photo) => {
+          const sourceId = photo.movementResolution.otherSourceId;
+          const mouseId = photo.movementResolution.mouseId;
+          if (sourceId && mouseId) {
+            closures.set(`${sourceId}:${mouseId}`, photo.id);
+          }
+          return closures;
+        }, new Map());
+    }
+
     function noteStatus(note) {
       if (note.strike === "double") return "Dead candidate";
       if (note.strike === "single") return "Moved candidate";
@@ -1918,19 +2113,21 @@
     }
 
     function canonicalCandidateRows() {
+      const movementClosures = movementClosuresBySource();
       return photos
         .filter((photo) => photo.type === "Separated" && photo.status === "auto")
         .flatMap((photo) => photo.notes.map((note, index) => {
           const mouseDisplayId = extractMouseDisplayId(note.raw);
           if (!mouseDisplayId) return null;
+          const closureSourceId = movementClosures.get(`${photo.id}:${mouseDisplayId}`);
           return [
             mouseDisplayId,
             photo.matchedStrain,
             "From note",
             photo.dobNormalized,
             "Pending genotype",
-            noteStatus(note),
-            `${photo.id} / note line ${index + 1}`
+            closureSourceId ? "Closed by movement review" : noteStatus(note),
+            closureSourceId ? `${photo.id} / note line ${index + 1}; superseded by ${closureSourceId}` : `${photo.id} / note line ${index + 1}`
           ];
         }))
         .filter(Boolean);
@@ -1938,6 +2135,136 @@
 
     function blockedExportItems() {
       return photos.filter((photo) => photo.status === "review" || photo.status === "conflict");
+    }
+
+    function latestBatchPhotos() {
+      const latest = photos.find((photo) => photo.batchId);
+      return latest ? photos.filter((photo) => photo.batchId === latest.batchId) : [];
+    }
+
+    function acceptedPhotosByType(type) {
+      return photos.filter((photo) => photo.type === type && photo.status === "auto");
+    }
+
+    function noteEvidence(photo) {
+      return photo.notes.map((note) => note.raw).join(" | ") || "No parsed note lines";
+    }
+
+    function extractMouseDisplayIds(text) {
+      return String(text || "").match(/\b[A-Za-z]{0,4}\d+[A-Za-z0-9-]*\b/g) || [];
+    }
+
+    function parsedMatingIds(photo) {
+      const countText = String(photo.mouseCount || "");
+      const noteText = (photo.notes || []).map((note) => note.raw).join(" | ");
+      const text = `${countText} | ${noteText}`;
+      const sireMatch = text.match(/\bSire\s+([A-Za-z]{0,4}\d+[A-Za-z0-9-]*)\b/i);
+      const damMatch = text.match(/\bDam\s+([A-Za-z]{0,4}\d+[A-Za-z0-9-]*)\b/i);
+      const crossMatch = text.match(/\b([A-Za-z]{0,4}\d+[A-Za-z0-9-]*)\b\s*(?:x|X|by)\s*\b([A-Za-z]{0,4}\d+[A-Za-z0-9-]*)\b/);
+      const countIds = extractMouseDisplayIds(countText);
+      const noteIds = extractMouseDisplayIds(noteText);
+      const allIds = Array.from(new Set(countIds.concat(noteIds)));
+      return {
+        sire: sireMatch?.[1] || crossMatch?.[1] || allIds[0] || "",
+        dam: damMatch?.[1] || crossMatch?.[2] || allIds.find((id) => id !== (sireMatch?.[1] || crossMatch?.[1] || allIds[0])) || ""
+      };
+    }
+
+    function litterEventRows(photo) {
+      return photo.notes
+        .filter((note) => /\d+\s*p\b/i.test(note.raw) || /litter|pup/i.test(note.meaning || ""))
+        .map((note, index) => {
+          const countMatch = String(note.raw).match(/\b(\d+)\s*p\b/i);
+          const dateMatch = String(note.raw).match(/\d{2}[./-]\d{1,2}[./-]\d{1,2}/);
+          const status = note.strike === "single" ? "separated" : note.strike === "double" ? "dead" : "open";
+          return ["", "", "Litter", `F${index + 1}`, status, "", dateMatch ? dateMatch[0] : "", countMatch ? countMatch[1] : "Review", note.raw, `${photo.id} / note line ${index + 1}`];
+        });
+    }
+
+    function acceptedStrainsForPreview(previewType) {
+      const cardType = previewType === "animalsheet" ? "Mating" : "Separated";
+      return Array.from(new Set(
+        acceptedPhotosByType(cardType)
+          .map((photo) => String(photo.matchedStrain || "").trim())
+          .filter(Boolean)
+      )).sort((a, b) => a.localeCompare(b));
+    }
+
+    function activeExportStrain(previewType = activeWorkbookPreview) {
+      const strains = acceptedStrainsForPreview(previewType);
+      const selected = activeExportStrainByType[previewType];
+      if (selected && strains.includes(selected)) {
+        return selected;
+      }
+      activeExportStrainByType[previewType] = strains[0] || "";
+      return activeExportStrainByType[previewType];
+    }
+
+    function acceptedPhotosForPreview(previewType) {
+      const cardType = previewType === "animalsheet" ? "Mating" : "Separated";
+      const strain = activeExportStrain(previewType);
+      return acceptedPhotosByType(cardType).filter((photo) => photo.matchedStrain === strain);
+    }
+
+    function animalSheetRows() {
+      return acceptedPhotosForPreview("animalsheet").flatMap((photo, index) => {
+        const ids = parsedMatingIds(photo);
+        const cageNo = index + 1;
+        const parentEvidence = noteEvidence(photo);
+        const parentRows = [
+          [cageNo, photo.matchedStrain, "M", ids.sire || "Review sire ID", "Parsed", photo.dobRaw, "", "", parentEvidence, photo.id],
+          ["", "", "F", ids.dam || "Review dam ID", "Parsed", photo.dobRaw, "", "", parentEvidence, photo.id]
+        ];
+        const litters = litterEventRows(photo);
+        return litters.length ? parentRows.concat(litters) : parentRows;
+      });
+    }
+
+    function sheetNameForPreview(previewType) {
+      return exportStrainLabel(previewType).slice(0, 31) || "Mouse colony";
+    }
+
+    function workbookPreviewModel(previewType = activeWorkbookPreview) {
+      const blocked = blockedExportItems().length;
+      if (previewType === "animalsheet") {
+        const rows = animalSheetRows();
+        const strain = activeExportStrain(previewType);
+        const acceptedBlocks = acceptedPhotosForPreview(previewType).length;
+        return {
+          title: "Animal sheet preview",
+          exportType: "animal sheet",
+          sheetName: sheetNameForPreview(previewType),
+          meta: `${strain || "No selected strain"}: ${acceptedBlocks} accepted mating block${acceptedBlocks === 1 ? "" : "s"}, ${rows.length} preview row${rows.length === 1 ? "" : "s"}; ${blocked} blocked review item${blocked === 1 ? "" : "s"}.`,
+          headerRows: [["Cage No.", "Strain", "Sex", "I.D", "genotype", "DOB", "Mating date", "Pubs", "Source evidence", "Traceability"]],
+          columnWidths: [12.33, 17.75, 8.16, 15.66, 15, 15.25, 15.5, 20.5, 20, 24],
+          rows
+        };
+      }
+
+      const strain = activeExportStrain(previewType);
+      const rows = acceptedPhotosForPreview("separation").map((photo) => [
+        photo.matchedStrain,
+        "Pending genotype",
+        photo.mouseCount,
+        photo.dobNormalized,
+        "",
+        "",
+        "",
+        "Review age/sampling rule",
+        photo.id
+      ]);
+      return {
+        title: "Separation workbook preview",
+        exportType: "\ubd84\ub9ac \ud604\ud669\ud45c",
+        sheetName: sheetNameForPreview(previewType),
+        meta: `${strain || "No selected strain"}: ${rows.length} accepted separated cage row${rows.length === 1 ? "" : "s"}; ${blocked} blocked review item${blocked === 1 ? "" : "s"}.`,
+        headerRows: [
+          ["Strain", "Genotype", "total", "DOB", "Genotype", "", "", "Sampling point", "Traceability"],
+          ["", "", "", "", "WT", "Tg", "", "", ""]
+        ],
+        columnWidths: [15.25, 17.66, 12, 21.58, 12, 10.16, 5, 47.41, 24],
+        rows
+      };
     }
 
     function renderMetrics() {
@@ -1959,6 +2286,14 @@
         </article>
       `).join("");
       document.getElementById("blockedExports").textContent = review + conflicts;
+      const batchPhotos = latestBatchPhotos();
+      if (batchPhotos.length) {
+        const batchReview = batchPhotos.filter((photo) => photo.status === "review" || photo.status === "conflict").length;
+        const batchProcessing = batchPhotos.filter((photo) => photo.status === "processing").length;
+        document.getElementById("latestBatchSummary").textContent = `${batchPhotos[0].batchId}: ${batchPhotos.length} photos, ${batchReview} review/conflict, ${batchProcessing} processing.`;
+      } else {
+        document.getElementById("latestBatchSummary").textContent = "No uploaded batch in this session.";
+      }
     }
 
     function renderInbox() {
@@ -1968,6 +2303,7 @@
         <tr class="${photo.id === selectedId ? "selected" : ""}" data-id="${photo.id}">
           <td><div class="thumb ${photo.sourceUrl ? "has-photo" : ""}" aria-label="Cage card thumbnail">${photo.sourceUrl ? `<img src="${photo.sourceUrl}" alt="">` : ""}</div></td>
           <td>${escapeHtml(photo.uploaded)}<br><span class="muted mono">${escapeHtml(photo.id)}</span></td>
+          <td class="mono">${escapeHtml(photo.batchId ? `${photo.batchId} (${photo.batchIndex}/${photo.batchSize})` : "Seed data")}</td>
           <td>${escapeHtml(photo.type)}</td>
           <td class="mono">${escapeHtml(photo.rawStrain)}</td>
           <td>${escapeHtml(photo.matchedStrain)}</td>
@@ -2028,14 +2364,327 @@
       `;
     }
 
+    function renderWorkbookPreview() {
+      const model = workbookPreviewModel();
+      const columnCount = Math.max(...model.headerRows.map((row) => row.length), ...model.rows.map((row) => row.length), 1);
+      const letters = Array.from({ length: columnCount }, (_, index) => String.fromCharCode(65 + index));
+      const headerRow = ["", ...letters].map((value, index) => (
+        index === 0
+          ? `<th class="corner">${escapeHtml(value)}</th>`
+          : `<th class="column-letter">${escapeHtml(value)}</th>`
+      )).join("");
+      const previewRows = model.headerRows.concat(model.rows);
+      const bodyRows = previewRows.map((row, rowIndex) => {
+        const rowClass = rowIndex < model.headerRows.length ? "sheet-header" : "";
+        const padded = row.concat(Array.from({ length: columnCount - row.length }, () => ""));
+        return `
+          <tr>
+            <th class="row-number">${rowIndex + 1}</th>
+            ${padded.map((cell) => `<td class="${rowClass}">${escapeHtml(cell)}</td>`).join("")}
+          </tr>
+        `;
+      }).join("") || `
+        <tr>
+          <th class="row-number">1</th>
+          <td class="blocked-cell">No accepted rows yet</td>
+        </tr>
+      `;
+      document.getElementById("workbookPreviewTitle").textContent = model.title;
+      document.getElementById("workbookPreviewMeta").textContent = model.meta;
+      document.getElementById("workbookPreviewTable").innerHTML = `<thead><tr>${headerRow}</tr></thead><tbody>${bodyRows}</tbody>`;
+      document.querySelectorAll("[data-workbook-preview]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.workbookPreview === activeWorkbookPreview);
+      });
+      renderExportStrainSelect();
+    }
+
+    function renderExportStrainSelect() {
+      const select = document.getElementById("exportStrainSelect");
+      const strains = acceptedStrainsForPreview(activeWorkbookPreview);
+      const active = activeExportStrain(activeWorkbookPreview);
+      select.disabled = !strains.length;
+      select.innerHTML = strains.length
+        ? strains.map((strain) => `<option value="${escapeHtml(strain)}" ${strain === active ? "selected" : ""}>${escapeHtml(strain)}</option>`).join("")
+        : `<option value="">No accepted strains yet</option>`;
+    }
+
+    function renderFilenamePreviews() {
+      const separationRows = workbookPreviewModel("separation").rows.length;
+      const animalsheetRows = workbookPreviewModel("animalsheet").rows.length;
+      document.getElementById("separationFilenamePreview").textContent = separationRows
+        ? xlsxFilename("separation")
+        : "No accepted separation rows yet.";
+      document.getElementById("animalsheetFilenamePreview").textContent = animalsheetRows
+        ? xlsxFilename("animalsheet")
+        : "No accepted mating rows yet.";
+    }
+
+    function renderExportReadiness() {
+      const separationRows = workbookPreviewModel("separation").rows.length;
+      const animalsheetRows = workbookPreviewModel("animalsheet").rows.length;
+      document.getElementById("separationExportStatus").textContent = separationRows
+        ? `${separationRows} row${separationRows === 1 ? "" : "s"}`
+        : "Not ready";
+      document.getElementById("animalsheetExportStatus").textContent = animalsheetRows
+        ? `${animalsheetRows} row${animalsheetRows === 1 ? "" : "s"}`
+        : "Not ready";
+      document.getElementById("downloadSeparationXlsx").disabled = !separationRows;
+      document.getElementById("downloadAnimalsheetXlsx").disabled = !animalsheetRows;
+    }
+
+    function xmlEscape(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function columnName(index) {
+      let name = "";
+      let value = index + 1;
+      while (value > 0) {
+        const mod = (value - 1) % 26;
+        name = String.fromCharCode(65 + mod) + name;
+        value = Math.floor((value - mod) / 26);
+      }
+      return name;
+    }
+
+    function worksheetXml(model) {
+      const rows = model.headerRows.concat(model.rows);
+      const columnCount = Math.max(...rows.map((row) => row.length), 1);
+      const colWidths = model.columnWidths || [];
+      const cols = Array.from({ length: columnCount }, (_, index) => {
+        const width = colWidths[index] || 14;
+        return `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`;
+      }).join("");
+      const sheetRows = rows.map((row, rowIndex) => {
+        const cells = row.map((cell, colIndex) => {
+          const ref = `${columnName(colIndex)}${rowIndex + 1}`;
+          const style = rowIndex < model.headerRows.length ? ` s="1"` : "";
+          return `<c r="${ref}"${style} t="inlineStr"><is><t>${xmlEscape(cell)}</t></is></c>`;
+        }).join("");
+        return `<row r="${rowIndex + 1}">${cells}</row>`;
+      }).join("");
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetViews><sheetView workbookViewId="0"/></sheetViews>
+  <sheetFormatPr defaultRowHeight="15"/>
+  <cols>${cols}</cols>
+  <sheetData>${sheetRows}</sheetData>
+</worksheet>`;
+    }
+
+    function crc32(bytes) {
+      let table = crc32.table;
+      if (!table) {
+        table = Array.from({ length: 256 }, (_, n) => {
+          let c = n;
+          for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+          return c >>> 0;
+        });
+        crc32.table = table;
+      }
+      let crc = 0xffffffff;
+      bytes.forEach((byte) => {
+        crc = table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+      });
+      return (crc ^ 0xffffffff) >>> 0;
+    }
+
+    function dosDateTime(date) {
+      const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+      const day = (date.getFullYear() - 1980) << 9 | ((date.getMonth() + 1) << 5) | date.getDate();
+      return { time, day };
+    }
+
+    function push16(target, value) {
+      target.push(value & 0xff, (value >>> 8) & 0xff);
+    }
+
+    function push32(target, value) {
+      target.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+    }
+
+    function concatBytes(parts) {
+      const length = parts.reduce((sum, part) => sum + part.length, 0);
+      const out = new Uint8Array(length);
+      let offset = 0;
+      parts.forEach((part) => {
+        out.set(part, offset);
+        offset += part.length;
+      });
+      return out;
+    }
+
+    function zipStore(files) {
+      const encoder = new TextEncoder();
+      const now = dosDateTime(new Date());
+      const localParts = [];
+      const centralParts = [];
+      let offset = 0;
+
+      files.forEach((file) => {
+        const nameBytes = encoder.encode(file.name);
+        const dataBytes = encoder.encode(file.content);
+        const crc = crc32(dataBytes);
+        const local = [];
+        push32(local, 0x04034b50);
+        push16(local, 20);
+        push16(local, 0x0800);
+        push16(local, 0);
+        push16(local, now.time);
+        push16(local, now.day);
+        push32(local, crc);
+        push32(local, dataBytes.length);
+        push32(local, dataBytes.length);
+        push16(local, nameBytes.length);
+        push16(local, 0);
+        const localHeader = concatBytes([new Uint8Array(local), nameBytes, dataBytes]);
+        localParts.push(localHeader);
+
+        const central = [];
+        push32(central, 0x02014b50);
+        push16(central, 20);
+        push16(central, 20);
+        push16(central, 0x0800);
+        push16(central, 0);
+        push16(central, now.time);
+        push16(central, now.day);
+        push32(central, crc);
+        push32(central, dataBytes.length);
+        push32(central, dataBytes.length);
+        push16(central, nameBytes.length);
+        push16(central, 0);
+        push16(central, 0);
+        push16(central, 0);
+        push16(central, 0);
+        push32(central, 0);
+        push32(central, offset);
+        centralParts.push(concatBytes([new Uint8Array(central), nameBytes]));
+        offset += localHeader.length;
+      });
+
+      const centralBytes = concatBytes(centralParts);
+      const end = [];
+      push32(end, 0x06054b50);
+      push16(end, 0);
+      push16(end, 0);
+      push16(end, files.length);
+      push16(end, files.length);
+      push32(end, centralBytes.length);
+      push32(end, offset);
+      push16(end, 0);
+      return concatBytes([...localParts, centralBytes, new Uint8Array(end)]);
+    }
+
+    function xlsxBlob(model) {
+      const sheetName = xmlEscape(model.sheetName);
+      const files = [
+        {
+          name: "[Content_Types].xml",
+          content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`
+        },
+        {
+          name: "_rels/.rels",
+          content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`
+        },
+        {
+          name: "xl/workbook.xml",
+          content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`
+        },
+        {
+          name: "xl/_rels/workbook.xml.rels",
+          content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`
+        },
+        {
+          name: "xl/styles.xml",
+          content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font></fonts>
+  <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8F4F3"/><bgColor indexed="64"/></patternFill></fill></fills>
+  <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFCFD8DC"/></left><right style="thin"><color rgb="FFCFD8DC"/></right><top style="thin"><color rgb="FFCFD8DC"/></top><bottom style="thin"><color rgb="FFCFD8DC"/></bottom><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/></cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>`
+        },
+        {
+          name: "xl/worksheets/sheet1.xml",
+          content: worksheetXml(model)
+        }
+      ];
+      return new Blob([zipStore(files)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    }
+
+    function exportDateLabel() {
+      return new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    }
+
+    function exportStrainLabel(previewType) {
+      return String(activeExportStrain(previewType) || "Mouse colony").replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim();
+    }
+
+    function xlsxFilename(previewType) {
+      const suffix = previewType === "animalsheet" ? "animal sheet" : "\ubd84\ub9ac \ud604\ud669\ud45c";
+      return `${exportDateLabel()} ${exportStrainLabel(previewType)} ${suffix}.xlsx`;
+    }
+
+    function downloadXlsx(previewType) {
+      const model = workbookPreviewModel(previewType);
+      if (!model.rows.length) {
+        showToast("No accepted rows are ready for XLSX export.");
+        return;
+      }
+      const blob = xlsxBlob(model);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = xlsxFilename(previewType);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      exportLogEntries.push({
+        time: timestampLabel(),
+        view: `${model.exportType} XLSX`,
+        included: model.rows.length,
+        blocked: blockedExportItems().length,
+        result: "XLSX generated from workbook preview"
+      });
+      actionLogEntries.push(`Generated ${model.exportType} XLSX with ${model.rows.length} preview row${model.rows.length === 1 ? "" : "s"}.`);
+      renderExports();
+      persistSession();
+      showToast(`${model.exportType} XLSX generated.`);
+    }
+
     function renderExports() {
-      const separationReady = photos.filter((photo) => photo.type === "Separated" && photo.status === "auto").length;
-      const animalsheetReady = photos.filter((photo) => photo.type === "Mating" && photo.status === "auto").length;
+      const separationReady = workbookPreviewModel("separation").rows.length;
+      const animalsheetReady = workbookPreviewModel("animalsheet").rows.length;
       const blockedItems = blockedExportItems();
       const blocked = blockedItems.length;
       const rows = [
-        ["Separation workbook CSV", "Accepted canonical structured state", separationReady, blocked, "Source photo + parsed note line per row; filename follows date + strain + 분리 현황표"],
-        ["Animalsheet preview", "Accepted mating/litter events", animalsheetReady, blocked, "Parent IDs and litter notes remain linked; filename follows date + strain + animal sheet"],
+        ["Separation workbook CSV", "Accepted canonical structured state", separationReady, blocked, `Selected strain: ${exportStrainLabel("separation")}; source photo + parsed note line per row`],
+        ["Animalsheet preview", "Accepted mating/litter events", animalsheetReady, blocked, `Selected strain: ${exportStrainLabel("animalsheet")}; parent IDs and litter notes remain linked`],
         ["Review block list", "Review item", blocked, 0, "Low-confidence and conflict rows excluded from exports"]
       ];
       document.getElementById("exportRows").innerHTML = rows.map((row) => `
@@ -2138,6 +2787,13 @@
       document.getElementById("afterValue").value = photo.suggestedValue;
       document.getElementById("dismissReason").value = photo.dismissReason || "";
       document.getElementById("reviewBox").style.display = photo.status === "auto" ? "none" : "grid";
+      const movementBox = document.getElementById("movementBox");
+      const movementButton = document.getElementById("resolveMovementButton");
+      const showMovementResolution = isDuplicateActiveReview(photo);
+      movementBox.style.display = showMovementResolution ? "grid" : "none";
+      movementButton.style.display = showMovementResolution ? "inline-flex" : "none";
+      document.getElementById("movementResolutionType").value = photo.movementResolution?.type || "previous_snapshot_closed";
+      document.getElementById("movementReason").value = photo.movementResolution?.reason || "";
 
       document.getElementById("noteList").innerHTML = photo.notes.length
         ? photo.notes.map((note, index) => `
@@ -2183,13 +2839,14 @@
       const files = Array.from(event.target.files || []);
       if (!files.length) return;
       try {
-        const uploadedPhotos = await Promise.all(files.map(buildUploadedPhoto));
+        const batchId = formatBatchId();
+        const uploadedPhotos = await Promise.all(files.map((file, index) => buildUploadedPhoto(file, index, batchId, files.length)));
         photos.unshift(...uploadedPhotos);
         selectedId = uploadedPhotos[0].id;
         setView("inbox");
         persistSession();
         renderAll();
-        showToast(`${uploadedPhotos.length} raw source photo${uploadedPhotos.length > 1 ? "s" : ""} stored locally.`);
+        showToast(`${uploadedPhotos.length} raw source photo${uploadedPhotos.length > 1 ? "s" : ""} stored as ${batchId}.`);
         uploadedPhotos.forEach((photo, index) => {
           window.setTimeout(() => {
             completeLocalParse(photo);
@@ -2256,8 +2913,7 @@
 
     function generateSeparationCsv() {
       const blocked = blockedExportItems().length;
-      const rows = photos
-        .filter((photo) => photo.type === "Separated" && photo.status === "auto")
+      const rows = acceptedPhotosForPreview("separation")
         .map((photo) => [
           photo.id,
           photo.matchedStrain,
@@ -2294,16 +2950,76 @@
         blocked,
         result: blocked ? "Preview generated; blocked rows excluded" : "Preview generated"
       });
-      actionLogEntries.push(`Generated separation CSV preview with ${rows.length} included row${rows.length === 1 ? "" : "s"} and ${blocked} blocked review item${blocked === 1 ? "" : "s"}.`);
+      actionLogEntries.push(`Generated separation CSV preview for ${exportStrainLabel("separation")} with ${rows.length} included row${rows.length === 1 ? "" : "s"} and ${blocked} blocked review item${blocked === 1 ? "" : "s"}.`);
       renderExports();
       persistSession();
       showToast("Separation CSV generated from reviewed rows only.");
     }
 
     function previewAnimalsheet() {
+      activeWorkbookPreview = "animalsheet";
       setView("exports");
-      const matingCount = photos.filter((photo) => photo.type === "Mating").length;
-      showToast(`${matingCount} mating source block${matingCount === 1 ? "" : "s"} available; conflicts remain blocked.`);
+      renderWorkbookPreview();
+      renderFilenamePreviews();
+      renderExportReadiness();
+      renderExports();
+      const matingCount = acceptedPhotosForPreview("animalsheet").length;
+      showToast(`${matingCount} accepted mating source block${matingCount === 1 ? "" : "s"} available for ${exportStrainLabel("animalsheet")}; conflicts remain blocked.`);
+    }
+
+    function resolveDuplicateActiveMouse() {
+      const photo = selectedPhoto();
+      if (!isDuplicateActiveReview(photo)) {
+        showToast("Select a duplicate active mouse review item first.");
+        return;
+      }
+      const resolutionType = document.getElementById("movementResolutionType").value;
+      const reason = document.getElementById("movementReason").value.trim();
+      if (!reason) {
+        showToast("Enter movement evidence or a lab decision before resolving the duplicate.");
+        return;
+      }
+
+      const mouseId = duplicateMouseId(photo);
+      const otherSourceId = duplicateOtherSourceId(photo);
+      const beforeValue = photo.currentValue;
+      const label = movementResolutionLabel(resolutionType);
+      photo.movementResolution = {
+        type: resolutionType,
+        label,
+        reason,
+        mouseId,
+        otherSourceId,
+        sourceId: photo.id,
+        beforeValue
+      };
+
+      if (resolutionType === "ocr_duplicate") {
+        photo.status = "dismissed";
+        photo.issue = "OCR duplicate dismissed";
+        photo.dismissReason = reason;
+        photo.reviewReason = `Duplicate active mouse item remains non-canonical. Reason: ${reason}`;
+      } else {
+        if (resolutionType === "incoming_moved" || resolutionType === "incoming_dead") {
+          const nextStrike = resolutionType === "incoming_moved" ? "single" : "double";
+          photo.notes = photo.notes.map((note) => (
+            extractMouseDisplayId(note.raw) === mouseId
+              ? { ...note, strike: nextStrike, meaning: `${note.meaning}; ${label.toLowerCase()} after review` }
+              : note
+          ));
+        }
+        photo.status = "auto";
+        photo.issue = "Movement reviewed";
+        photo.confidence = Math.max(photo.confidence, 90);
+        photo.currentValue = `${mouseId} - ${label}`;
+        photo.suggestedValue = photo.currentValue;
+        photo.reviewReason = `${label} for ${mouseId}. Evidence: ${reason}`;
+      }
+
+      actionLogEntries.push(`Resolved duplicate active mouse ${mouseId} on ${photo.id}: ${label}. Before: "${beforeValue}". Reason: "${reason}".`);
+      persistSession();
+      renderAll();
+      showToast("Duplicate active mouse resolved with traceable before/after movement evidence.");
     }
 
     function applyReviewedChange() {
@@ -2312,7 +3028,7 @@
         showToast("This item is already auto-filled; no review action is required.");
         return;
       }
-      if (photo.reviewField === "mouseId" && photo.issue === "Duplicate active mouse") {
+      if (isDuplicateActiveReview(photo)) {
         showToast("Resolve the mouse movement before accepting this duplicate active mouse.");
         return;
       }
@@ -2370,12 +3086,33 @@
       renderInbox();
       renderReviewRows();
       renderRecords();
+      renderWorkbookPreview();
+      renderFilenamePreviews();
+      renderExportReadiness();
       renderExports();
       renderDrawer();
     }
 
     document.querySelectorAll(".nav-button").forEach((button) => {
       button.addEventListener("click", () => setView(button.dataset.view));
+    });
+
+    document.querySelectorAll("[data-workbook-preview]").forEach((button) => {
+      button.addEventListener("click", () => {
+        activeWorkbookPreview = button.dataset.workbookPreview;
+        renderWorkbookPreview();
+        renderFilenamePreviews();
+        renderExportReadiness();
+        renderExports();
+      });
+    });
+
+    document.getElementById("exportStrainSelect").addEventListener("change", (event) => {
+      activeExportStrainByType[activeWorkbookPreview] = event.target.value;
+      renderWorkbookPreview();
+      renderFilenamePreviews();
+      renderExportReadiness();
+      renderExports();
     });
 
     document.getElementById("searchInput").addEventListener("input", (event) => {
@@ -2395,6 +3132,7 @@
 
     document.getElementById("applyButton").addEventListener("click", applyReviewedChange);
     document.getElementById("dismissButton").addEventListener("click", dismissWithReason);
+    document.getElementById("resolveMovementButton").addEventListener("click", resolveDuplicateActiveMouse);
     document.getElementById("nextItem").addEventListener("click", selectNextItem);
     document.getElementById("uploadButton").addEventListener("click", () => document.getElementById("photoInput").click());
     document.getElementById("photoInput").addEventListener("change", handlePhotoUpload);
@@ -2405,6 +3143,8 @@
     document.getElementById("parseInput").addEventListener("change", handleParseImport);
     document.getElementById("generateExport").addEventListener("click", generateSeparationCsv);
     document.getElementById("previewAnimalsheet").addEventListener("click", previewAnimalsheet);
+    document.getElementById("downloadSeparationXlsx").addEventListener("click", () => downloadXlsx("separation"));
+    document.getElementById("downloadAnimalsheetXlsx").addEventListener("click", () => downloadXlsx("animalsheet"));
     document.getElementById("jumpFirstReview").addEventListener("click", () => {
       const first = photos.find((photo) => photo.status === "review" || photo.status === "conflict");
       if (first) {
