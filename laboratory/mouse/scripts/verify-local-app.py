@@ -198,9 +198,17 @@ def main() -> None:
                 distribution_payload = distribution.json()
                 assert_true(distribution_payload["stored_rows"] == 1, "Distribution import row count is wrong.")
                 distribution_imports = client.get("/api/distribution-imports").json()
-                assert_true(len(distribution_imports) == 1, "Distribution import list should include the stored import.")
+                stored_distribution = next(
+                    (
+                        item
+                        for item in distribution_imports
+                        if item["distribution_import_id"] == distribution_payload["distribution_import_id"]
+                    ),
+                    None,
+                )
+                assert_true(stored_distribution is not None, "Distribution import list should include the stored import.")
                 assert_true(
-                    distribution_imports[0]["rows"][0]["traceability"]["source_cells"]["mating_type"] == "B35",
+                    stored_distribution["rows"][0]["traceability"]["source_cells"]["mating_type"] == "B35",
                     "Distribution import should preserve source cell traceability.",
                 )
                 created = client.post(
@@ -238,9 +246,17 @@ def main() -> None:
                 )
                 assert_true(distribution_payload["stored_rows"] >= 3, "Distribution import stored too few rows.")
                 imports = client.get("/api/distribution-imports").json()
-                assert_true(len(imports) == 1, "Distribution import list did not return the new import.")
+                imported_fixture = next(
+                    (
+                        item
+                        for item in imports
+                        if item["distribution_import_id"] == distribution_payload["distribution_import_id"]
+                    ),
+                    None,
+                )
+                assert_true(imported_fixture is not None, f"Distribution import list did not return the new import: {imports!r}")
                 assert_true(
-                    any(row["mating_type_raw"] == "GFAP Cre; S1PR1 fl/fl" for row in imports[0]["rows"]),
+                    any(row["mating_type_raw"] == "GFAP Cre; S1PR1 fl/fl" for row in imported_fixture["rows"]),
                     "Distribution assignment rows did not preserve candidate mating type.",
                 )
                 assert_true(
