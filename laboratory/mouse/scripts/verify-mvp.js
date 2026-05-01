@@ -176,6 +176,15 @@ async function main() {
     (await page.locator("#distributionSuggestionRows tr").filter({ hasText: "ApoMtg/tg" }).filter({ hasText: "Possible alias for ApoM Tg/Tg" }).count()) === 1,
     "Distribution fixture did not create a reviewable strain candidate suggestion."
   );
+  await page
+    .locator("#distributionSuggestionRows tr")
+    .filter({ hasText: "GFAP Cre; S1PR1 fl/fl" })
+    .getByRole("button", { name: "Add Scope" })
+    .click();
+  assert(
+    (await page.locator("#assignedStrainRows tr").filter({ hasText: "GFAP Cre; S1PR1 fl/fl" }).filter({ hasText: "Distribution import" }).count()) === 1,
+    "Distribution candidate was not added to My Assigned Strains."
+  );
   assert(
     (await page.locator("#recordRows tr").filter({ hasText: "ApoMtg/tg" }).count()) === 0,
     "Distribution assignment leaked into canonical mouse records."
@@ -267,6 +276,11 @@ async function main() {
   assert(
     (await page.locator("#distributionSuggestionRows tr").filter({ hasText: "GFAP Cre; S1PR1 fl/fl" }).filter({ hasText: "New candidate" }).count()) === 1,
     "Distribution parser JSON import did not create a new candidate review signal."
+  );
+  await page.locator("#distributionSuggestionRows tr").filter({ hasText: "GFAP Cre; S1PR1 fl/fl" }).getByRole("button", { name: "Add Scope" }).click();
+  assert(
+    (await page.locator("#assignedStrainRows tr").filter({ hasText: "GFAP Cre; S1PR1 fl/fl" }).filter({ hasText: "Distribution import" }).count()) === 1,
+    "Distribution candidate was not added to My Assigned Strains."
   );
   assert(
     (await page.locator("#recordRows tr").filter({ hasText: "ApoMtg/tg" }).count()) === 0,

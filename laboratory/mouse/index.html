@@ -1540,6 +1540,7 @@
                   <th>People</th>
                   <th>Cage Scope</th>
                   <th>Review Signal</th>
+                  <th>Action</th>
                   <th>Boundary</th>
                 </tr>
               </thead>
@@ -2152,6 +2153,20 @@
         return `Possible alias for ${suggestion.possibleAlias}; review raw source before confirming.`;
       }
       return "New candidate; review against strain master before use.";
+    }
+
+    function applyDistributionSuggestion(matingTypeRaw) {
+      const latest = distributionImports[0];
+      const suggestion = distributionStrainSuggestions(latest).find((entry) => entry.matingTypeRaw === matingTypeRaw);
+      if (!suggestion) return;
+      const source = latest ? `Distribution import: ${latest.sourceFileName}` : "Distribution import";
+      const canonicalName = suggestion.possibleAlias || suggestion.exactMatch || suggestion.matingTypeRaw;
+      const aliases = suggestion.possibleAlias || suggestion.exactMatch ? [suggestion.matingTypeRaw] : [];
+      if (upsertAssignedStrain(canonicalName, aliases, source)) {
+        persistSession();
+        renderAll();
+        showToast("Distribution candidate added to My Assigned Strains.");
+      }
     }
 
     function addDistributionImport(distributionImport) {
@@ -3033,10 +3048,14 @@
             <td>${escapeHtml(Array.from(suggestion.people).join(", "))}</td>
             <td>${escapeHtml(`${suggestion.cageTotal || "--"} cage${suggestion.cageTotal === 1 ? "" : "s"}; ${suggestion.matingCageTotal || "--"} mating cage${suggestion.matingCageTotal === 1 ? "" : "s"}`)}</td>
             <td>${escapeHtml(distributionReviewSignal(suggestion))}</td>
+            <td><button class="small-button" type="button" data-distribution-scope="${escapeHtml(suggestion.matingTypeRaw)}">Add Scope</button></td>
             <td><span class="layer-chip">Review item</span></td>
           </tr>
         `).join("")
-        : `<tr><td colspan="6">No candidate mating types to review yet.</td></tr>`;
+        : `<tr><td colspan="7">No candidate mating types to review yet.</td></tr>`;
+      document.querySelectorAll("[data-distribution-scope]").forEach((button) => {
+        button.addEventListener("click", () => applyDistributionSuggestion(button.dataset.distributionScope));
+      });
     }
 
     function renderCardImage(photo) {
@@ -3499,6 +3518,12 @@
     document.getElementById("distributionInput").addEventListener("change", handleDistributionImport);
     document.getElementById("addAssignedStrainButton").addEventListener("click", handleAssignedStrainSubmit);
     document.getElementById("assignedStrainAliases").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handleAssignedStrainSubmit();
+      }
+    });
+    document.getElementById("assignedStrainName").addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
         handleAssignedStrainSubmit();
