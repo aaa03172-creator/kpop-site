@@ -167,6 +167,27 @@
     </section>
 
     <section class="full">
+      <h2>Strain Registry</h2>
+      <p>Confirmed strain knowledge base entries stay separate from mouse records.</p>
+      <div class="form-grid">
+        <label>
+          Strain name
+          <input id="strainName" type="text" placeholder="PV-Cre">
+        </label>
+        <label>
+          Gene / allele
+          <input id="strainGeneAllele" type="text" placeholder="Pvalb / Pvalb-IRES-Cre">
+        </label>
+        <button id="strainButton" type="button">Add Strain</button>
+      </div>
+      <p class="muted" id="strainMessage"></p>
+      <table>
+        <thead><tr><th>Strain</th><th>Gene</th><th>Allele</th><th>Status</th><th>Source evidence</th></tr></thead>
+        <tbody id="strainRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
       <h2>Distribution Assignment Import</h2>
       <p>Parsed distribution rows stay non-canonical until added to My Assigned Strains.</p>
       <input id="distributionFile" type="file" accept="application/json,.json">
@@ -198,8 +219,17 @@
     <section>
       <h2>Review Queue</h2>
       <table>
-        <thead><tr><th>Issue</th><th>Severity</th><th>Suggested</th><th>Status</th></tr></thead>
+        <thead><tr><th>Issue</th><th>Severity</th><th>Suggested</th><th>Status</th><th>Action</th></tr></thead>
         <tbody id="reviewRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
+      <h2>Source Evidence</h2>
+      <p>Raw photos, manual entries, and imported rows remain traceable evidence.</p>
+      <table>
+        <thead><tr><th>Type</th><th>Label</th><th>URI</th><th>Imported</th><th>Note</th></tr></thead>
+        <tbody id="sourceRows"></tbody>
       </table>
     </section>
 
@@ -242,6 +272,24 @@
           </tr>
         </thead>
         <tbody id="noteRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
+      <h2>Mouse Events</h2>
+      <p>Durable mouse history, separate from the latest mouse card state.</p>
+      <table>
+        <thead><tr><th>Mouse</th><th>Event</th><th>Date</th><th>Related</th><th>Details</th></tr></thead>
+        <tbody id="eventRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
+      <h2>Correction Log</h2>
+      <p>Reviewed user corrections keep before and after values.</p>
+      <table>
+        <thead><tr><th>Entity</th><th>Field</th><th>Before</th><th>After</th><th>Reason</th><th>Corrected</th></tr></thead>
+        <tbody id="correctionRows"></tbody>
       </table>
     </section>
 
@@ -360,15 +408,24 @@
       `;
     }
 
+    function compactDetails(details) {
+      if (!details || Object.keys(details).length === 0) return "--";
+      return Object.entries(details).slice(0, 3).map(([key, value]) => `${key}: ${value}`).join("; ");
+    }
+
     async function refresh() {
-      const [health, assignedStrains, distributionImports, photos, reviews, mice, noteItems, preview] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, photos, reviews, mice, noteItems, mouseEvents, preview] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
+        api("/api/strains"),
+        api("/api/source-records"),
+        api("/api/corrections"),
         api("/api/distribution-imports"),
         api("/api/photos"),
         api("/api/review-items"),
         api("/api/mice"),
         api("/api/note-items"),
+        api("/api/mouse-events"),
         api("/api/export-preview")
       ]);
 
@@ -383,6 +440,15 @@
           await refresh();
         });
       });
+      document.getElementById("strainRows").innerHTML = strains.map((strain) =>
+        row([
+          strain.strain_name,
+          strain.gene || "--",
+          strain.allele || "--",
+          strain.status,
+          strain.source_record_id || "--"
+        ])
+      ).join("") || row(["No confirmed strains yet", "", "", "", ""]);
       const suggestions = distributionSuggestions(distributionImports, assignedStrains);
       document.getElementById("distributionRows").innerHTML = suggestions.map(distributionRow).join("") ||
         row(["No distribution candidates yet", "", "", "", "", ""]);
@@ -408,9 +474,44 @@
       document.getElementById("photoRows").innerHTML = photos.map((photo) =>
         row([photo.photo_id, photo.original_filename, photo.status, photo.uploaded_at])
       ).join("") || row(["No photos yet", "", "", ""]);
-      document.getElementById("reviewRows").innerHTML = reviews.map((item) =>
-        row([item.issue, item.severity, item.suggested_value, item.status])
-      ).join("") || row(["No review items", "", "", ""]);
+      document.getElementById("reviewRows").innerHTML = reviews.map((item) => `
+        <tr>
+          <td>${escapeHtml(item.issue)}</td>
+          <td>${escapeHtml(item.severity)}</td>
+          <td>${escapeHtml(item.suggested_value)}</td>
+          <td>${escapeHtml(item.status)}</td>
+          <td>${
+            item.status === "open"
+              ? `<button class="resolve-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Resolve</button>`
+              : escapeHtml(item.resolution_note || "Resolved")
+          }</td>
+        </tr>
+      `).join("") || row(["No review items", "", "", "", ""]);
+      document.querySelectorAll(".resolve-review").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const note = window.prompt("Resolution note");
+          if (!note || !note.trim()) return;
+          await api(`/api/review-items/${button.dataset.reviewId}/resolve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ resolution_note: note.trim() })
+          });
+          await refresh();
+        });
+      });
+      document.getElementById("sourceRows").innerHTML = sourceRecords.map((source) =>
+        row([source.source_type, source.source_label || "--", source.source_uri || "--", source.imported_at, source.note || "--"])
+      ).join("") || row(["No source evidence yet", "", "", "", ""]);
+      document.getElementById("correctionRows").innerHTML = corrections.map((correction) =>
+        row([
+          `${correction.entity_type}:${correction.entity_id}`,
+          correction.field_name,
+          correction.before_value || "--",
+          correction.after_value || "--",
+          correction.reason || "--",
+          correction.corrected_at
+        ])
+      ).join("") || row(["No corrections yet", "", "", "", "", ""]);
       document.getElementById("mouseRows").innerHTML = mice.map((mouse) =>
         row([
           mouse.display_id,
@@ -437,6 +538,15 @@
           item.needs_review ? "Needs review" : "No"
         ])
       ).join("") || row(["No parsed note evidence yet", "", "", "", "", "", "", "", ""]);
+      document.getElementById("eventRows").innerHTML = mouseEvents.map((event) =>
+        row([
+          event.mouse_id,
+          event.event_type,
+          event.event_date,
+          [event.related_entity_type, event.related_entity_id].filter(Boolean).join(": ") || "--",
+          compactDetails(event.details)
+        ])
+      ).join("") || row(["No mouse events yet", "", "", "", ""]);
       document.getElementById("exportPreview").textContent =
         `Photos: ${preview.photos}. Parsed results: ${preview.parsed_results}. ` +
         `Blocked review items: ${preview.blocked_review_items}. Ready: ${preview.ready ? "yes" : "no"}.`;
@@ -484,6 +594,26 @@
       document.getElementById("assignedStrainMessage").textContent = `Added ${result.display_name} to active scope.`;
       document.getElementById("assignedStrainName").value = "";
       document.getElementById("assignedStrainAliases").value = "";
+      await refresh();
+    });
+
+    document.getElementById("strainButton").addEventListener("click", async () => {
+      const strainName = document.getElementById("strainName").value.trim();
+      const geneAllele = document.getElementById("strainGeneAllele").value.trim();
+      if (!strainName) {
+        document.getElementById("strainMessage").textContent = "Enter a strain name first.";
+        return;
+      }
+      const [gene = "", allele = ""] = geneAllele.split("/").map((item) => item.trim());
+      const result = await api("/api/strains", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strain_name: strainName, gene, allele, status: "active" })
+      });
+      document.getElementById("strainMessage").textContent =
+        `Added ${result.strain_name} with source evidence ${result.source_record_id}.`;
+      document.getElementById("strainName").value = "";
+      document.getElementById("strainGeneAllele").value = "";
       await refresh();
     });
 

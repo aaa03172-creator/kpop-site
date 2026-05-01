@@ -59,6 +59,10 @@ def main() -> None:
                 "parse_result",
                 "review_queue",
                 "action_log",
+                "source_record",
+                "strain_registry",
+                "correction_log",
+                "mouse_event",
                 "my_assigned_strain",
                 "distribution_import",
                 "distribution_assignment_row",
@@ -172,9 +176,37 @@ def main() -> None:
                 index_html = client.get("/").text
                 assert_true("Colony Records" in index_html, "Local UI should expose mouse records.")
                 assert_true("Parsed Note Evidence" in index_html, "Local UI should expose parsed note evidence.")
+                assert_true("Strain Registry" in index_html, "Local UI should expose strain registry.")
+                assert_true("Source Evidence" in index_html, "Local UI should expose source evidence.")
+                assert_true("Mouse Events" in index_html, "Local UI should expose mouse events.")
+                assert_true("Correction Log" in index_html, "Local UI should expose correction history.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
                 assert_true("Distribution Assignment Import" in index_html, "Local UI should expose distribution import.")
+                assert_true("/[^a-z0-9]/g" in index_html, "Local UI strain matching key should use a valid regex.")
                 assert_true(client.get("/api/assigned-strains").json() == [], "Assigned strain scope should start empty.")
+                assert_true(client.get("/api/source-records").json() == [], "Source evidence should start empty.")
+                assert_true(client.get("/api/strains").json() == [], "Strain registry should start empty.")
+                strain = client.post(
+                    "/api/strains",
+                    json={
+                        "strain_name": "PV-Cre",
+                        "gene": "Pvalb",
+                        "allele": "Pvalb-IRES-Cre",
+                        "background": "C57BL/6J",
+                        "source": "manual",
+                        "status": "active",
+                    },
+                )
+                assert_true(strain.status_code == 200, "Could not create strain registry entry.")
+                strain_payload = strain.json()
+                assert_true(strain_payload["source_record_id"], "Strain entry should create source evidence.")
+                strains = client.get("/api/strains").json()
+                assert_true(strains[0]["strain_name"] == "PV-Cre", "Strain registry did not persist entry.")
+                source_records = client.get("/api/source-records").json()
+                assert_true(
+                    any(item["source_type"] == "manual_entry" for item in source_records),
+                    "Manual strain creation should leave source evidence.",
+                )
                 distribution = client.post(
                     "/api/distribution-imports",
                     json={
@@ -197,6 +229,7 @@ def main() -> None:
                 assert_true(distribution.status_code == 200, "Could not store distribution import JSON.")
                 distribution_payload = distribution.json()
                 assert_true(distribution_payload["stored_rows"] == 1, "Distribution import row count is wrong.")
+                assert_true(distribution_payload["source_record_id"], "Distribution import should create source evidence.")
                 distribution_imports = client.get("/api/distribution-imports").json()
                 stored_distribution = next(
                     (
@@ -271,6 +304,14 @@ def main() -> None:
                     ).fetchone()["count"]
                 assert_true(action_count == 2, "Assigned strain changes should be logged.")
 
+                outside_import = client.post("/api/fixtures/import-sample")
+                assert_true(outside_import.status_code == 200, "Could not import fixture without active assigned scope.")
+                outside_reviews = client.get("/api/review-items").json()
+                assert_true(
+                    any(item["issue"] == "Outside assigned strain scope" for item in outside_reviews),
+                    "Fixture import without active scope should create outside-scope review items.",
+                )
+
                 client.post(
                     "/api/assigned-strains",
                     json={
@@ -290,11 +331,17 @@ def main() -> None:
                     imported_payload["created_or_updated_mouse_candidates"] >= 3,
                     "Fixture import should create safe mouse candidates from accepted separated rows.",
                 )
+                mouse_events = client.get("/api/mouse-events").json()
+                assert_true(len(mouse_events) >= 3, "Mouse candidates should create mouse event history.")
+                assert_true(
+                    any(event["event_type"] == "note_added" for event in mouse_events),
+                    "Mouse event history should include source-backed note events.",
+                )
                 review_items = client.get("/api/review-items").json()
                 assert_true(len(review_items) >= 4, "Fixture import should create review and validation items.")
                 assert_true(
                     not any(item["issue"] == "Outside assigned strain scope" for item in review_items),
-                    "Assigned ApoM scope should prevent ApoM fixture rows from being marked outside scope.",
+                    "Assigned ApoM scope should clear stale outside-scope review items for now-accepted rows.",
                 )
                 assert_true(
                     any(item["parse_id"] == "FIXTURE-COUNT-MISMATCH" and item["issue"] == "Count mismatch" for item in review_items),
@@ -304,11 +351,54 @@ def main() -> None:
                     any(item["parse_id"] == "FIXTURE-DUPLICATE-ACTIVE" and item["issue"] == "Duplicate active mouse" for item in review_items),
                     "Duplicate active fixture should create a backend review item.",
                 )
+                assert_true(
+                    any(item["parse_id"] == "FIXTURE-EAR-LABEL-CHECK" and item["issue"] == "Ear label needs review" for item in review_items),
+                    "Ambiguous ear label fixture should create a note-level review item.",
+                )
+                count_review = next(item for item in review_items if item["parse_id"] == "FIXTURE-COUNT-MISMATCH")
+                resolved = client.post(
+                    f"/api/review-items/{count_review['review_id']}/resolve",
+                    json={"resolution_note": "Reviewed count mismatch in source note lines."},
+                )
+                assert_true(resolved.status_code == 200, "Could not resolve review item.")
+                resolved_items = client.get("/api/review-items").json()
+                resolved_count_review = next(item for item in resolved_items if item["review_id"] == count_review["review_id"])
+                assert_true(resolved_count_review["status"] == "resolved", "Resolved review item stayed open.")
+                with db.connection() as conn:
+                    review_action_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM action_log
+                        WHERE action_type = 'review_resolved' AND target_id = ?
+                        """,
+                        (count_review["review_id"],),
+                    ).fetchone()["count"]
+                assert_true(review_action_count == 1, "Review resolution should create an action log entry.")
                 note_items = client.get("/api/note-items").json()
                 mice = client.get("/api/mice").json()
                 assert_true(
                     any(item["raw_line_text"] == "MT321 R'" and item["parsed_ear_label_code"] == "R_PRIME" for item in note_items),
                     "Note item API should expose parsed ear label evidence.",
+                )
+                assert_true(
+                    any(
+                        item["raw_line_text"] == "MT399 R0"
+                        and item["parsed_ear_label_code"] == "R_CIRCLE"
+                        and item["parsed_ear_label_review_status"] == "check"
+                        and item["needs_review"] == 1
+                        for item in note_items
+                    ),
+                    "Ambiguous ear label note should stay reviewable with raw evidence.",
+                )
+                assert_true(
+                    any(
+                        mouse["display_id"] == "MT399"
+                        and mouse["ear_label_raw"] == "R0"
+                        and mouse["ear_label_code"] is None
+                        and mouse["ear_label_review_status"] == "check"
+                        for mouse in mice
+                    ),
+                    "Mouse candidate should not accept an uncertain normalized ear label.",
                 )
                 assert_true(
                     any(mouse["display_id"] == "MT323" and mouse["status"] == "moved" for mouse in mice),
@@ -334,6 +424,24 @@ def main() -> None:
                 assert_true(mouse_count >= 3, "Persisted mouse candidate count is too low.")
                 assert_true(moved_count >= 1, "Single-struck mouse note should create a moved candidate.")
                 assert_true(duplicate_leak_count == 0, "Duplicate active fixture should not create mouse candidates.")
+                correction = client.post(
+                    "/api/corrections",
+                    json={
+                        "entity_type": "strain",
+                        "entity_id": strain_payload["strain_id"],
+                        "field_name": "common_name",
+                        "before_value": "",
+                        "after_value": "PV-Cre line",
+                        "reason": "Verified local correction workflow.",
+                        "source_record_id": strain_payload["source_record_id"],
+                    },
+                )
+                assert_true(correction.status_code == 200, "Could not create correction log entry.")
+                corrections = client.get("/api/corrections").json()
+                assert_true(
+                    corrections[0]["before_value"] == "" and corrections[0]["after_value"] == "PV-Cre line",
+                    "Correction log should preserve before and after values.",
+                )
 
     print("Local app scaffold verification passed.")
 

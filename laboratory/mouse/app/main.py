@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -48,6 +49,48 @@ class DistributionImportPayload(BaseModel):
     rows: list[dict[str, Any]]
 
 
+class StrainRegistryCreate(BaseModel):
+    strain_name: str = Field(min_length=1)
+    common_name: str = ""
+    official_name: str = ""
+    gene: str = ""
+    allele: str = ""
+    background: str = ""
+    source: str = ""
+    status: str = "active"
+    breeding_note: str = ""
+    genotyping_note: str = ""
+    owner: str = ""
+    source_record_id: str | None = None
+
+
+class CorrectionCreate(BaseModel):
+    entity_type: str = Field(min_length=1)
+    entity_id: str = Field(min_length=1)
+    field_name: str = Field(min_length=1)
+    before_value: str = ""
+    after_value: str = ""
+    reason: str = ""
+    source_record_id: str | None = None
+    review_id: str | None = None
+
+
+class MouseEventCreate(BaseModel):
+    mouse_id: str = Field(min_length=1)
+    event_type: str = Field(min_length=1)
+    event_date: str = ""
+    related_entity_type: str = ""
+    related_entity_id: str = ""
+    source_record_id: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    created_by: str = "local_user"
+
+
+class ReviewResolutionCreate(BaseModel):
+    resolution_note: str = Field(min_length=1)
+    resolved_value: str = ""
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
@@ -69,6 +112,262 @@ def list_photos() -> list[dict[str, Any]]:
             """
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def stable_checksum(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def create_source_record(
+    conn: Any,
+    *,
+    source_type: str,
+    source_uri: str = "",
+    source_label: str = "",
+    raw_payload: str = "",
+    note: str = "",
+) -> str:
+    source_record_id = new_id("source")
+    imported_at = utc_now()
+    conn.execute(
+        """
+        INSERT INTO source_record
+            (source_record_id, source_type, source_uri, source_label,
+             raw_payload, imported_at, checksum, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            source_record_id,
+            source_type,
+            source_uri,
+            source_label,
+            raw_payload,
+            imported_at,
+            stable_checksum(f"{source_type}|{source_uri}|{source_label}|{raw_payload}"),
+            note,
+        ),
+    )
+    return source_record_id
+
+
+@app.get("/api/source-records")
+def list_source_records() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT source_record_id, source_type, source_uri, source_label,
+                   raw_payload, imported_at, checksum, note
+            FROM source_record
+            ORDER BY imported_at DESC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.get("/api/strains")
+def list_strains() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT strain_id, strain_name, common_name, official_name, gene,
+                   allele, background, source, status, breeding_note,
+                   genotyping_note, owner, source_record_id, created_at, updated_at
+            FROM strain_registry
+            ORDER BY status = 'active' DESC, strain_name COLLATE NOCASE
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.post("/api/strains")
+def create_strain(payload: StrainRegistryCreate) -> dict[str, Any]:
+    strain_name = " ".join(payload.strain_name.split())
+    if not strain_name:
+        raise HTTPException(status_code=400, detail="Strain name is required.")
+
+    now = utc_now()
+    strain_id = new_id("strain")
+    raw_payload = payload.model_dump_json()
+    with connection() as conn:
+        source_record_id = payload.source_record_id
+        if source_record_id is None:
+            source_record_id = create_source_record(
+                conn,
+                source_type="manual_entry",
+                source_label=f"Manual strain registry entry: {strain_name}",
+                raw_payload=raw_payload,
+                note="Created from local Strain Registry form.",
+            )
+        else:
+            exists = conn.execute(
+                "SELECT 1 FROM source_record WHERE source_record_id = ?",
+                (source_record_id,),
+            ).fetchone()
+            if exists is None:
+                raise HTTPException(status_code=400, detail="source_record_id does not exist.")
+
+        conn.execute(
+            """
+            INSERT INTO strain_registry
+                (strain_id, strain_name, common_name, official_name, gene,
+                 allele, background, source, status, breeding_note,
+                 genotyping_note, owner, source_record_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                strain_id,
+                strain_name,
+                payload.common_name,
+                payload.official_name,
+                payload.gene,
+                payload.allele,
+                payload.background,
+                payload.source,
+                payload.status or "active",
+                payload.breeding_note,
+                payload.genotyping_note,
+                payload.owner,
+                source_record_id,
+                now,
+                now,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "strain_created",
+                strain_id,
+                None,
+                raw_payload,
+                now,
+            ),
+        )
+
+    return {
+        "strain_id": strain_id,
+        "strain_name": strain_name,
+        "status": payload.status or "active",
+        "source_record_id": source_record_id,
+        "created_at": now,
+    }
+
+
+@app.get("/api/corrections")
+def list_corrections() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT correction_id, entity_type, entity_id, field_name,
+                   before_value, after_value, reason, source_record_id,
+                   review_id, corrected_at
+            FROM correction_log
+            ORDER BY corrected_at DESC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.post("/api/corrections")
+def create_correction(payload: CorrectionCreate) -> dict[str, Any]:
+    correction_id = new_id("correction")
+    corrected_at = utc_now()
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO correction_log
+                (correction_id, entity_type, entity_id, field_name,
+                 before_value, after_value, reason, source_record_id,
+                 review_id, corrected_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                correction_id,
+                payload.entity_type,
+                payload.entity_id,
+                payload.field_name,
+                payload.before_value,
+                payload.after_value,
+                payload.reason,
+                payload.source_record_id,
+                payload.review_id,
+                corrected_at,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "correction_applied",
+                payload.entity_id,
+                payload.before_value,
+                payload.after_value,
+                corrected_at,
+            ),
+        )
+
+    return {"correction_id": correction_id, "corrected_at": corrected_at}
+
+
+@app.get("/api/mouse-events")
+def list_mouse_events() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT event_id, mouse_id, event_type, event_date,
+                   related_entity_type, related_entity_id, source_record_id,
+                   details, created_by, created_at
+            FROM mouse_event
+            ORDER BY event_date DESC, created_at DESC
+            """
+        ).fetchall()
+    result = []
+    for row in rows:
+        payload = dict(row)
+        payload["details"] = json.loads(payload["details"] or "{}")
+        result.append(payload)
+    return result
+
+
+@app.post("/api/mouse-events")
+def create_mouse_event(payload: MouseEventCreate) -> dict[str, Any]:
+    event_id = new_id("event")
+    created_at = utc_now()
+    event_date = payload.event_date or created_at[:10]
+    with connection() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM mouse_master WHERE mouse_id = ?",
+            (payload.mouse_id,),
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=404, detail="Mouse not found.")
+        conn.execute(
+            """
+            INSERT INTO mouse_event
+                (event_id, mouse_id, event_type, event_date, related_entity_type,
+                 related_entity_id, source_record_id, details, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                payload.mouse_id,
+                payload.event_type,
+                event_date,
+                payload.related_entity_type,
+                payload.related_entity_id,
+                payload.source_record_id,
+                json.dumps(payload.details, ensure_ascii=False),
+                payload.created_by,
+                created_at,
+            ),
+        )
+    return {"event_id": event_id, "event_date": event_date, "created_at": created_at}
 
 
 def assigned_strain_row(row: Any) -> dict[str, Any]:
@@ -221,7 +520,7 @@ def parse_note_line(raw_line: str, card_type: str) -> dict[str, Any]:
             "parsed_event_date": None,
             "parsed_count": None,
             "confidence": ear["confidence"],
-            "needs_review": 1 if ear["status"] == "needs_review" else 0,
+            "needs_review": 1 if ear["status"] in {"check", "needs_review"} else 0,
         }
 
     return {
@@ -313,11 +612,12 @@ def validation_review_for_record(conn: Any, record: dict[str, Any], status: str)
     return None
 
 
-def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict[str, Any], status: str) -> tuple[int, int]:
+def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict[str, Any], status: str) -> tuple[int, int, int]:
     card_type = str(record.get("type") or "unknown").lower()
     notes = record.get("notes") if isinstance(record.get("notes"), list) else []
     note_count = 0
     mouse_count = 0
+    ear_review_count = 0
     write_mouse = should_write_mouse_candidate(record, status)
     dob_raw, dob_start, dob_end = split_dob_range(record.get("dobRaw"), record.get("dobNormalized"))
     raw_strain_text = str(record.get("matchedStrain") or record.get("rawStrain") or "")
@@ -358,10 +658,38 @@ def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict
             ),
         )
         note_count += 1
+        if parsed["parsed_type"] == "mouse_item" and parsed["parsed_ear_label_review_status"] in {"check", "needs_review"}:
+            review_id = f"review_ear_{note_item_id}"
+            suggested_value = parsed["parsed_ear_label_code"] or "Confirm raw note line before normalization"
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value, suggested_value,
+                     review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    review_id,
+                    parse_id,
+                    "Medium",
+                    "Ear label needs review",
+                    str(parsed["parsed_ear_label_raw"] or raw_line),
+                    str(suggested_value),
+                    f"Note item {note_item_id} has uncertain ear label evidence. Confirm against the source cage card before using a normalized ear label.",
+                    "open",
+                    utc_now(),
+                ),
+            )
+            ear_review_count += 1
 
         if write_mouse and parsed["parsed_type"] == "mouse_item" and parsed["parsed_mouse_display_id"]:
             display_id = str(parsed["parsed_mouse_display_id"])
             mouse_id = f"mouse_{display_id}_{parse_id}".replace(" ", "_")
+            reviewed_ear_code = (
+                parsed["parsed_ear_label_code"]
+                if parsed["parsed_ear_label_review_status"] == "auto_filled"
+                else None
+            )
             conn.execute(
                 """
                 INSERT OR REPLACE INTO mouse_master
@@ -379,15 +707,41 @@ def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict
                     dob_start,
                     dob_end,
                     parsed["parsed_ear_label_raw"],
-                    parsed["parsed_ear_label_code"],
+                    reviewed_ear_code,
                     parsed["parsed_ear_label_confidence"],
                     parsed["parsed_ear_label_review_status"],
                     note_item_id,
                     status_from_strike,
                 ),
             )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO mouse_event
+                    (event_id, mouse_id, event_type, event_date, related_entity_type,
+                     related_entity_id, details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"event_{mouse_id}_{index}",
+                    mouse_id,
+                    "note_added",
+                    dob_start or utc_now()[:10],
+                    "note_item",
+                    note_item_id,
+                    json.dumps(
+                        {
+                            "display_id": display_id,
+                            "interpreted_status": status_from_strike,
+                            "raw_line_text": raw_line,
+                            "raw_strain_text": raw_strain_text,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    utc_now(),
+                ),
+            )
             mouse_count += 1
-    return note_count, mouse_count
+    return note_count, mouse_count, ear_review_count
 
 
 @app.get("/api/assigned-strains")
@@ -539,6 +893,14 @@ def create_distribution_import(payload: DistributionImportPayload) -> dict[str, 
     imported_at = utc_now()
     source_file_name = payload.source_file_name or "distribution_import.json"
     with connection() as conn:
+        source_record_id = create_source_record(
+            conn,
+            source_type="excel_row_import",
+            source_uri=payload.source_file_path,
+            source_label=source_file_name,
+            raw_payload=payload.model_dump_json(),
+            note="Distribution assignment import remains parsed/intermediate until reviewed.",
+        )
         conn.execute(
             """
             INSERT INTO distribution_import
@@ -607,13 +969,21 @@ def create_distribution_import(payload: DistributionImportPayload) -> dict[str, 
                 "distribution_import_created",
                 import_id,
                 None,
-                json.dumps({"source_file_name": source_file_name, "rows": inserted_rows}, ensure_ascii=False),
+                json.dumps(
+                    {
+                        "source_file_name": source_file_name,
+                        "rows": inserted_rows,
+                        "source_record_id": source_record_id,
+                    },
+                    ensure_ascii=False,
+                ),
                 imported_at,
             ),
         )
 
     return {
         "distribution_import_id": import_id,
+        "source_record_id": source_record_id,
         "source_file_name": source_file_name,
         "sheet_name": payload.sheet_name,
         "imported_at": imported_at,
@@ -632,6 +1002,14 @@ def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
     uploaded_at = utc_now()
     try:
         with connection() as conn:
+            source_record_id = create_source_record(
+                conn,
+                source_type="photo",
+                source_uri=str(stored_path.relative_to(ROOT)),
+                source_label=file.filename,
+                raw_payload=json.dumps({"original_filename": file.filename}, ensure_ascii=False),
+                note="Uploaded cage card photo retained as raw source evidence.",
+            )
             conn.execute(
                 """
                 INSERT INTO photo_log (photo_id, original_filename, stored_path, uploaded_at, status)
@@ -648,6 +1026,7 @@ def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
         "stored_path": str(stored_path.relative_to(ROOT)),
         "uploaded_at": uploaded_at,
         "status": "uploaded",
+        "source_record_id": source_record_id,
     }
 
 
@@ -663,6 +1042,60 @@ def list_review_items() -> list[dict[str, Any]]:
             """
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+@app.post("/api/review-items/{review_id}/resolve")
+def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict[str, Any]:
+    resolved_at = utc_now()
+    with connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT review_id, parse_id, severity, issue, current_value, suggested_value,
+                   review_reason, status, resolution_note
+            FROM review_queue
+            WHERE review_id = ?
+            """,
+            (review_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Review item not found.")
+        before = dict(existing)
+        after = {
+            "status": "resolved",
+            "resolved_value": payload.resolved_value,
+            "resolution_note": payload.resolution_note,
+        }
+        conn.execute(
+            """
+            UPDATE review_queue
+            SET status = 'resolved',
+                resolved_at = ?,
+                resolution_note = ?
+            WHERE review_id = ?
+            """,
+            (resolved_at, payload.resolution_note, review_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "review_resolved",
+                review_id,
+                json.dumps(before, ensure_ascii=False),
+                json.dumps(after, ensure_ascii=False),
+                resolved_at,
+            ),
+        )
+    return {
+        "review_id": review_id,
+        "status": "resolved",
+        "resolved_at": resolved_at,
+        "resolution_note": payload.resolution_note,
+        "resolved_value": payload.resolved_value,
+    }
 
 
 @app.get("/api/note-items")
@@ -775,9 +1208,10 @@ def import_sample_fixture() -> dict[str, Any]:
                 ),
             )
             imported += 1
-            written_notes, written_mice = write_note_items_and_mouse_candidates(conn, parse_id, record, status)
+            written_notes, written_mice, written_ear_reviews = write_note_items_and_mouse_candidates(conn, parse_id, record, status)
             note_items += written_notes
             mouse_candidates += written_mice
+            reviews += written_ear_reviews
             if needs_review:
                 review_id = f"review_{parse_id}"
                 conn.execute(
@@ -800,6 +1234,11 @@ def import_sample_fixture() -> dict[str, Any]:
                     ),
                 )
                 reviews += 1
+            else:
+                conn.execute(
+                    "DELETE FROM review_queue WHERE review_id = ?",
+                    (f"review_{parse_id}",),
+                )
 
     return {
         "imported_parse_results": imported,
