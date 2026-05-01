@@ -1225,10 +1225,12 @@
           <button class="small-button" type="button" id="loadSampleButton">Load Sample Fixture</button>
           <button class="small-button" type="button" id="loadDistributionFixtureButton">Load Distribution Fixture</button>
           <button class="small-button" type="button" id="importParseButton">Import Parse JSON</button>
+          <button class="small-button" type="button" id="importDistributionButton">Import Distribution JSON</button>
           <button class="small-button" type="button" id="resetSessionButton">Reset Local</button>
           <button class="primary-button" type="button" id="uploadButton">Upload Photos</button>
           <input class="hidden-file" id="photoInput" type="file" accept="image/*" multiple>
           <input class="hidden-file" id="parseInput" type="file" accept="application/json,.json">
+          <input class="hidden-file" id="distributionInput" type="file" accept="application/json,.json">
         </div>
       </header>
 
@@ -3000,6 +3002,25 @@
       setView("settings");
     }
 
+    function handleDistributionImport(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.addEventListener("load", () => {
+        try {
+          const parsed = JSON.parse(String(reader.result || ""));
+          const distributionImport = normalizeDistributionImport(parsed, file.name);
+          addDistributionImport(distributionImport);
+          setView("settings");
+        } catch (error) {
+          showToast("Could not import distribution JSON. Use output from parse_distribution_workbook.py.");
+        } finally {
+          event.target.value = "";
+        }
+      });
+      reader.readAsText(file);
+    }
+
     function csvCell(value) {
       return `"${String(value ?? "").replace(/"/g, '""')}"`;
     }
@@ -3236,6 +3257,8 @@
     document.getElementById("resetSessionButton").addEventListener("click", resetLocalSession);
     document.getElementById("importParseButton").addEventListener("click", () => document.getElementById("parseInput").click());
     document.getElementById("parseInput").addEventListener("change", handleParseImport);
+    document.getElementById("importDistributionButton").addEventListener("click", () => document.getElementById("distributionInput").click());
+    document.getElementById("distributionInput").addEventListener("change", handleDistributionImport);
     document.getElementById("generateExport").addEventListener("click", generateSeparationCsv);
     document.getElementById("previewAnimalsheet").addEventListener("click", previewAnimalsheet);
     document.getElementById("downloadSeparationXlsx").addEventListener("click", () => downloadXlsx("separation"));

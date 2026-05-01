@@ -1,12 +1,14 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { spawnSync } = require("child_process");
 const { chromium } = require("playwright");
 
 const root = path.resolve(__dirname, "..");
 const pagePath = path.join(root, "index.html");
 const fixturePath = path.join(root, "fixtures", "sample_parse_results.json");
 const distributionFixturePath = path.join(root, "fixtures", "sample_distribution_import.json");
+const distributionParserPath = path.join(root, "scripts", "parse_distribution_workbook.py");
 
 function assert(condition, message) {
   if (!condition) {
@@ -27,10 +29,74 @@ function makeTinyPng() {
   return pngPath;
 }
 
+function pythonExecutable() {
+  const bundled = path.join(
+    os.homedir(),
+    ".cache",
+    "codex-runtimes",
+    "codex-primary-runtime",
+    "dependencies",
+    "python",
+    process.platform === "win32" ? "python.exe" : "bin/python"
+  );
+  return fs.existsSync(bundled) ? bundled : "python";
+}
+
+function runPython(args, options = {}) {
+  const result = spawnSync(pythonExecutable(), args, {
+    cwd: root,
+    encoding: "utf8",
+    ...options
+  });
+  if (result.status !== 0) {
+    throw new Error(`Python command failed: ${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
+  }
+  return result;
+}
+
+function verifyDistributionParser() {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mouse-distribution-"));
+  const workbookPath = path.join(tempDir, "distribution.xlsx");
+  const parsedPath = path.join(tempDir, "distribution-parsed.json");
+  const workbookScript = `
+from pathlib import Path
+from openpyxl import Workbook
+
+workbook_path = Path(${JSON.stringify(workbookPath)})
+
+wb = Workbook()
+ws = wb.active
+ws.title = "Mating"
+ws.append(["Vet Med", "mating type", "Cage count", "mating cage count", "", "Medicine", "mating type", "Cage count", "mating cage count"])
+ws.append(["Jang S.", "ApoMtg/tg", "6", "", "", "Kim S.", "GFAP Cre; S1PR1 fl/fl", "8", ""])
+ws.append([None, "TAStg/+; TPMtg/+; ApoMtg/+", "16", "16", "", None, "Lyz2-cre+/-; S565Afl/fl", "8", ""])
+wb.save(workbook_path)
+`;
+  runPython(["-c", workbookScript]);
+  runPython([distributionParserPath, workbookPath, "--sheet", "Mating", "--out", parsedPath]);
+
+  const parsed = JSON.parse(fs.readFileSync(parsedPath, "utf8"));
+  assert(parsed.layer === "parsed or intermediate result", "Parsed distribution output must stay non-canonical.");
+  assert(parsed.sheet_name === "Mating", "Distribution parser used the wrong sheet.");
+  assert(parsed.detected_blocks.length === 2, "Distribution parser did not detect both column blocks.");
+  assert(parsed.rows.some((row) => row.mating_type_raw === "ApoMtg/tg"), "Distribution parser missed the ApoMtg/tg row.");
+  assert(
+    parsed.rows.some((row) => row.responsible_person_raw === "Jang S." && row.mating_type_raw.startsWith("TAStg")),
+    "Distribution parser did not carry down merged/person context."
+  );
+  assert(
+    parsed.rows.every((row) => row.source_row_number && row.source_cells),
+    "Distribution parser rows must preserve source row and cell traceability."
+  );
+  return parsedPath;
+}
+
 async function main() {
   assert(fs.existsSync(pagePath), "index.html is missing.");
   assert(fs.existsSync(fixturePath), "fixtures/sample_parse_results.json is missing.");
   assert(fs.existsSync(distributionFixturePath), "fixtures/sample_distribution_import.json is missing.");
+  assert(fs.existsSync(distributionParserPath), "Distribution workbook parser is missing.");
+  const generatedDistributionPath = verifyDistributionParser();
 
   const html = fs.readFileSync(pagePath, "utf8");
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
@@ -104,6 +170,20 @@ async function main() {
   await page.waitForSelector("#inboxRows tr");
   assert((await page.locator("#inboxRows tr").filter({ hasText: "FIXTURE-AUTO-MATING" }).count()) === 0, "Reset did not remove embedded fixture rows.");
   assert((await page.locator("#distributionRows tr").filter({ hasText: "ApoMtg/tg" }).count()) === 0, "Reset did not remove distribution assignment rows.");
+
+  await page.getByRole("button", { name: "Import Distribution JSON" }).click();
+  await page.setInputFiles("#distributionInput", generatedDistributionPath);
+  await page.waitForFunction(() => document.querySelector("#distributionRows")?.textContent.includes("TAStg/+; TPMtg/+; ApoMtg/+"));
+  assert(
+    (await page.locator("#distributionRows tr").filter({ hasText: "ApoMtg/tg" }).count()) === 1,
+    "Distribution parser JSON import row missing."
+  );
+  assert(
+    (await page.locator("#recordRows tr").filter({ hasText: "ApoMtg/tg" }).count()) === 0,
+    "Distribution parser JSON import leaked into canonical mouse records."
+  );
+  await page.getByRole("button", { name: "Reset Local" }).click();
+  await page.waitForSelector("#inboxRows tr");
 
   await page.getByRole("button", { name: "Import Parse JSON" }).click();
   await page.setInputFiles("#parseInput", fixturePath);

@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "parse:distribution": "python scripts/parse_distribution_workbook.py",
     "test": "node scripts/verify-mvp.js"
   },
   "keywords": [],
