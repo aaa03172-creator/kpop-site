@@ -191,6 +191,35 @@
       ]
     },
     {
+      "id": "FIXTURE-EAR-LABEL-CHECK",
+      "uploaded": "Fixture import",
+      "type": "Separated",
+      "rawStrain": "ApoM Tg/Tg",
+      "matchedStrain": "ApoM Tg/Tg",
+      "dobRaw": "25.10.21",
+      "dobNormalized": "2025-10-21",
+      "mouseCount": "1 total",
+      "confidence": 91,
+      "status": "auto",
+      "issue": "Fixture auto-filled by policy",
+      "severity": "Low",
+      "reviewField": "matchedStrain",
+      "currentValue": "ApoM Tg/Tg",
+      "suggestedValue": "ApoM Tg/Tg",
+      "reviewReason": "Fixture keeps an ambiguous handwritten ear label reviewable.",
+      "notes": [
+        {
+          "raw": "MT399 R0",
+          "meaning": "Mouse MT399, ambiguous right ear label mark that should be checked before normalization",
+          "strike": "none"
+        }
+      ],
+      "actions": [
+        "Attach raw note evidence.",
+        "Create ear label review item before accepting normalized ear label."
+      ]
+    },
+    {
       "id": "FIXTURE-DUPLICATE-ACTIVE",
       "uploaded": "Fixture import",
       "type": "Separated",

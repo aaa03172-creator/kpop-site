@@ -117,6 +117,66 @@ def init_db() -> None:
                 created_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS source_record (
+                source_record_id TEXT PRIMARY KEY,
+                source_type TEXT NOT NULL,
+                source_uri TEXT NOT NULL DEFAULT '',
+                source_label TEXT NOT NULL DEFAULT '',
+                raw_payload TEXT NOT NULL DEFAULT '',
+                imported_at TEXT NOT NULL,
+                checksum TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS strain_registry (
+                strain_id TEXT PRIMARY KEY,
+                strain_name TEXT NOT NULL,
+                common_name TEXT NOT NULL DEFAULT '',
+                official_name TEXT NOT NULL DEFAULT '',
+                gene TEXT NOT NULL DEFAULT '',
+                allele TEXT NOT NULL DEFAULT '',
+                background TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active',
+                breeding_note TEXT NOT NULL DEFAULT '',
+                genotyping_note TEXT NOT NULL DEFAULT '',
+                owner TEXT NOT NULL DEFAULT '',
+                source_record_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS correction_log (
+                correction_id TEXT PRIMARY KEY,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                field_name TEXT NOT NULL,
+                before_value TEXT NOT NULL DEFAULT '',
+                after_value TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                source_record_id TEXT,
+                review_id TEXT,
+                corrected_at TEXT NOT NULL,
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
+                FOREIGN KEY (review_id) REFERENCES review_queue(review_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS mouse_event (
+                event_id TEXT PRIMARY KEY,
+                mouse_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                related_entity_type TEXT NOT NULL DEFAULT '',
+                related_entity_id TEXT NOT NULL DEFAULT '',
+                source_record_id TEXT,
+                details TEXT NOT NULL DEFAULT '{}',
+                created_by TEXT NOT NULL DEFAULT 'local_user',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (mouse_id) REFERENCES mouse_master(mouse_id),
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
             CREATE TABLE IF NOT EXISTS my_assigned_strain (
                 assigned_strain_id TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL,
@@ -249,6 +309,14 @@ def init_db() -> None:
                 ON mouse_master(sample_id);
             CREATE INDEX IF NOT EXISTS idx_distribution_assignment_import
                 ON distribution_assignment_row(distribution_import_id, source_row_number);
+            CREATE INDEX IF NOT EXISTS idx_strain_registry_name
+                ON strain_registry(strain_name COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_source_record_type
+                ON source_record(source_type, imported_at);
+            CREATE INDEX IF NOT EXISTS idx_correction_log_entity
+                ON correction_log(entity_type, entity_id, corrected_at);
+            CREATE INDEX IF NOT EXISTS idx_mouse_event_mouse
+                ON mouse_event(mouse_id, event_date);
             """
         )
         conn.executemany(
