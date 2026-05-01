@@ -170,6 +170,7 @@ def main() -> None:
                 index_html = client.get("/").text
                 assert_true("Colony Records" in index_html, "Local UI should expose mouse records.")
                 assert_true("Parsed Note Evidence" in index_html, "Local UI should expose parsed note evidence.")
+                assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
                 assert_true(client.get("/api/assigned-strains").json() == [], "Assigned strain scope should start empty.")
                 created = client.post(
                     "/api/assigned-strains",

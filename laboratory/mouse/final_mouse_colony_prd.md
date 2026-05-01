@@ -6,6 +6,7 @@ Adopted project documents:
 
 - `AGENTS.md`: project agent guidelines and safety boundaries.
 - `design.md`: non-canonical UI and workflow design guidance.
+- `mouse_strain_colony_system_design_ko.md`: non-canonical Korean extension design for strain knowledge graph, colony tracking, evidence boundaries, review/correction, and visualization.
 - `reference_adoption_notes.md`: non-canonical reference adoption notes for development, design, and external tooling ideas.
 - `mvp_vertical_slice_plan.md`: non-canonical implementation planning note for the first end-to-end workflow.
 

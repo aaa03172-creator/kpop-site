@@ -161,7 +161,7 @@
       </div>
       <p class="muted" id="assignedStrainMessage"></p>
       <table>
-        <thead><tr><th>Strain</th><th>Aliases</th><th>Source</th><th>Status</th></tr></thead>
+        <thead><tr><th>Strain</th><th>Aliases</th><th>Source</th><th>Status</th><th>Action</th></tr></thead>
         <tbody id="assignedStrainRows"></tbody>
       </table>
     </section>
@@ -250,6 +250,27 @@
       }[ch]))}</td>`).join("")}</tr>`;
     }
 
+    function escapeHtml(value) {
+      return text(value).replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[ch]));
+    }
+
+    function assignedStrainRow(strain) {
+      const action = strain.active
+        ? `<button class="deactivate-scope" type="button" data-assigned-strain-id="${escapeHtml(strain.assigned_strain_id)}">Deactivate</button>`
+        : `<span class="muted">Inactive</span>`;
+      return `
+        <tr>
+          <td>${escapeHtml(strain.display_name)}</td>
+          <td>${escapeHtml((strain.aliases || []).join(", ") || "--")}</td>
+          <td>${escapeHtml(strain.source_type)}</td>
+          <td>${escapeHtml(strain.active ? "Active" : "Inactive")}</td>
+          <td>${action}</td>
+        </tr>
+      `;
+    }
+
     async function refresh() {
       const [health, assignedStrains, photos, reviews, mice, noteItems, preview] = await Promise.all([
         api("/api/health"),
@@ -263,13 +284,15 @@
 
       document.getElementById("health").textContent = health.storage;
       document.getElementById("assignedStrainRows").innerHTML = assignedStrains.map((strain) =>
-        row([
-          strain.display_name,
-          (strain.aliases || []).join(", ") || "--",
-          strain.source_type,
-          strain.active ? "Active" : "Inactive"
-        ])
-      ).join("") || row(["No assigned strains yet", "", "", ""]);
+        assignedStrainRow(strain)
+      ).join("") || row(["No assigned strains yet", "", "", "", ""]);
+      document.querySelectorAll(".deactivate-scope").forEach((button) => {
+        button.addEventListener("click", async () => {
+          await api(`/api/assigned-strains/${button.dataset.assignedStrainId}/deactivate`, { method: "POST" });
+          document.getElementById("assignedStrainMessage").textContent = "Assigned strain scope deactivated.";
+          await refresh();
+        });
+      });
       document.getElementById("photoRows").innerHTML = photos.map((photo) =>
         row([photo.photo_id, photo.original_filename, photo.status, photo.uploaded_at])
       ).join("") || row(["No photos yet", "", "", ""]);

@@ -8,6 +8,7 @@ This document summarizes the proposed UI direction for the mouse colony manageme
 
 Related non-canonical reference note:
 
+- `mouse_strain_colony_system_design_ko.md` summarizes the broader Korean extension design for strain registry, mouse cards, events, source evidence, review/correction, and visualization.
 - `reference_adoption_notes.md` summarizes development, design, and external tooling references that can inform implementation without replacing the PRD.
 
 ## Design Intent
