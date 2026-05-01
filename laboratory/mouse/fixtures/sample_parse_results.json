@@ -22,17 +22,17 @@
       "notes": [
         {
           "raw": "318 R'",
-          "meaning": "Possible mouse ID 318, right ear notch",
+          "meaning": "Possible mouse ID 318, right prime ear label (R_PRIME)",
           "strike": "none"
         },
         {
           "raw": "319 L'",
-          "meaning": "Possible mouse ID 319, left ear notch",
+          "meaning": "Possible mouse ID 319, left prime ear label (L_PRIME)",
           "strike": "none"
         },
         {
           "raw": "320 R'L'",
-          "meaning": "Possible mouse ID 320, both ears notched",
+          "meaning": "Possible mouse ID 320, right and left prime ear labels (R_PRIME_L_PRIME)",
           "strike": "none"
         }
       ],
@@ -131,17 +131,17 @@
       "notes": [
         {
           "raw": "MT401 R'",
-          "meaning": "Mouse MT401, right ear notch",
+          "meaning": "Mouse MT401, right prime ear label (R_PRIME)",
           "strike": "none"
         },
         {
           "raw": "MT402 L'",
-          "meaning": "Mouse MT402, left ear notch",
+          "meaning": "Mouse MT402, left prime ear label (L_PRIME)",
           "strike": "none"
         },
         {
           "raw": "MT403 R'L'",
-          "meaning": "Mouse MT403, both ears notched",
+          "meaning": "Mouse MT403, right and left prime ear labels (R_PRIME_L_PRIME)",
           "strike": "none"
         }
       ],
@@ -170,17 +170,17 @@
       "notes": [
         {
           "raw": "MT321 R'",
-          "meaning": "Mouse MT321, right ear notch",
+          "meaning": "Mouse MT321, right prime ear label (R_PRIME)",
           "strike": "none"
         },
         {
           "raw": "MT322 L'",
-          "meaning": "Mouse MT322, left ear notch",
+          "meaning": "Mouse MT322, left prime ear label (L_PRIME)",
           "strike": "none"
         },
         {
           "raw": "MT323 R'L'",
-          "meaning": "Mouse MT323, both ears notched; moved out on reviewed card",
+          "meaning": "Mouse MT323, right and left prime ear labels (R_PRIME_L_PRIME); moved out on reviewed card",
           "strike": "single"
         }
       ],
@@ -210,7 +210,7 @@
       "notes": [
         {
           "raw": "MT318 R'",
-          "meaning": "Mouse MT318, right ear notch",
+          "meaning": "Mouse MT318, right prime ear label (R_PRIME)",
           "strike": "none"
         }
       ],

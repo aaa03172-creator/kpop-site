@@ -177,12 +177,38 @@ Minimum behavior:
 - Create or update candidate mouse records from reviewed note lines.
 - Create a card snapshot as a source-backed observation.
 - Link canonical candidate records to source photo and note item.
+- For newly separated mice, initialize genotyping workflow fields as not sampled with next action sample needed when genotyping is required.
+- Store line-level note evidence in `card_note_item_log` before writing mouse-level state.
+- Store current individual state in `mouse_master`, while preserving movement/death/genotype changes as action/event history.
 
 Acceptance checks:
 
 - Card snapshot is not treated as durable history by itself.
+- Note line raw text, strike status, parsed mouse ID, parsed ear label, confidence, and review flag are preserved.
+- Mouse display ID is not globally unique by itself; duplicate display IDs remain candidate matches until strain/DOB/ear-label/source context resolves them.
 - Movement, death, mating, litter, and genotype updates are represented as events.
 - Internal IDs stay hidden from ordinary user-facing UI.
+
+### Step 5A: Genotyping Worklist Planning
+
+Goal:
+
+- Keep mouse ID, ear label, sample ID, and genotype result connected after separation.
+
+Minimum behavior:
+
+- Show separated mice that need tail sampling.
+- Support manual sample/result entry before real OCR.
+- Match sample IDs to mouse IDs by exact ID, ID without prefix, and strain/DOB/ear-label context.
+- Route unmatched, duplicate, conflicting, or ambiguous sample/result rows to review.
+- Suggest target match, use category, and next action from configurable strain target genotype settings.
+
+Acceptance checks:
+
+- Newly separated mice can be found in a not-sampled worklist.
+- Sample/result changes create action log entries.
+- Suggested use category does not automatically overwrite user judgment.
+- Existing export templates are not broken by genotyping fields.
 
 ### Step 6: Export Preview
 

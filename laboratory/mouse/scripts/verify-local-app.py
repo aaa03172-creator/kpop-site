@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import sqlite3
@@ -54,9 +54,104 @@ def main() -> None:
         finally:
             conn.close()
         assert_true(
-            {"photo_log", "parse_result", "review_queue", "action_log", "my_assigned_strain"}.issubset(tables),
+            {
+                "photo_log",
+                "parse_result",
+                "review_queue",
+                "action_log",
+                "my_assigned_strain",
+                "ear_label_master",
+                "ear_label_alias",
+                "mouse_master",
+                "card_note_item_log",
+            }.issubset(tables),
             "Local SQLite schema is incomplete.",
         )
+        conn = sqlite3.connect(db.DB_PATH)
+        try:
+            master_rows = dict(
+                conn.execute("SELECT ear_label_code, display_text FROM ear_label_master").fetchall()
+            )
+            ambiguous_alias = conn.execute(
+                """
+                SELECT confirmed
+                FROM ear_label_alias
+                WHERE raw_text = ? AND ear_label_code = ?
+                """,
+                ("R0", "R_CIRCLE"),
+            ).fetchone()
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, line_number, raw_line_text, parsed_type, strike_status,
+                     interpreted_status, parsed_mouse_display_id, parsed_ear_label_raw,
+                     parsed_ear_label_code, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "note_test_319",
+                    1,
+                    "319 L'",
+                    "mouse_item",
+                    "none",
+                    "active",
+                    "319",
+                    "L'",
+                    "L_PRIME",
+                    0.98,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO mouse_master
+                    (mouse_id, display_id, raw_strain_text, dob_raw, dob_start, dob_end,
+                     ear_label_raw, ear_label_code, source_note_item_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "mouse_test_319_a",
+                    "319",
+                    "ApoM Tg/Tg",
+                    "25.10.20-28",
+                    "2025-10-20",
+                    "2025-10-28",
+                    "L'",
+                    "L_PRIME",
+                    "note_test_319",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO mouse_master
+                    (mouse_id, display_id, raw_strain_text, dob_start, ear_label_code)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("mouse_test_319_b", "319", "Different strain candidate", "2026-01-01", "R_PRIME"),
+            )
+            mouse_defaults = conn.execute(
+                """
+                SELECT genotyping_status, next_action, status
+                FROM mouse_master
+                WHERE mouse_id = ?
+                """,
+                ("mouse_test_319_a",),
+            ).fetchone()
+            same_display_count = conn.execute(
+                "SELECT COUNT(*) FROM mouse_master WHERE display_id = ?",
+                ("319",),
+            ).fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        assert_true(master_rows.get("R_CIRCLE") == "R\u00b0", "R_CIRCLE must use degree-sign display text.")
+        assert_true(master_rows.get("L_CIRCLE") == "L\u00b0", "L_CIRCLE must use degree-sign display text.")
+        assert_true(ambiguous_alias is not None, "Ambiguous R0 alias should be seeded for review.")
+        assert_true(ambiguous_alias[0] == 0, "Ambiguous R0 alias must not be auto-confirmed.")
+        assert_true(
+            tuple(mouse_defaults) == ("not_sampled", "sample_needed", "active"),
+            "Mouse workflow defaults are wrong.",
+        )
+        assert_true(same_display_count == 2, "Mouse display IDs must remain non-unique identity candidates.")
 
         if TestClient is None:
             with db.connection() as conn:
@@ -112,12 +207,51 @@ def main() -> None:
                 )
                 imported = client.post("/api/fixtures/import-sample")
                 assert_true(imported.status_code == 200, "Could not import sample fixture through local API.")
+                imported_payload = imported.json()
+                assert_true(
+                    imported_payload["created_or_updated_note_items"] >= 10,
+                    "Fixture import should persist parsed note item evidence.",
+                )
+                assert_true(
+                    imported_payload["created_or_updated_mouse_candidates"] >= 3,
+                    "Fixture import should create safe mouse candidates from accepted separated rows.",
+                )
                 review_items = client.get("/api/review-items").json()
                 assert_true(len(review_items) >= 2, "Fixture import should create review items.")
                 assert_true(
                     not any(item["issue"] == "Outside assigned strain scope" for item in review_items),
                     "Assigned ApoM scope should prevent ApoM fixture rows from being marked outside scope.",
                 )
+                note_items = client.get("/api/note-items").json()
+                mice = client.get("/api/mice").json()
+                assert_true(
+                    any(item["raw_line_text"] == "MT321 R'" and item["parsed_ear_label_code"] == "R_PRIME" for item in note_items),
+                    "Note item API should expose parsed ear label evidence.",
+                )
+                assert_true(
+                    any(mouse["display_id"] == "MT323" and mouse["status"] == "moved" for mouse in mice),
+                    "Mouse API should expose moved candidate from single-struck note line.",
+                )
+                with db.connection() as conn:
+                    note_count = conn.execute(
+                        "SELECT COUNT(*) AS count FROM card_note_item_log"
+                    ).fetchone()["count"]
+                    mouse_count = conn.execute("SELECT COUNT(*) AS count FROM mouse_master").fetchone()["count"]
+                    moved_count = conn.execute(
+                        "SELECT COUNT(*) AS count FROM mouse_master WHERE status = 'moved'"
+                    ).fetchone()["count"]
+                    duplicate_leak_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM mouse_master
+                        WHERE source_note_item_id LIKE ?
+                        """,
+                        ("note_FIXTURE-DUPLICATE-ACTIVE_%",),
+                    ).fetchone()["count"]
+                assert_true(note_count >= 10, "Persisted note item evidence count is too low.")
+                assert_true(mouse_count >= 3, "Persisted mouse candidate count is too low.")
+                assert_true(moved_count >= 1, "Single-struck mouse note should create a moved candidate.")
+                assert_true(duplicate_leak_count == 0, "Duplicate active fixture should not create mouse candidates.")
 
     print("Local app scaffold verification passed.")
 
