@@ -107,8 +107,17 @@ def main() -> None:
         finally:
             migrated_conn.close()
         assert_true(
-            {"target_match_status", "use_category", "next_action", "sample_id"}.issubset(mouse_columns),
-            "Existing mouse_master tables should migrate to the genotyping workflow schema.",
+            {
+                "target_match_status",
+                "use_category",
+                "next_action",
+                "sample_id",
+                "father_id",
+                "mother_id",
+                "litter_id",
+                "source_record_id",
+            }.issubset(mouse_columns),
+            "Existing mouse_master tables should migrate to the genotyping, lineage, and traceability schema.",
         )
         assert_true(
             {"parsed_ear_label_code", "strike_status", "needs_review"}.issubset(note_columns),
@@ -389,6 +398,7 @@ def main() -> None:
                 assert_true("Download Ready CSV" in index_html, "Local UI should expose gated final CSV export.")
                 assert_true("Cage View" in index_html, "Local UI should expose cage management.")
                 assert_true("Breeding / Litter View" in index_html, "Local UI should expose mating and litter management.")
+                assert_true("Create Offspring" in index_html, "Local UI should expose litter offspring generation.")
                 assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
                 assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
                 assert_true("exportRows" in index_html, "Local UI should expose export preview rows.")
@@ -799,6 +809,44 @@ def main() -> None:
                     any(row["litter_id"] == litter_payload["litter_id"] and row["number_born"] == 10 for row in litter_rows),
                     "Litter list should expose source-backed litter counts.",
                 )
+                offspring = client.post(
+                    f"/api/litters/{litter_payload['litter_id']}/offspring",
+                    json={
+                        "count": 2,
+                        "display_prefix": "MT321-L1",
+                        "start_number": 1,
+                        "sex": "unknown",
+                        "cage_id": cage_payload["cage_id"],
+                        "note": "Generated from reviewed litter count.",
+                    },
+                )
+                assert_true(offspring.status_code == 200, "Could not create offspring mouse records from litter.")
+                offspring_payload = offspring.json()
+                assert_true(offspring_payload["created_count"] == 2, "Offspring creation should return created count.")
+                assert_true(offspring_payload["source_record_id"], "Offspring creation should preserve source evidence.")
+                duplicate_offspring = client.post(
+                    f"/api/litters/{litter_payload['litter_id']}/offspring",
+                    json={"count": 1, "display_prefix": "MT321-L1", "start_number": 1},
+                )
+                assert_true(duplicate_offspring.status_code == 409, "Duplicate offspring IDs should be rejected.")
+                offspring_rows = client.get("/api/mice", params={"query": "MT321-L1"}).json()
+                assert_true(len(offspring_rows) == 2, "Mouse search should include generated offspring records.")
+                assert_true(
+                    all(
+                        row["father_id"] == genotyping_target["mouse_id"]
+                        and row["mother_id"] == female_parent["mouse_id"]
+                        and row["litter_id"] == litter_payload["litter_id"]
+                        and row["source_record_id"] == offspring_payload["source_record_id"]
+                        and row["current_cage_label"] == "A-101"
+                        for row in offspring_rows
+                    ),
+                    "Generated offspring should preserve parent, litter, source, and cage traceability.",
+                )
+                litter_rows_after_offspring = client.get("/api/litters").json()
+                assert_true(
+                    any(row["litter_id"] == litter_payload["litter_id"] and row["offspring_count"] == 2 for row in litter_rows_after_offspring),
+                    "Litter list should expose generated offspring count.",
+                )
                 genotyping_update = client.post(
                     "/api/genotyping/update",
                     json={
@@ -859,6 +907,15 @@ def main() -> None:
                 assert_true(
                     "display_id" in csv_export.text and "MT321" in csv_export.text,
                     "Mouse CSV export should include headers and filtered mouse rows.",
+                )
+                offspring_csv = client.get("/api/exports/mice.csv", params={"query": "MT321-L1"})
+                assert_true(offspring_csv.status_code == 200, "Offspring CSV export endpoint failed.")
+                assert_true(
+                    "father_id" in offspring_csv.text
+                    and "mother_id" in offspring_csv.text
+                    and "litter_id" in offspring_csv.text
+                    and offspring_payload["source_record_id"] in offspring_csv.text,
+                    "Offspring CSV export should include lineage and source traceability fields.",
                 )
                 with db.connection() as conn:
                     note_count = conn.execute(
@@ -945,8 +1002,23 @@ def main() -> None:
                         WHERE event_type = 'litter_produced' AND related_entity_type = 'litter'
                         """
                     ).fetchone()["count"]
+                    offspring_born_event_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM mouse_event
+                        WHERE event_type = 'born' AND related_entity_type = 'litter'
+                        """
+                    ).fetchone()["count"]
+                    offspring_action_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM action_log
+                        WHERE action_type = 'offspring_created' AND target_id = ?
+                        """,
+                        (litter_payload["litter_id"],),
+                    ).fetchone()["count"]
                 assert_true(note_count >= 10, "Persisted note item evidence count is too low.")
-                assert_true(mouse_count >= 3, "Persisted mouse candidate count is too low.")
+                assert_true(mouse_count >= 5, "Persisted mouse candidate count is too low.")
                 assert_true(moved_count >= 1, "Single-struck mouse note should create a moved candidate.")
                 assert_true(duplicate_leak_count == 0, "Duplicate active fixture should not create mouse candidates.")
                 assert_true(genotyping_action_count == 1, "Genotyping update should create an action log entry.")
@@ -958,6 +1030,8 @@ def main() -> None:
                 assert_true(litter_action_count == 1, "Litter creation should create an action log entry.")
                 assert_true(paired_event_count >= 2, "Mating creation should create parent pairing events.")
                 assert_true(litter_event_count >= 2, "Litter creation should create parent litter events.")
+                assert_true(offspring_born_event_count == 2, "Offspring creation should create one birth event per mouse.")
+                assert_true(offspring_action_count == 1, "Offspring creation should create an action log entry.")
                 correction = client.post(
                     "/api/corrections",
                     json={

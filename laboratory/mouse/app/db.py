@@ -85,6 +85,9 @@ def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
         {
             "id_prefix": "TEXT NOT NULL DEFAULT ''",
             "strain_id": "TEXT",
+            "father_id": "TEXT",
+            "mother_id": "TEXT",
+            "litter_id": "TEXT",
             "raw_strain_text": "TEXT NOT NULL DEFAULT ''",
             "sex": "TEXT",
             "genotype": "TEXT",
@@ -108,6 +111,7 @@ def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
             "current_card_snapshot_id": "TEXT",
             "status": "TEXT NOT NULL DEFAULT 'active'",
             "source_photo_id": "TEXT",
+            "source_record_id": "TEXT",
             "created_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
             "updated_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
         },
@@ -475,6 +479,9 @@ def init_db() -> None:
                 display_id TEXT NOT NULL,
                 id_prefix TEXT NOT NULL DEFAULT '',
                 strain_id TEXT,
+                father_id TEXT,
+                mother_id TEXT,
+                litter_id TEXT,
                 raw_strain_text TEXT NOT NULL DEFAULT '',
                 sex TEXT,
                 genotype TEXT,
@@ -498,10 +505,12 @@ def init_db() -> None:
                 current_card_snapshot_id TEXT,
                 status TEXT NOT NULL DEFAULT 'active',
                 source_photo_id TEXT,
+                source_record_id TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (ear_label_code) REFERENCES ear_label_master(ear_label_code),
-                FOREIGN KEY (source_photo_id) REFERENCES photo_log(photo_id)
+                FOREIGN KEY (source_photo_id) REFERENCES photo_log(photo_id),
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
             );
             """
         )

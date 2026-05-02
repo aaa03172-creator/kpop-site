@@ -793,9 +793,33 @@
       </div>
       <p class="muted" id="litterMessage"></p>
       <table>
-        <thead><tr><th>Litter</th><th>Mating</th><th>Birth</th><th>Born</th><th>Alive</th><th>Weaning</th><th>Status</th></tr></thead>
+        <thead><tr><th>Litter</th><th>Mating</th><th>Birth</th><th>Born</th><th>Alive</th><th>Offspring</th><th>Weaning</th><th>Status</th></tr></thead>
         <tbody id="litterRows"></tbody>
       </table>
+      <div class="form-grid">
+        <label>
+          Litter
+          <select id="offspringLitter"></select>
+        </label>
+        <label>
+          Count
+          <input id="offspringCount" type="text" placeholder="6">
+        </label>
+        <label>
+          Display prefix
+          <input id="offspringPrefix" type="text" placeholder="LIT-2026-001">
+        </label>
+        <label>
+          Starting number
+          <input id="offspringStartNumber" type="text" placeholder="1">
+        </label>
+        <label>
+          Cage
+          <select id="offspringCage"></select>
+        </label>
+        <button id="offspringButton" type="button">Create Offspring</button>
+      </div>
+      <p class="muted" id="offspringMessage"></p>
     </section>
 
     <section class="full">
@@ -1386,10 +1410,17 @@
           litter.birth_date || "--",
           litter.number_born ?? "--",
           litter.number_alive ?? "--",
+          litter.offspring_count ?? 0,
           litter.weaning_date || "--",
           litter.status
         ])
-      ).join("") || row(["No litters yet", "", "", "", "", "", ""]);
+      ).join("") || row(["No litters yet", "", "", "", "", "", "", ""]);
+      document.getElementById("offspringLitter").innerHTML = litters.map((litter) =>
+        `<option value="${escapeHtml(litter.litter_id)}">${escapeHtml(litter.litter_label)}</option>`
+      ).join("");
+      document.getElementById("offspringCage").innerHTML = '<option value="">--</option>' + cages.map((cage) =>
+        `<option value="${escapeHtml(cage.cage_id)}">${escapeHtml(cage.cage_label)}</option>`
+      ).join("");
       document.getElementById("genotypingMouse").innerHTML = mice.map((mouse) =>
         `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.ear_label_raw || "")}</option>`
       ).join("");
@@ -1699,6 +1730,34 @@
       document.getElementById("litterBirthDate").value = "";
       document.getElementById("litterBornCount").value = "";
       document.getElementById("litterWeaningDate").value = "";
+      await refresh();
+    });
+
+    document.getElementById("offspringButton").addEventListener("click", async () => {
+      const litterId = document.getElementById("offspringLitter").value;
+      const countText = document.getElementById("offspringCount").value.trim();
+      if (!litterId || !countText) {
+        document.getElementById("offspringMessage").textContent = "Choose a litter and enter offspring count first.";
+        return;
+      }
+      const count = Number(countText);
+      const startNumberText = document.getElementById("offspringStartNumber").value.trim();
+      const created = await api(`/api/litters/${litterId}/offspring`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          count,
+          display_prefix: document.getElementById("offspringPrefix").value.trim(),
+          start_number: startNumberText ? Number(startNumberText) : 1,
+          cage_id: document.getElementById("offspringCage").value,
+          status: "weaning_pending"
+        })
+      });
+      document.getElementById("offspringMessage").textContent =
+        `Created ${created.created_count} offspring mouse cards; source evidence ${created.source_record_id}.`;
+      document.getElementById("offspringCount").value = "";
+      document.getElementById("offspringPrefix").value = "";
+      document.getElementById("offspringStartNumber").value = "";
       await refresh();
     });
 

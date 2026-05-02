@@ -144,6 +144,16 @@ class LitterCreate(BaseModel):
     note: str = ""
 
 
+class LitterOffspringCreate(BaseModel):
+    count: int = Field(gt=0, le=100)
+    display_prefix: str = ""
+    start_number: int = Field(default=1, ge=1)
+    sex: str = "unknown"
+    cage_id: str = ""
+    status: str = "weaning_pending"
+    note: str = ""
+
+
 class MouseCageMove(BaseModel):
     cage_id: str = Field(min_length=1)
     note: str = ""
@@ -1806,7 +1816,12 @@ def list_litters() -> list[dict[str, Any]]:
             SELECT l.litter_id, l.litter_label, l.mating_id, m.mating_label,
                    l.birth_date, l.number_born, l.number_alive, l.number_weaned,
                    l.weaning_date, l.status, l.note, l.source_record_id,
-                   l.created_at, l.updated_at
+                   l.created_at, l.updated_at,
+                   (
+                       SELECT COUNT(*)
+                       FROM mouse_master mouse
+                       WHERE mouse.litter_id = l.litter_id
+                   ) AS offspring_count
             FROM litter_registry l
             JOIN mating_registry m ON m.mating_id = l.mating_id
             ORDER BY l.birth_date DESC, l.created_at DESC
@@ -1927,6 +1942,184 @@ def create_litter(payload: LitterCreate) -> dict[str, Any]:
     }
 
 
+@app.post("/api/litters/{litter_id}/offspring")
+def create_litter_offspring(litter_id: str, payload: LitterOffspringCreate) -> dict[str, Any]:
+    now = utc_now()
+    raw_payload = payload.model_dump_json()
+    with connection() as conn:
+        litter = conn.execute(
+            """
+            SELECT l.litter_id, l.litter_label, l.mating_id, l.birth_date,
+                   l.number_born, l.number_alive, m.mating_label, m.strain_goal
+            FROM litter_registry l
+            JOIN mating_registry m ON m.mating_id = l.mating_id
+            WHERE l.litter_id = ?
+            """,
+            (litter_id,),
+        ).fetchone()
+        if litter is None:
+            raise HTTPException(status_code=404, detail="Litter not found.")
+        cage = None
+        cage_id = payload.cage_id.strip()
+        if cage_id:
+            cage = conn.execute(
+                "SELECT cage_id, cage_label FROM cage_registry WHERE cage_id = ?",
+                (cage_id,),
+            ).fetchone()
+            if cage is None:
+                raise HTTPException(status_code=404, detail="Cage not found.")
+
+        parent_rows = conn.execute(
+            """
+            SELECT mouse_id, role
+            FROM mating_mouse
+            WHERE mating_id = ? AND removed_date IS NULL
+            """,
+            (litter["mating_id"],),
+        ).fetchall()
+        father_id = next((row["mouse_id"] for row in parent_rows if row["role"] == "male"), None)
+        mother_id = next((row["mouse_id"] for row in parent_rows if row["role"] == "female"), None)
+        display_prefix = " ".join(payload.display_prefix.split()) or litter["litter_label"]
+        planned = []
+        for offset in range(payload.count):
+            number = payload.start_number + offset
+            display_id = f"{display_prefix}-{number:02d}"
+            mouse_id = f"mouse_{litter_id}_{number:02d}".replace(" ", "_")
+            planned.append((mouse_id, display_id))
+        placeholders = ",".join(["?"] * len(planned))
+        duplicate = conn.execute(
+            f"SELECT mouse_id FROM mouse_master WHERE mouse_id IN ({placeholders}) LIMIT 1",
+            [mouse_id for mouse_id, _display_id in planned],
+        ).fetchone()
+        if duplicate is not None:
+            raise HTTPException(status_code=409, detail="One or more offspring IDs already exist for this litter.")
+
+        source_record_id = create_source_record(
+            conn,
+            source_type="manual_entry",
+            source_label=f"Manual offspring generation: {litter['litter_label']}",
+            raw_payload=raw_payload,
+            note="Generated offspring mouse cards from a reviewed litter record.",
+        )
+        created = []
+        for mouse_id, display_id in planned:
+            conn.execute(
+                """
+                INSERT INTO mouse_master
+                    (mouse_id, display_id, id_prefix, father_id, mother_id, litter_id,
+                     raw_strain_text, sex, dob_raw, dob_start, status, use_category,
+                     next_action, source_record_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    mouse_id,
+                    display_id,
+                    mouse_id_prefix(display_id),
+                    father_id,
+                    mother_id,
+                    litter_id,
+                    litter["strain_goal"] or "",
+                    payload.sex or "unknown",
+                    litter["birth_date"] or "",
+                    litter["birth_date"] or "",
+                    payload.status or "weaning_pending",
+                    "stock",
+                    "weaning_due" if payload.status == "weaning_pending" else "sample_needed",
+                    source_record_id,
+                    now,
+                    now,
+                ),
+            )
+            if cage is not None:
+                conn.execute(
+                    """
+                    INSERT INTO mouse_cage_assignment
+                        (assignment_id, mouse_id, cage_id, status, assigned_at,
+                         source_record_id, note)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_id("cage_assignment"),
+                        mouse_id,
+                        cage["cage_id"],
+                        "active",
+                        now,
+                        source_record_id,
+                        payload.note,
+                    ),
+                )
+            conn.execute(
+                """
+                INSERT INTO mouse_event
+                    (event_id, mouse_id, event_type, event_date, related_entity_type,
+                     related_entity_id, source_record_id, details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("event"),
+                    mouse_id,
+                    "born",
+                    litter["birth_date"] or now[:10],
+                    "litter",
+                    litter_id,
+                    source_record_id,
+                    json.dumps(
+                        {
+                            "display_id": display_id,
+                            "litter_label": litter["litter_label"],
+                            "mating_label": litter["mating_label"],
+                            "father_id": father_id,
+                            "mother_id": mother_id,
+                            "cage_label": cage["cage_label"] if cage else "",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    now,
+                ),
+            )
+            created.append({"mouse_id": mouse_id, "display_id": display_id})
+
+        conn.execute(
+            """
+            UPDATE litter_registry
+            SET number_alive = COALESCE(number_alive, ?),
+                status = CASE WHEN status = 'born' THEN 'pre_weaning' ELSE status END,
+                updated_at = ?
+            WHERE litter_id = ?
+            """,
+            (payload.count, now, litter_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "offspring_created",
+                litter_id,
+                None,
+                json.dumps(
+                    {
+                        "litter_id": litter_id,
+                        "created_count": len(created),
+                        "source_record_id": source_record_id,
+                    },
+                    ensure_ascii=False,
+                ),
+                now,
+            ),
+        )
+
+    return {
+        "litter_id": litter_id,
+        "created_count": len(created),
+        "created_mice": created,
+        "source_record_id": source_record_id,
+        "created_at": now,
+    }
+
+
 def contains_filter(columns: list[str], query: str) -> tuple[str, list[str]]:
     normalized = f"%{query.lower()}%"
     clause = " OR ".join([f"LOWER(COALESCE({column}, '')) LIKE ?" for column in columns])
@@ -1951,13 +2144,14 @@ def list_note_items() -> list[dict[str, Any]]:
 
 
 MOUSE_SELECT = """
-    SELECT mouse_id, display_id, id_prefix, strain_id, raw_strain_text, sex,
+    SELECT mouse_id, display_id, id_prefix, strain_id, father_id, mother_id,
+           litter_id, raw_strain_text, sex,
            genotype, genotype_status, dob_raw, dob_start, dob_end,
            ear_label_raw, ear_label_code, ear_label_confidence,
            ear_label_review_status, sample_id, sample_date, genotyping_status,
            genotype_result, genotype_result_date, target_match_status,
            use_category, next_action, source_note_item_id,
-           current_card_snapshot_id, status, source_photo_id,
+           current_card_snapshot_id, status, source_photo_id, source_record_id,
            created_at, updated_at,
            (
                SELECT a.cage_id
@@ -2099,6 +2293,9 @@ def export_mice_csv(query: str = "", require_ready: bool = False) -> Response:
         "mouse_id",
         "display_id",
         "raw_strain_text",
+        "father_id",
+        "mother_id",
+        "litter_id",
         "sex",
         "dob_raw",
         "dob_start",
@@ -2116,6 +2313,7 @@ def export_mice_csv(query: str = "", require_ready: bool = False) -> Response:
         "use_category",
         "next_action",
         "source_note_item_id",
+        "source_record_id",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
