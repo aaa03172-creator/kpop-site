@@ -348,3 +348,192 @@ Phase 1과 Phase 2를 하나의 contained UI restructuring으로 구현한다.
 - UI state가 기존 API로 표현 불가능한 경우가 아니라면 새 data model change는 만들지 않는다.
 
 이렇게 하면 레퍼런스의 제품 완성도와 시각적 방향을 가져오면서도, Mouse Colony 프로젝트의 evidence-first 원칙을 유지할 수 있다.
+
+## Generated Mockup Review
+
+Layer classification: export or view
+Status: visual reference review, non-canonical
+Generated image location: `C:\Users\User\.codex\generated_images\019de2df-1d85-7d30-bbbb-ed71b447de50`
+
+아래 이미지는 구현 사양이 아니라 UI 방향 검토용 visual reference이다. 화면 안의 날짜, ID, 개체 수, strain, genotype, 파일명은 모두 예시이며 canonical state나 실제 colony 기록으로 취급하지 않는다.
+
+### Generated Pages
+
+| Page | Generated image | Review decision |
+| --- | --- | --- |
+| Early Photo Review Workbench | `ig_0c032b98dc1209df0169f56f96fc20819199f05236d1af761c.png` | 초기 방향 검토용. 이후 생성된 Photo Review Workbench가 더 좋다. |
+| Early Dashboard | `ig_0c032b98dc1209df0169f570359a988191b319b6870d93e871.png` | 초기 방향 검토용. 이후 생성된 Dashboard가 더 좋다. |
+| Colony Dashboard | `ig_0c032b98dc1209df0169f5718e12f88191919da8cbbb9c96fe.png` | 장기 목표 reference로 채택. 구현 우선순위는 낮음. |
+| Photo Review Workbench | `ig_0c032b98dc1209df0169f5725053888191b00067f215b80fc1.png` | Phase 1-2의 핵심 reference로 채택. |
+| Evidence Comparison | `ig_0c032b98dc1209df0169f5730f34688191bf1b191eb1d98612.png` | Phase 3 reference로 채택. |
+| Review Queue | `ig_0c032b98dc1209df0169f573bec3d88191b8b79a02b65628ef.png` | Phase 4 reference로 강하게 채택. |
+| Mouse Detail | `ig_0c032b98dc1209df0169f5751ac5d48191b1e0f363a858d33d.png` | Phase 6 reference로 채택. |
+| Strain Detail | `ig_0c032b98dc1209df0169f575cfa3c48191b28ad6af5db5d403.png` | Phase 7 reference로 채택. |
+
+### Overall Review
+
+생성된 mockup들은 기존 레퍼런스 이미지의 장점인 shell, topbar, KPI, 카드 밀도, 상태 badge를 잘 가져왔다. 동시에 현재 MouseDB의 핵심 원칙인 raw photo, parsed/intermediate, review item, canonical candidate, export blocker를 UI에 드러내는 방향도 비교적 잘 반영했다.
+
+가장 좋은 방향:
+- Photo Review Workbench를 첫 화면으로 둔다.
+- Review Queue는 list/detail split view로 만든다.
+- Evidence Comparison은 table 중심이되, 오른쪽 evidence inspector를 붙인다.
+- Mouse Detail과 Strain Detail은 source-backed 상세 화면으로 후속 구현한다.
+- Colony Dashboard는 accepted canonical state가 충분히 쌓인 뒤 최종 운영 화면으로 다듬는다.
+
+주의할 점:
+- 생성 이미지의 텍스트는 일부 AI가 만든 placeholder이므로 그대로 복사하지 않는다.
+- 생성 이미지의 생물학적 관계, 날짜, genotype, count는 실제 기록이 아니다.
+- UI가 너무 깔끔해 보이면 unresolved evidence가 accepted state처럼 보일 수 있다.
+- dashboard 수치는 반드시 accepted state, review candidate, mixed state 중 무엇인지 표시해야 한다.
+- raw photo와 predecessor Excel 사이의 priority를 시각적으로 계속 유지해야 한다.
+
+## Page-by-Page Review
+
+### Colony Dashboard Mockup
+
+좋은 점:
+- reference #1과 유사한 운영 dashboard 밀도가 나온다.
+- accepted state only 안내와 review blocker panel이 있어 evidence-first 원칙과 충돌하지 않는다.
+- KPI, heatmap, age chart, sex ratio, readiness, alerts 구성이 균형적이다.
+- 좌측 navigation과 topbar가 제품 느낌을 만든다.
+
+개선할 점:
+- Dashboard가 너무 앞에 오면 사용자가 검토 전 데이터를 이미 확정된 상태로 오해할 수 있다.
+- `canonical candidates 339`처럼 숫자가 과도하게 확정적으로 보이는 표현은 실제 구현에서 조심해야 한다.
+- 초기 제품에서는 Dashboard를 default로 두지 않는다.
+
+결론:
+- 장기 dashboard target으로 유지.
+- Phase 8에서 구현.
+- Phase 1에서는 shell, KPI 스타일, readiness warning만 일부 차용.
+
+### Photo Review Workbench Mockup
+
+좋은 점:
+- 현재 제품 단계에 가장 잘 맞는 화면이다.
+- raw photo preview가 중앙에 있어 원본 사진이 primary evidence라는 점이 명확하다.
+- Photo Inbox, Manual Transcription, Parsed Note Lines, Next Actions가 한 흐름에 놓여 있다.
+- `Does not write canonical mouse state` 경고가 좋다.
+- 실제 사용자가 사진을 보면서 전사하고, 비교와 review blocker로 넘기는 흐름이 자연스럽다.
+
+개선할 점:
+- note line 입력과 parsed note line 결과 사이의 관계를 더 직접적으로 연결하면 좋다.
+- `Compare`, `Create blocker`, `Map candidate` 버튼은 조건별 disabled/enabled 상태가 필요하다.
+- 사진 preview는 확대, 회전, fit/actual size 같은 조작이 필요할 수 있다.
+
+결론:
+- Phase 1-2의 핵심 구현 reference로 채택.
+- 첫 화면 default는 이 방향이 가장 좋다.
+
+### Evidence Comparison Mockup
+
+좋은 점:
+- table과 right-side inspector 조합이 좋다.
+- manual transcription과 predecessor Excel candidate의 차이가 한눈에 보인다.
+- matched/mismatched fields가 review 판단을 쉽게 만든다.
+- Excel이 predecessor view일 뿐 source of truth가 아니라는 경고가 포함되어 있다.
+- review state와 candidate draft 상태가 같은 행에 있어 workflow continuity가 좋다.
+
+개선할 점:
+- row action은 `Create review`, `View review`, `View candidate`, `No action needed`처럼 상태별로 정확히 갈라야 한다.
+- Excel row snapshot은 실제 workbook source cell reference를 더 명확히 보여줘야 한다.
+- `exact match`도 자동 canonical write로 이어지면 안 된다는 표시가 필요하다.
+
+결론:
+- Phase 3 reference로 채택.
+- 기존 Evidence Comparison table을 decision table + evidence inspector로 발전시킨다.
+
+### Review Queue Mockup
+
+좋은 점:
+- 가장 실제 업무 화면에 가깝다.
+- left list와 right detail split view가 review 처리에 적합하다.
+- raw source evidence, current value, suggested/context value, note lines, resolution controls가 한 화면에 있다.
+- export blocker 이유가 명확하다.
+- correction log preview가 있어 before/after 기록 원칙과 잘 맞는다.
+
+개선할 점:
+- resolution note required 상태를 더 강하게 표현해야 한다.
+- `Accept legacy` 같은 선택지는 lab policy상 위험하므로, 실제 UI에서는 “legacy를 참고값으로 채택”인지 “canonical 후보로 매핑”인지 더 엄밀하게 표현해야 한다.
+- review resolve와 canonical apply는 같은 화면에 있더라도 분리된 단계임을 계속 보여줘야 한다.
+
+결론:
+- Phase 4 reference로 강하게 채택.
+- Review Queue는 단순 table보다 split detail 방식으로 재설계한다.
+
+### Mouse Detail Mockup
+
+좋은 점:
+- reference #2보다 현재 프로젝트 원칙에 더 잘 맞게 source evidence와 audit trace가 포함되어 있다.
+- Basic Information, Source Evidence, Genotype, Cage, Timeline, Notes, Audit Trace 구성이 좋다.
+- canonical record가 어떤 raw photo, parse, review, candidate를 거쳐 만들어졌는지 보인다.
+- field-level provenance를 표시하기 좋은 구조다.
+
+개선할 점:
+- header에서 어떤 값이 accepted이고 어떤 값이 needs review인지 더 강하게 표시해야 한다.
+- ear label처럼 review가 필요한 필드는 card 내부에서도 warning 상태가 필요하다.
+- Audit Trace는 상세 화면 하단에 두되, 필요하면 drawer로 열 수 있어야 한다.
+
+결론:
+- Phase 6 reference로 채택.
+- Mouse Detail은 source-aware detail view로 구현한다.
+
+### Strain Detail Mockup
+
+좋은 점:
+- reference #3의 network 중심 구성을 잘 유지하면서 evidence layer를 추가했다.
+- raw source, parsed/intermediate, review, candidate, canonical legend가 좋다.
+- strain-level open reviews가 시각적으로 드러난다.
+- related reviews와 quick reference가 실무적으로 유용하다.
+
+개선할 점:
+- genotype distribution category는 hard-code하지 않고 configurable master에서 와야 한다.
+- network edge는 reviewed evidence와 pending/unreviewed evidence를 더 엄격히 구분해야 한다.
+- radar score는 review aid일 뿐 canonical state가 아니라는 문구를 유지해야 한다.
+
+결론:
+- Phase 7 reference로 채택.
+- Strain Detail은 genotype/strain normalization이 어느 정도 안정된 뒤 구현한다.
+
+## Updated Implementation Priority
+
+생성 이미지를 검토한 뒤 우선순위를 다음처럼 조정한다.
+
+1. App shell: sidebar, topbar, view container.
+2. Photo Review Workbench: raw photo preview 중심의 첫 화면.
+3. Review Queue split detail: review resolution을 실제 업무 화면으로 승격.
+4. Evidence Comparison decision table + evidence inspector.
+5. Export Readiness panel: blockers, filenames, export log.
+6. Mouse Detail source-aware view.
+7. Strain Detail evidence network view.
+8. Colony Dashboard accepted-state operational view.
+
+핵심 변경:
+- 기존 계획에서는 Evidence Comparison을 Review Queue보다 먼저 개선하는 순서였지만, 생성 mockup 검토 후 Review Queue split detail을 더 앞당긴다.
+- 이유는 실제 사용자 행동이 “차이를 발견한다”보다 “리뷰를 해결한다”에 더 오래 머무르기 때문이다.
+- Photo Review Workbench와 Review Queue가 안정되면 Evidence Comparison은 자연스럽게 decision support view가 된다.
+
+## Updated Next Step
+
+다음 구현은 Phase 1-2에 Phase 4의 일부를 섞어 진행한다.
+
+Scope:
+- sidebar/topbar shell 추가.
+- Photo Review Workbench를 default view로 배치.
+- Review Queue를 list/detail split layout으로 재배치하되, 기존 resolve API를 그대로 사용.
+- Evidence Comparison은 우선 현재 table을 유지하고, selected row inspector는 다음 phase로 넘긴다.
+
+Non-goals:
+- Mouse Detail 전체 구현.
+- Strain Detail network 구현.
+- Dashboard chart 전체 구현.
+- 새로운 canonical schema 추가.
+- 자동 OCR 또는 외부 inference 연동.
+
+Verification:
+- 기존 `python scripts/verify-local-app.py` 유지.
+- 기존 `npm run verify` 유지.
+- desktop screenshot으로 Photo Review Workbench 확인.
+- open review blocker가 final export를 계속 막는지 확인.
+- raw photo, manual transcription, comparison view에서 canonical write가 발생하지 않는지 확인.
