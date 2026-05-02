@@ -400,6 +400,7 @@ def main() -> None:
                 assert_true("Breeding / Litter View" in index_html, "Local UI should expose mating and litter management.")
                 assert_true("Create Offspring" in index_html, "Local UI should expose litter offspring generation.")
                 assert_true("Complete Weaning" in index_html, "Local UI should expose litter weaning completion.")
+                assert_true("Request Genotyping" in index_html, "Local UI should expose genotyping request workflow.")
                 assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
                 assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
                 assert_true("exportRows" in index_html, "Local UI should expose export preview rows.")
@@ -701,6 +702,14 @@ def main() -> None:
                 assert_true(export_preview["export_type"] == "separation_preview", "Export preview should identify its workbook-like shape.")
                 assert_true(export_preview["preview_row_count"] >= 3, "Export preview should include mouse candidate rows.")
                 assert_true(
+                    export_preview["separation_columns"][:5] == ["Cage number", "Strain", "Genotype", "total", "DOB"],
+                    "Separation preview should expose senior-workbook-style column labels.",
+                )
+                assert_true(
+                    any(row["total"].endswith("p") and row["source_note_item_ids"] for row in export_preview["separation_rows"]),
+                    "Separation preview should group mouse records into workbook-like sex/count rows with traceability.",
+                )
+                assert_true(
                     any(row["display_id"] == "MT321" and row["source_note_item_id"] for row in export_preview["preview_rows"]),
                     "Export preview rows should preserve source note traceability.",
                 )
@@ -848,6 +857,25 @@ def main() -> None:
                     any(row["litter_id"] == litter_payload["litter_id"] and row["offspring_count"] == 2 for row in litter_rows_after_offspring),
                     "Litter list should expose generated offspring count.",
                 )
+                animal_preview = client.get("/api/export-preview").json()
+                assert_true(
+                    animal_preview["animal_sheet_columns"][:8]
+                    == ["Cage No.", "Strain", "Sex", "I.D", "genotype", "DOB", "Mating date", "Pubs"],
+                    "Animal sheet preview should expose mating-workbook-style column labels.",
+                )
+                assert_true(
+                    any(
+                        row["cage_no"] == "1"
+                        and row["strain"] == genotyping_target["raw_strain_text"]
+                        and row["mating_date"] == "2026-05-01"
+                        for row in animal_preview["animal_sheet_rows"]
+                    ),
+                    "Animal sheet preview should include parent rows grouped by mating cage.",
+                )
+                assert_true(
+                    any(row["sex"] == "F1" and row["mouse_id"] == "9p" and row["status"] == "pre_weaning" for row in animal_preview["animal_sheet_rows"]),
+                    "Animal sheet preview should include litter rows with pup counts and status.",
+                )
                 over_weaned = client.post(
                     f"/api/litters/{litter_payload['litter_id']}/wean",
                     json={"weaning_date": "2026-05-23", "number_weaned": 3},
@@ -876,6 +904,20 @@ def main() -> None:
                     all(row["status"] == "active" and row["next_action"] == "sample_needed" for row in weaned_offspring_rows),
                     "Weaned offspring should move from weaning pending to active sample-needed workflow.",
                 )
+                requested_genotyping = client.post(
+                    "/api/genotyping/request",
+                    json={
+                        "mouse_id": weaned_offspring_rows[0]["mouse_id"],
+                        "sample_id": "TAIL-MT321-L1-01",
+                        "target_name": "ApoM Tg/Tg",
+                        "note": "Requested after weaning verification.",
+                    },
+                )
+                assert_true(requested_genotyping.status_code == 200, "Could not request genotyping for weaned offspring.")
+                requested_payload = requested_genotyping.json()
+                assert_true(requested_payload["sample_id"] == "TAIL-MT321-L1-01", "Genotyping request should preserve sample ID.")
+                assert_true(requested_payload["genotyping_status"] == "submitted", "Genotyping request should mark mouse submitted.")
+                assert_true(requested_payload["next_action"] == "awaiting_result", "Genotyping request should move mouse to awaiting result.")
                 litter_rows_after_weaning = client.get("/api/litters").json()
                 assert_true(
                     any(
@@ -901,6 +943,11 @@ def main() -> None:
                 assert_true(genotyping_payload["genotyping_status"] == "resulted", "Genotyping result should mark mouse resulted.")
                 assert_true(genotyping_payload["target_match_status"] == "matches_target", "Genotyping result should use configured target matching.")
                 assert_true(genotyping_payload["next_action"] == "consider_for_mating", "Matching target genotype should suggest a mating review action.")
+                duplicate_resulted_request = client.post(
+                    "/api/genotyping/request",
+                    json={"mouse_id": genotyping_target["mouse_id"], "sample_id": "already-resulted"},
+                )
+                assert_true(duplicate_resulted_request.status_code == 409, "Resulted mice should not accept a new genotyping request silently.")
                 dashboard_after = {card["key"]: card["count"] for card in client.get("/api/genotyping-dashboard").json()}
                 assert_true(
                     dashboard_after.get("target_confirmed", 0) >= 1,
@@ -910,6 +957,10 @@ def main() -> None:
                 assert_true(
                     any(record["mouse_id"] == genotyping_target["mouse_id"] and record["normalized_result"] == "Tg/Tg" for record in genotyping_records),
                     "Genotyping record history should preserve the entered result.",
+                )
+                assert_true(
+                    any(record["sample_id"] == "TAIL-MT321-L1-01" and record["result_status"] == "pending" for record in genotyping_records),
+                    "Genotyping request should create a pending genotyping record.",
                 )
                 genotyping_export = client.get("/api/exports/genotyping-worklist.csv", params={"query": "MT321"})
                 assert_true(genotyping_export.status_code == 200, "Genotyping worklist CSV export endpoint failed.")
@@ -1072,6 +1123,27 @@ def main() -> None:
                         """,
                         (litter_payload["litter_id"],),
                     ).fetchone()["count"]
+                    genotyping_request_action_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM action_log
+                        WHERE action_type = 'genotyping_requested'
+                        """
+                    ).fetchone()["count"]
+                    tail_biopsy_event_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM mouse_event
+                        WHERE event_type = 'tail_biopsy' AND related_entity_type = 'genotyping_record'
+                        """
+                    ).fetchone()["count"]
+                    genotyping_request_event_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM mouse_event
+                        WHERE event_type = 'genotyping_requested' AND related_entity_type = 'genotyping_record'
+                        """
+                    ).fetchone()["count"]
                 assert_true(note_count >= 10, "Persisted note item evidence count is too low.")
                 assert_true(mouse_count >= 5, "Persisted mouse candidate count is too low.")
                 assert_true(moved_count >= 1, "Single-struck mouse note should create a moved candidate.")
@@ -1089,6 +1161,9 @@ def main() -> None:
                 assert_true(offspring_action_count == 1, "Offspring creation should create an action log entry.")
                 assert_true(weaned_event_count == 2, "Weaning should create one event per weaned offspring.")
                 assert_true(weaned_action_count == 1, "Weaning should create an action log entry.")
+                assert_true(genotyping_request_action_count == 1, "Genotyping request should create an action log entry.")
+                assert_true(tail_biopsy_event_count == 1, "Genotyping request should create a tail biopsy event.")
+                assert_true(genotyping_request_event_count == 1, "Genotyping request should create a request event.")
                 correction = client.post(
                     "/api/corrections",
                     json={

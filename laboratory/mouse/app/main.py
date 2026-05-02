@@ -104,6 +104,14 @@ class GenotypingUpdate(BaseModel):
     notes: str = ""
 
 
+class GenotypingRequestCreate(BaseModel):
+    mouse_id: str = Field(min_length=1)
+    sample_id: str = ""
+    sample_date: str = ""
+    target_name: str = ""
+    note: str = ""
+
+
 class StrainTargetGenotypeCreate(BaseModel):
     strain_text: str = Field(min_length=1)
     target_genotype: str = Field(min_length=1)
@@ -1341,6 +1349,132 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
             ),
         )
     return {"genotyping_id": record_id, **dict(after)}
+
+
+@app.post("/api/genotyping/request")
+def request_genotyping(payload: GenotypingRequestCreate) -> dict[str, Any]:
+    requested_at = utc_now()
+    sample_date = payload.sample_date or requested_at[:10]
+    with connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT mouse_id, display_id, sample_id, sample_date, genotyping_status,
+                   genotype_result, next_action, raw_strain_text
+            FROM mouse_master
+            WHERE mouse_id = ?
+            """,
+            (payload.mouse_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Mouse not found.")
+        if existing["genotyping_status"] == "resulted":
+            raise HTTPException(status_code=409, detail="Mouse already has a genotyping result.")
+
+        before = dict(existing)
+        sample_id = payload.sample_id.strip() or existing["display_id"]
+        raw_payload = payload.model_dump_json()
+        source_record_id = create_source_record(
+            conn,
+            source_type="manual_entry",
+            source_label=f"Manual genotyping request: {existing['display_id']}",
+            raw_payload=raw_payload,
+            note="Tail biopsy / genotyping request entered from local Genotyping Worklist.",
+        )
+        conn.execute(
+            """
+            UPDATE mouse_master
+            SET sample_id = ?,
+                sample_date = ?,
+                genotyping_status = 'submitted',
+                genotype_status = 'pending',
+                next_action = 'awaiting_result',
+                updated_at = ?
+            WHERE mouse_id = ?
+            """,
+            (sample_id, sample_date, requested_at, payload.mouse_id),
+        )
+        record_id = new_id("genotyping")
+        conn.execute(
+            """
+            INSERT INTO genotyping_record
+                (genotyping_id, mouse_id, sample_id, sample_date, submitted_date,
+                 target_name, raw_result, normalized_result, result_status,
+                 confidence, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record_id,
+                payload.mouse_id,
+                sample_id,
+                sample_date,
+                requested_at[:10],
+                payload.target_name,
+                "",
+                "",
+                "pending",
+                1.0,
+                payload.note,
+                requested_at,
+                requested_at,
+            ),
+        )
+        for event_type in ["tail_biopsy", "genotyping_requested"]:
+            conn.execute(
+                """
+                INSERT INTO mouse_event
+                    (event_id, mouse_id, event_type, event_date, related_entity_type,
+                     related_entity_id, source_record_id, details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("event"),
+                    payload.mouse_id,
+                    event_type,
+                    sample_date,
+                    "genotyping_record",
+                    record_id,
+                    source_record_id,
+                    json.dumps(
+                        {
+                            "display_id": existing["display_id"],
+                            "sample_id": sample_id,
+                            "target_name": payload.target_name,
+                            "note": payload.note,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    requested_at,
+                ),
+            )
+        after = conn.execute(
+            """
+            SELECT mouse_id, display_id, sample_id, sample_date,
+                   genotyping_status, genotype_status, next_action
+            FROM mouse_master
+            WHERE mouse_id = ?
+            """,
+            (payload.mouse_id,),
+        ).fetchone()
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "genotyping_requested",
+                payload.mouse_id,
+                json.dumps(before, ensure_ascii=False),
+                json.dumps(dict(after), ensure_ascii=False),
+                requested_at,
+            ),
+        )
+
+    return {
+        "genotyping_id": record_id,
+        "source_record_id": source_record_id,
+        **dict(after),
+    }
 
 
 @app.get("/api/strain-target-genotypes")
@@ -2629,8 +2763,69 @@ def export_preview() -> dict[str, Any]:
             LIMIT 50
             """
         ).fetchall()
+        mating_rows = conn.execute(
+            """
+            SELECT m.mating_id, m.mating_label, m.strain_goal, m.expected_genotype,
+                   m.start_date, m.status AS mating_status,
+                   mm.role, mouse.display_id, mouse.sex, mouse.ear_label_raw,
+                   mouse.genotype, mouse.genotype_result, mouse.dob_raw, mouse.dob_start,
+                   mouse.source_note_item_id, mouse.source_record_id
+            FROM mating_registry m
+            LEFT JOIN mating_mouse mm ON mm.mating_id = m.mating_id AND mm.removed_date IS NULL
+            LEFT JOIN mouse_master mouse ON mouse.mouse_id = mm.mouse_id
+            ORDER BY m.created_at, m.mating_label COLLATE NOCASE,
+                     CASE mm.role WHEN 'male' THEN 1 WHEN 'female' THEN 2 ELSE 3 END,
+                     mouse.display_id COLLATE NOCASE
+            LIMIT 120
+            """
+        ).fetchall()
+        litter_rows = conn.execute(
+            """
+            SELECT l.litter_id, l.litter_label, l.mating_id, l.birth_date,
+                   l.number_born, l.number_alive, l.number_weaned, l.weaning_date,
+                   l.status, l.source_record_id
+            FROM litter_registry l
+            ORDER BY l.birth_date, l.created_at
+            LIMIT 120
+            """
+        ).fetchall()
     rows = []
+    separation_groups: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for mouse in mice:
+        sex = mouse["sex"] or ""
+        sex_symbol = {"male": "♂", "female": "♀"}.get(sex.lower(), sex)
+        genotype = mouse["genotype_result"] or mouse["genotype"] or ""
+        dob = mouse["dob_raw"] or mouse["dob_start"] or ""
+        cage = mouse["current_cage_label"] or ""
+        group_key = (cage, mouse["raw_strain_text"] or "", genotype, sex_symbol, dob)
+        if group_key not in separation_groups:
+            separation_groups[group_key] = {
+                "cage_number": cage,
+                "strain": mouse["raw_strain_text"] or "",
+                "genotype": genotype,
+                "sex": sex_symbol,
+                "count": 0,
+                "dob": dob,
+                "wt": "",
+                "tg": "",
+                "sampling_point": "",
+                "source_note_item_ids": [],
+                "source_record_ids": [],
+            }
+        group = separation_groups[group_key]
+        group["count"] += 1
+        if "wt" in genotype.lower():
+            group["wt"] = str(int(group["wt"] or "0") + 1)
+        elif "tg" in genotype.lower():
+            group["tg"] = str(int(group["tg"] or "0") + 1)
+        elif mouse["genotyping_status"] and mouse["genotyping_status"] != "resulted":
+            group["wt"] = mouse["genotyping_status"]
+        if mouse["next_action"]:
+            group["sampling_point"] = mouse["next_action"]
+        if mouse["source_note_item_id"]:
+            group["source_note_item_ids"].append(mouse["source_note_item_id"])
+        if mouse["source_record_id"]:
+            group["source_record_ids"].append(mouse["source_record_id"])
         rows.append(
             {
                 "mouse_id": mouse["mouse_id"],
@@ -2645,16 +2840,91 @@ def export_preview() -> dict[str, Any]:
                 "source_note_item_id": mouse["source_note_item_id"] or "",
             }
         )
+    separation_rows = []
+    for group in separation_groups.values():
+        source_notes = ", ".join(group["source_note_item_ids"][:3])
+        if len(group["source_note_item_ids"]) > 3:
+            source_notes = f"{source_notes}, +{len(group['source_note_item_ids']) - 3}"
+        separation_rows.append(
+            {
+                "cage_number": group["cage_number"],
+                "strain": group["strain"],
+                "genotype": group["genotype"],
+                "total": f"{group['sex']} {group['count']}p".strip(),
+                "dob": group["dob"],
+                "wt": group["wt"],
+                "tg": group["tg"],
+                "sampling_point": group["sampling_point"],
+                "source_note_item_ids": source_notes,
+            }
+        )
+    litter_by_mating: dict[str, list[Any]] = {}
+    for litter in litter_rows:
+        litter_by_mating.setdefault(litter["mating_id"], []).append(litter)
+    animal_rows = []
+    current_mating = None
+    cage_no = 0
+    litter_sequence: dict[str, int] = {}
+    for mating in mating_rows:
+        if mating["mating_id"] != current_mating:
+            current_mating = mating["mating_id"]
+            cage_no += 1
+            litter_sequence[current_mating] = 0
+            first_parent_for_mating = True
+        else:
+            first_parent_for_mating = False
+        if mating["display_id"]:
+            sex_value = {"male": "♂", "female": "♀"}.get((mating["sex"] or "").lower(), mating["sex"] or mating["role"] or "")
+            mouse_label = " ".join([mating["display_id"] or "", mating["ear_label_raw"] or ""]).strip()
+            animal_rows.append(
+                {
+                    "cage_no": str(cage_no) if first_parent_for_mating else "",
+                    "strain": mating["strain_goal"] or "",
+                    "sex": sex_value,
+                    "mouse_id": mouse_label,
+                    "genotype": mating["genotype_result"] or mating["genotype"] or mating["expected_genotype"] or "",
+                    "dob": mating["dob_raw"] or mating["dob_start"] or "",
+                    "mating_date": mating["start_date"] if first_parent_for_mating else "",
+                    "pubs": "",
+                    "status": mating["mating_status"] or "",
+                    "source": mating["source_note_item_id"] or mating["source_record_id"] or "",
+                }
+            )
+        for litter in litter_by_mating.get(current_mating, []):
+            if litter_sequence[current_mating] >= litter_by_mating[current_mating].index(litter) + 1:
+                continue
+            litter_sequence[current_mating] += 1
+            born_count = litter["number_alive"] if litter["number_alive"] is not None else litter["number_born"]
+            animal_rows.append(
+                {
+                    "cage_no": "",
+                    "strain": "",
+                    "sex": f"F{litter_sequence[current_mating]}",
+                    "mouse_id": f"{born_count or ''}p".strip(),
+                    "genotype": litter["status"] or "",
+                    "dob": litter["birth_date"] or "",
+                    "mating_date": "",
+                    "pubs": f"{litter['birth_date']} {litter['number_born']}p".strip() if litter["number_born"] else "",
+                    "status": litter["status"] or "",
+                    "source": litter["source_record_id"] or "",
+                }
+            )
     return {
         "source_layer": "export or view",
         "export_type": "separation_preview",
         "expected_filename": "mouse_records_preview.csv",
+        "separation_columns": ["Cage number", "Strain", "Genotype", "total", "DOB", "WT", "Tg", "Sampling point", "Source note"],
+        "animal_sheet_columns": ["Cage No.", "Strain", "Sex", "I.D", "genotype", "DOB", "Mating date", "Pubs", "Status", "Source"],
         "photos": photos,
         "parsed_results": parsed,
         "blocked_review_items": open_reviews,
         "ready": open_reviews == 0 and bool(rows),
         "preview_rows": rows,
+        "separation_rows": separation_rows,
+        "animal_sheet_rows": animal_rows,
         "preview_row_count": len(rows),
+        "separation_row_count": len(separation_rows),
+        "animal_sheet_row_count": len(animal_rows),
         "review_blockers": [dict(row) for row in review_rows],
         "generated_at": utc_now(),
     }
