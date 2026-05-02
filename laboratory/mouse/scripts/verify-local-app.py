@@ -1226,7 +1226,16 @@ def main() -> None:
                     ready_separation_xlsx.content[:4] == b"PK\x03\x04",
                     "Separation XLSX export should be a ZIP-based workbook.",
                 )
+                separation_disposition = ready_separation_xlsx.headers.get("content-disposition", "")
+                assert_true(
+                    "filename*=UTF-8''" in separation_disposition and "separation.xlsx" in separation_disposition,
+                    "Separation XLSX export should expose a safe fallback and UTF-8 filename.",
+                )
                 with zipfile.ZipFile(io.BytesIO(ready_separation_xlsx.content)) as workbook_zip:
+                    assert_true(
+                        "xl/workbook.xml" in workbook_zip.namelist() and "xl/worksheets/sheet1.xml" in workbook_zip.namelist(),
+                        "Separation XLSX should contain the required workbook parts.",
+                    )
                     separation_sheet_xml = workbook_zip.read("xl/worksheets/sheet1.xml").decode("utf-8")
                 assert_true("Sampling point" in separation_sheet_xml, "Separation XLSX should include the template header.")
                 assert_true("ApoM Tg/Tg" in separation_sheet_xml, "Separation XLSX should include accepted strain rows.")
@@ -1236,12 +1245,30 @@ def main() -> None:
                     ready_animal_xlsx.content[:4] == b"PK\x03\x04",
                     "Animal sheet XLSX export should be a ZIP-based workbook.",
                 )
+                animal_disposition = ready_animal_xlsx.headers.get("content-disposition", "")
+                assert_true(
+                    "filename*=UTF-8''" in animal_disposition and "animal sheet.xlsx" in animal_disposition,
+                    "Animal sheet XLSX export should expose a safe fallback and UTF-8 filename.",
+                )
                 with zipfile.ZipFile(io.BytesIO(ready_animal_xlsx.content)) as workbook_zip:
+                    assert_true(
+                        "xl/workbook.xml" in workbook_zip.namelist() and "xl/worksheets/sheet1.xml" in workbook_zip.namelist(),
+                        "Animal sheet XLSX should contain the required workbook parts.",
+                    )
                     animal_sheet_xml = workbook_zip.read("xl/worksheets/sheet1.xml").decode("utf-8")
                 assert_true("Cage No." in animal_sheet_xml, "Animal sheet XLSX should include the template header.")
                 assert_true("MT321" in animal_sheet_xml and "MT322" in animal_sheet_xml, "Animal sheet XLSX should include parent IDs.")
                 assert_true("2026-05-02 10p" in animal_sheet_xml, "Animal sheet XLSX should include litter pup evidence.")
-                ready_export_log = client.get("/api/export-log").json()[0]
+                ready_logs = client.get("/api/export-log").json()
+                assert_true(
+                    any(item["export_type"] == "separation_xlsx" and item["status"] == "generated" for item in ready_logs),
+                    "Export log should record generated separation XLSX exports.",
+                )
+                assert_true(
+                    any(item["export_type"] == "animal_sheet_xlsx" and item["status"] == "generated" for item in ready_logs),
+                    "Export log should record generated animal sheet XLSX exports.",
+                )
+                ready_export_log = next(item for item in ready_logs if item["export_type"] == "mouse_csv")
                 assert_true(ready_export_log["status"] == "generated", "Ready export should create a generated export log entry.")
                 assert_true(
                     ready_export_log["blocked_review_count"] == 0,
