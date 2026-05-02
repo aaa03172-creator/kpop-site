@@ -49,6 +49,54 @@ def init_db() -> None:
                 PRIMARY KEY (entity, year)
             );
 
+            CREATE TABLE IF NOT EXISTS source_record (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_record_id TEXT NOT NULL UNIQUE,
+                source_type TEXT NOT NULL,
+                source_uri TEXT NOT NULL DEFAULT '',
+                source_label TEXT NOT NULL DEFAULT '',
+                raw_payload TEXT NOT NULL DEFAULT '',
+                checksum TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS review_item (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                review_item_id TEXT NOT NULL UNIQUE,
+                entity_type TEXT NOT NULL DEFAULT '',
+                entity_id TEXT NOT NULL DEFAULT '',
+                issue_type TEXT NOT NULL,
+                severity TEXT NOT NULL DEFAULT 'medium',
+                status TEXT NOT NULL DEFAULT 'open',
+                source_record_id TEXT,
+                raw_value TEXT NOT NULL DEFAULT '',
+                current_value TEXT NOT NULL DEFAULT '',
+                suggested_value TEXT NOT NULL DEFAULT '',
+                evidence TEXT NOT NULL DEFAULT '',
+                resolution_note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TEXT,
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS correction_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                correction_id TEXT NOT NULL UNIQUE,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                field_name TEXT NOT NULL,
+                before_value TEXT NOT NULL DEFAULT '',
+                after_value TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                source_record_id TEXT,
+                review_item_id TEXT,
+                corrected_by TEXT NOT NULL DEFAULT 'local_user',
+                corrected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
+                FOREIGN KEY (review_item_id) REFERENCES review_item(review_item_id)
+            );
+
             CREATE TABLE IF NOT EXISTS strain (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 strain_id TEXT NOT NULL UNIQUE,
@@ -257,5 +305,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_genotype_mouse ON genotype_result(mouse_id);
             CREATE INDEX IF NOT EXISTS idx_mating_status ON mating(status);
             CREATE INDEX IF NOT EXISTS idx_litter_status ON litter(status);
+            CREATE INDEX IF NOT EXISTS idx_source_record_type ON source_record(source_type, created_at);
+            CREATE INDEX IF NOT EXISTS idx_review_item_status ON review_item(status, severity);
+            CREATE INDEX IF NOT EXISTS idx_correction_entity ON correction_log(entity_type, entity_id);
             """
         )
