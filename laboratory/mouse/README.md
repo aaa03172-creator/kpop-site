@@ -108,7 +108,7 @@ Core canonical tables:
 
 Mouse records stay lightweight and hold current state. Detailed history is stored in `mouse_event`. Genotype display summaries on Mouse are convenience values; structured `genotype_result` rows are the source of truth.
 
-Corrections preserve before/after values in `correction_log`. When a correction changes a mouse record, MouseDB also writes a `correction_applied` event so the timeline remains auditable.
+Corrections preserve before/after values in `correction_log`. When a correction changes a mouse record, MouseDB also writes a `correction_applied` event so the timeline remains auditable. Review resolution can include correction metadata so the resolved review, before/after values, and action log entry are recorded in one transaction.
 
 Litter weaning updates generated offspring from `weaning_pending` to `alive` and writes a `weaned` event for each mouse, preserving the litter snapshot as the related entity.
 
