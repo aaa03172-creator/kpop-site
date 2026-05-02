@@ -493,6 +493,22 @@ def main() -> None:
                     and "selected photo" in health["ai_draft"]["payload_minimization"],
                     "Health endpoint should expose approval-gated AI draft status and payload minimization.",
                 )
+                with patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False):
+                    set_ai_key = client.post("/api/ai-draft-settings", json={"api_key": "sk-test-session-key"})
+                    assert_true(set_ai_key.status_code == 200, "Could not set temporary AI draft session key.")
+                    set_ai_key_payload = set_ai_key.json()
+                    assert_true(
+                        set_ai_key_payload["ai_draft"]["available"] is True
+                        and set_ai_key_payload["ai_draft"]["key_source"] == "session"
+                        and "sk-test-session-key" not in json.dumps(set_ai_key_payload),
+                        "AI draft session key should activate draft status without echoing the secret.",
+                    )
+                    cleared_ai_key = client.post("/api/ai-draft-settings", json={"api_key": ""})
+                    assert_true(cleared_ai_key.status_code == 200, "Could not clear temporary AI draft session key.")
+                    assert_true(
+                        cleared_ai_key.json()["ai_draft"]["available"] is False,
+                        "Clearing the session key should disable AI draft when no environment key is configured.",
+                    )
                 index_html = client.get("/").text
                 assert_true("app-shell" in index_html and "Primary navigation" in index_html, "Local UI should use a persistent app shell with primary navigation.")
                 assert_true('data-view-target="photo"' in index_html and "Photo Review Workbench" in index_html, "Photo Review Workbench should be the default operational view.")
@@ -549,6 +565,8 @@ def main() -> None:
                 assert_true("/api/photo-review-workbench" in index_html, "Local UI should load the batch photo review workbench view.")
                 assert_true("aiDraftButton" in index_html, "Local UI should expose approval-gated AI transcription drafts.")
                 assert_true("ai-transcription-draft" in index_html, "Local UI should call the AI draft endpoint only from the review form.")
+                assert_true("openAiApiKeyInput" in index_html, "Local UI should allow a temporary session API key for AI drafts.")
+                assert_true("ai-draft-settings" in index_html, "Local UI should update AI draft settings without storing the key in app records.")
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")

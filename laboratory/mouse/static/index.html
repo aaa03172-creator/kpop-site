@@ -409,6 +409,9 @@
       border-radius: 6px;
       background: #0d1412;
     }
+    .photo-preview-image:not([src]) {
+      display: none;
+    }
     .metric-grid {
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1011,6 +1014,14 @@
       </div>
       <p class="muted" id="transcriptionMessage"></p>
       <p class="muted" id="aiDraftMessage">AI draft sends only the selected photo and active assigned strain names after button approval.</p>
+      <div class="form-grid">
+        <label>
+          OpenAI API key
+          <input id="openAiApiKeyInput" type="password" autocomplete="off" placeholder="sk-...">
+        </label>
+        <button id="saveAiKeyButton" type="button">Use for Session</button>
+        <button id="clearAiKeyButton" type="button">Clear Session Key</button>
+      </div>
     </section>
 
     <section class="full" data-view="settings">
@@ -1154,7 +1165,7 @@
       </table>
     </section>
 
-    <section data-view="photo">
+    <section data-view="records">
       <h2>Photo Inbox</h2>
       <table>
         <thead><tr><th>ID</th><th>File</th><th>Status</th><th>Uploaded</th><th>Action</th></tr></thead>
@@ -2240,8 +2251,8 @@
       renderShellStatus({ health, photoWorkbench, photos, reviews, mice, evidenceComparison, preview });
       const aiStatus = health.ai_draft || {};
       document.getElementById("aiDraftMessage").textContent = aiStatus.available
-        ? `AI draft ready with ${aiStatus.model}; approval is required for each selected photo.`
-        : "AI draft unavailable: set OPENAI_API_KEY to use draft transcription. Manual transcription remains available.";
+        ? `AI draft ready with ${aiStatus.model} (${aiStatus.key_source || "configured"} key); approval is required for each selected photo.`
+        : "AI draft unavailable: enter a session API key here or set OPENAI_API_KEY before starting the server. Manual transcription remains available.";
       renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview });
       await renderAuditTrace(mice);
       const searchResults = activeSearchQuery
@@ -2718,6 +2729,37 @@
       } catch (error) {
         message.textContent = `AI draft unavailable: ${error.message}`;
       }
+    });
+    document.getElementById("saveAiKeyButton").addEventListener("click", async () => {
+      const input = document.getElementById("openAiApiKeyInput");
+      const message = document.getElementById("aiDraftMessage");
+      const key = input.value.trim();
+      if (!key) {
+        message.textContent = "Enter an OpenAI API key first. It will be kept only in this running server session.";
+        return;
+      }
+      const result = await api("/api/ai-draft-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: key })
+      });
+      input.value = "";
+      message.textContent = result.ai_draft?.available
+        ? `AI draft ready with ${result.ai_draft.model} (session key). The key is not written to the database.`
+        : "AI draft key was not activated.";
+      await refresh();
+    });
+    document.getElementById("clearAiKeyButton").addEventListener("click", async () => {
+      const result = await api("/api/ai-draft-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: "" })
+      });
+      document.getElementById("openAiApiKeyInput").value = "";
+      document.getElementById("aiDraftMessage").textContent = result.ai_draft?.available
+        ? `Session key cleared; AI draft still available from ${result.ai_draft.key_source}.`
+        : "Session API key cleared. Manual transcription remains available.";
+      await refresh();
     });
     document.getElementById("comparisonReviewButton").addEventListener("click", async () => {
       const result = await api("/api/evidence-comparison/review-candidates", { method: "POST" });
