@@ -65,6 +65,15 @@ python -m mousedb colony summary --json
 python -m mousedb experiment-ready --strain STR-0001 --genotype "AL-0001:positive" --sex male --age-min-weeks 8 --json
 ```
 
+Evidence and review commands:
+
+```powershell
+python -m mousedb source add --type manual_entry --label "Correction note" --raw-payload "M0232 sex female" --json
+python -m mousedb review add --issue-type sex_uncertain --entity-type mouse --entity-id M-2026-0232 --source SRC-2026-0001 --raw-value unknown --suggested-value female --json
+python -m mousedb correction apply --entity-type mouse --entity-id M-2026-0232 --field sex --value female --review REV-2026-0001 --source SRC-2026-0001 --reason "Reviewed cage card note" --json
+python -m mousedb correction list --entity-type mouse --entity-id M-2026-0232 --json
+```
+
 ## Demo Workflow
 
 ```powershell
@@ -93,6 +102,9 @@ Core canonical tables:
 - `litter`
 - `genotype_result`
 - `mouse_event`
+- `source_record`
+- `review_item`
+- `correction_log`
 
 Mouse records stay lightweight and hold current state. Detailed history is stored in `mouse_event`. Genotype display summaries on Mouse are convenience values; structured `genotype_result` rows are the source of truth.
 

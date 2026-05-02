@@ -222,3 +222,167 @@ def test_mating_litter_and_archive_commands(tmp_path: Path) -> None:
 
     archived = run_cli(tmp_path, "strain", "archive", "STR-0001", "--json")
     assert archived["status"] == "archived"
+
+
+def test_review_correction_source_cli_preserves_before_after(tmp_path: Path) -> None:
+    run_cli(tmp_path, "reset", "--yes", "--json")
+    run_cli(tmp_path, "seed", "--json")
+
+    source = run_cli(
+        tmp_path,
+        "source",
+        "add",
+        "--type",
+        "cage_card_photo",
+        "--label",
+        "Card A",
+        "--raw-payload",
+        "raw handwritten note",
+        "--json",
+    )
+    assert source["source_record_id"].startswith("SRC-")
+
+    review = run_cli(
+        tmp_path,
+        "review",
+        "add",
+        "--issue-type",
+        "uncertain_ocr",
+        "--severity",
+        "high",
+        "--entity-type",
+        "strain",
+        "--entity-id",
+        "STR-0001",
+        "--source",
+        source["source_record_id"],
+        "--raw-value",
+        "PV-Cre?",
+        "--current-value",
+        "PV-Cre",
+        "--suggested-value",
+        "Pvalb-Cre",
+        "--evidence",
+        "note line 2",
+        "--json",
+    )
+    assert review["status"] == "open"
+
+    correction = run_cli(
+        tmp_path,
+        "correction",
+        "apply",
+        "--entity-type",
+        "strain",
+        "--entity-id",
+        "STR-0001",
+        "--field",
+        "common_name",
+        "--value",
+        "Pvalb-Cre",
+        "--reason",
+        "reviewed source card",
+        "--source",
+        source["source_record_id"],
+        "--review",
+        review["review_item_id"],
+        "--json",
+    )
+    assert correction["before_value"] == "PV-Cre"
+    assert correction["after_value"] == "Pvalb-Cre"
+
+    updated = run_cli(tmp_path, "strain", "show", "STR-0001", "--json")
+    assert updated["common_name"] == "Pvalb-Cre"
+    resolved = run_cli(tmp_path, "review", "list", "--status", "resolved", "--json")
+    assert resolved[0]["review_item_id"] == review["review_item_id"]
+
+
+def test_source_review_correction_loop(tmp_path: Path) -> None:
+    run_cli(tmp_path, "reset", "--yes", "--json")
+    run_cli(tmp_path, "seed", "--json")
+    mouse = run_cli(
+        tmp_path,
+        "mouse",
+        "add",
+        "--display-id",
+        "M0232",
+        "--strain",
+        "STR-0001",
+        "--sex",
+        "unknown",
+        "--dob",
+        "2026-01-04",
+        "--status",
+        "available",
+        "--json",
+    )
+
+    source = run_cli(
+        tmp_path,
+        "source",
+        "add",
+        "--type",
+        "manual_entry",
+        "--label",
+        "Correction note",
+        "--raw-payload",
+        "M0232 sex female",
+        "--json",
+    )
+    assert source["source_record_id"].startswith("SRC-")
+    assert source["checksum"]
+
+    review = run_cli(
+        tmp_path,
+        "review",
+        "add",
+        "--issue-type",
+        "sex_uncertain",
+        "--severity",
+        "medium",
+        "--entity-type",
+        "mouse",
+        "--entity-id",
+        mouse["mouse_id"],
+        "--source",
+        source["source_record_id"],
+        "--raw-value",
+        "unknown",
+        "--suggested-value",
+        "female",
+        "--json",
+    )
+    assert review["review_item_id"].startswith("REV-")
+    assert review["status"] == "open"
+
+    correction = run_cli(
+        tmp_path,
+        "correction",
+        "apply",
+        "--entity-type",
+        "mouse",
+        "--entity-id",
+        mouse["mouse_id"],
+        "--field",
+        "sex",
+        "--value",
+        "female",
+        "--reason",
+        "Reviewed cage card note",
+        "--source",
+        source["source_record_id"],
+        "--review",
+        review["review_item_id"],
+        "--json",
+    )
+    assert correction["before_value"] == "unknown"
+    assert correction["after_value"] == "female"
+
+    updated_mouse = run_cli(tmp_path, "mouse", "show", mouse["mouse_id"], "--json")
+    assert updated_mouse["sex"] == "female"
+
+    reviews = run_cli(tmp_path, "review", "list", "--json")
+    assert reviews[0]["status"] == "resolved"
+
+    timeline = run_cli(tmp_path, "mouse", "timeline", mouse["mouse_id"], "--json")
+    assert any(event["event_type"] == "correction_applied" for event in timeline)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import hashlib
 from datetime import date
 from typing import Any
 
@@ -20,6 +21,195 @@ def require_row(conn: sqlite3.Connection, table: str, id_field: str, value: str)
     if row is None:
         raise ValueError(f"{table} not found: {value}")
     return row
+
+
+def create_source_record(
+    conn: sqlite3.Connection,
+    *,
+    source_type: str,
+    source_uri: str = "",
+    source_label: str = "",
+    raw_payload: str = "",
+    note: str = "",
+) -> dict[str, Any]:
+    source_record_id = next_external_id(conn, "source")
+    checksum = hashlib.sha256(f"{source_type}|{source_uri}|{source_label}|{raw_payload}".encode("utf-8")).hexdigest()
+    conn.execute(
+        """
+        INSERT INTO source_record
+            (source_record_id, source_type, source_uri, source_label, raw_payload, checksum, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (source_record_id, source_type, source_uri, source_label, raw_payload, checksum, note),
+    )
+    return dict(require_row(conn, "source_record", "source_record_id", source_record_id))
+
+
+def list_source_records(conn: sqlite3.Connection, source_type: str | None = None) -> list[dict[str, Any]]:
+    if source_type:
+        rows = conn.execute(
+            "SELECT * FROM source_record WHERE source_type = ? ORDER BY created_at DESC, id DESC",
+            (source_type,),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM source_record ORDER BY created_at DESC, id DESC").fetchall()
+    return [dict(row) for row in rows]
+
+
+def show_source_record(conn: sqlite3.Connection, source_record_id: str) -> dict[str, Any]:
+    return dict(require_row(conn, "source_record", "source_record_id", source_record_id))
+
+
+def create_review_item(
+    conn: sqlite3.Connection,
+    *,
+    issue_type: str,
+    severity: str = "medium",
+    entity_type: str = "",
+    entity_id: str = "",
+    source_record_id: str | None = None,
+    raw_value: str = "",
+    current_value: str = "",
+    suggested_value: str = "",
+    evidence: str = "",
+) -> dict[str, Any]:
+    if source_record_id:
+        require_row(conn, "source_record", "source_record_id", source_record_id)
+    review_item_id = next_external_id(conn, "review")
+    conn.execute(
+        """
+        INSERT INTO review_item
+            (review_item_id, entity_type, entity_id, issue_type, severity,
+             source_record_id, raw_value, current_value, suggested_value, evidence)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            review_item_id,
+            entity_type,
+            entity_id,
+            issue_type,
+            severity,
+            source_record_id,
+            raw_value,
+            current_value,
+            suggested_value,
+            evidence,
+        ),
+    )
+    return dict(require_row(conn, "review_item", "review_item_id", review_item_id))
+
+
+def list_review_items(conn: sqlite3.Connection, status: str | None = None) -> list[dict[str, Any]]:
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM review_item WHERE status = ? ORDER BY severity DESC, created_at DESC, id DESC",
+            (status,),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM review_item ORDER BY status, severity DESC, created_at DESC, id DESC").fetchall()
+    return [dict(row) for row in rows]
+
+
+def resolve_review_item(conn: sqlite3.Connection, review_item_id: str, resolution_note: str, status: str = "resolved") -> dict[str, Any]:
+    require_row(conn, "review_item", "review_item_id", review_item_id)
+    conn.execute(
+        """
+        UPDATE review_item
+        SET status = ?, resolution_note = ?, resolved_at = CURRENT_TIMESTAMP
+        WHERE review_item_id = ?
+        """,
+        (status, resolution_note, review_item_id),
+    )
+    return dict(require_row(conn, "review_item", "review_item_id", review_item_id))
+
+
+CORRECTION_TABLES = {
+    "strain": ("strain", "strain_id"),
+    "mouse": ("mouse", "mouse_id"),
+    "cage": ("cage", "cage_id"),
+    "mating": ("mating", "mating_id"),
+    "litter": ("litter", "litter_id"),
+    "genotype_result": ("genotype_result", "genotype_result_id"),
+}
+
+
+def record_correction(
+    conn: sqlite3.Connection,
+    *,
+    entity_type: str,
+    entity_id: str,
+    field_name: str,
+    after_value: str,
+    reason: str = "",
+    source_record_id: str | None = None,
+    review_item_id: str | None = None,
+    apply_change: bool = True,
+) -> dict[str, Any]:
+    if source_record_id:
+        require_row(conn, "source_record", "source_record_id", source_record_id)
+    if review_item_id:
+        require_row(conn, "review_item", "review_item_id", review_item_id)
+    if entity_type not in CORRECTION_TABLES:
+        raise ValueError(f"unsupported correction entity_type: {entity_type}")
+    table, id_field = CORRECTION_TABLES[entity_type]
+    entity = require_row(conn, table, id_field, entity_id)
+    if field_name not in entity.keys():
+        raise ValueError(f"field not found on {entity_type}: {field_name}")
+    before_value = "" if entity[field_name] is None else str(entity[field_name])
+    correction_id = next_external_id(conn, "correction")
+    conn.execute(
+        """
+        INSERT INTO correction_log
+            (correction_id, entity_type, entity_id, field_name, before_value,
+             after_value, reason, source_record_id, review_item_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            correction_id,
+            entity_type,
+            entity_id,
+            field_name,
+            before_value,
+            after_value,
+            reason,
+            source_record_id,
+            review_item_id,
+        ),
+    )
+    if apply_change:
+        conn.execute(
+            f"UPDATE {table} SET {field_name} = ?, updated_at = CURRENT_TIMESTAMP WHERE {id_field} = ?",
+            (after_value, entity_id),
+        )
+        if entity_type == "mouse":
+            event(
+                conn,
+                mouse_id=entity_id,
+                event_type="correction_applied",
+                event_date=today_iso(),
+                details=f"{field_name}: {before_value} -> {after_value}",
+                previous_value=before_value,
+                new_value=after_value,
+                related_entity_type="correction_log",
+                related_entity_id=correction_id,
+            )
+    if review_item_id:
+        resolve_review_item(conn, review_item_id, f"Correction {correction_id}: {reason or field_name}")
+    return dict(require_row(conn, "correction_log", "correction_id", correction_id))
+
+
+def list_corrections(conn: sqlite3.Connection, entity_type: str | None = None, entity_id: str | None = None) -> list[dict[str, Any]]:
+    clauses = []
+    params: list[Any] = []
+    if entity_type:
+        clauses.append("entity_type = ?")
+        params.append(entity_type)
+    if entity_id:
+        clauses.append("entity_id = ?")
+        params.append(entity_id)
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    rows = conn.execute(f"SELECT * FROM correction_log {where} ORDER BY corrected_at DESC, id DESC", params).fetchall()
+    return [dict(row) for row in rows]
 
 
 def create_strain(

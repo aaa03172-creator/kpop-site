@@ -15,24 +15,32 @@ from .services import (
     create_litter_mice,
     create_mating,
     create_mouse,
+    create_review_item,
+    create_source_record,
     create_strain,
     end_mating,
     event,
     experiment_ready,
     list_cages,
+    list_corrections,
     list_events,
     list_genotypes,
     list_litters,
     list_matings,
     list_mice,
+    list_review_items,
+    list_source_records,
     list_strains,
     move_mouse,
+    record_correction,
     record_genotype,
+    resolve_review_item,
     seed as seed_data,
     show_cage,
     show_litter,
     show_mating,
     show_mouse,
+    show_source_record,
     show_strain,
     update_mouse_status,
     wean_litter,
@@ -49,6 +57,9 @@ genotype_app = typer.Typer(help="Manage genotype results.")
 mating_app = typer.Typer(help="Manage matings.")
 litter_app = typer.Typer(help="Manage litters.")
 colony_app = typer.Typer(help="Colony summaries.")
+source_app = typer.Typer(help="Manage raw source records.")
+review_app = typer.Typer(help="Manage review items.")
+correction_app = typer.Typer(help="Manage correction logs.")
 
 app.add_typer(strain_app, name="strain")
 app.add_typer(mouse_app, name="mouse")
@@ -58,6 +69,9 @@ app.add_typer(genotype_app, name="genotype")
 app.add_typer(mating_app, name="mating")
 app.add_typer(litter_app, name="litter")
 app.add_typer(colony_app, name="colony")
+app.add_typer(source_app, name="source")
+app.add_typer(review_app, name="review")
+app.add_typer(correction_app, name="correction")
 
 
 def fail(exc: Exception) -> None:
@@ -448,6 +462,144 @@ def experiment_ready_cmd(
             age_max_weeks=age_max_weeks,
             status=status,
         )
+    print_result(payload, json_output)
+
+
+@source_app.command("add")
+def source_add(
+    source_type: str = typer.Option(..., "--type"),
+    uri: str = typer.Option("", "--uri"),
+    label: str = typer.Option("", "--label"),
+    raw_payload: str = typer.Option("", "--raw-payload"),
+    note: str = typer.Option("", "--note"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    db.init_db()
+    with db.connection() as conn:
+        payload = create_source_record(
+            conn,
+            source_type=source_type,
+            source_uri=uri,
+            source_label=label,
+            raw_payload=raw_payload,
+            note=note,
+        )
+    print_result(payload, json_output)
+
+
+@source_app.command("list")
+def source_list(
+    source_type: str = typer.Option(None, "--type"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    db.init_db()
+    with db.connection() as conn:
+        payload = list_source_records(conn, source_type=source_type)
+    print_result(payload, json_output)
+
+
+@source_app.command("show")
+def source_show(source_record_id: str, json_output: bool = typer.Option(False, "--json")) -> None:
+    db.init_db()
+    with db.connection() as conn:
+        payload = show_source_record(conn, source_record_id)
+    print_result(payload, json_output)
+
+
+@review_app.command("add")
+def review_add(
+    issue_type: str = typer.Option(..., "--issue-type"),
+    severity: str = typer.Option("medium", "--severity"),
+    entity_type: str = typer.Option("", "--entity-type"),
+    entity_id: str = typer.Option("", "--entity-id"),
+    source: str = typer.Option(None, "--source"),
+    raw_value: str = typer.Option("", "--raw-value"),
+    current_value: str = typer.Option("", "--current-value"),
+    suggested_value: str = typer.Option("", "--suggested-value"),
+    evidence: str = typer.Option("", "--evidence"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    db.init_db()
+    with db.connection() as conn:
+        payload = create_review_item(
+            conn,
+            issue_type=issue_type,
+            severity=severity,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            source_record_id=source,
+            raw_value=raw_value,
+            current_value=current_value,
+            suggested_value=suggested_value,
+            evidence=evidence,
+        )
+    print_result(payload, json_output)
+
+
+@review_app.command("list")
+def review_list(
+    status: str = typer.Option(None, "--status"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    db.init_db()
+    with db.connection() as conn:
+        payload = list_review_items(conn, status=status)
+    print_result(payload, json_output)
+
+
+@review_app.command("resolve")
+def review_resolve(
+    review_item_id: str,
+    note: str = typer.Option(..., "--note"),
+    status: str = typer.Option("resolved", "--status"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    db.init_db()
+    with db.connection() as conn:
+        payload = resolve_review_item(conn, review_item_id, note, status=status)
+    print_result(payload, json_output)
+
+
+@correction_app.command("apply")
+def correction_apply(
+    entity_type: str = typer.Option(..., "--entity-type"),
+    entity_id: str = typer.Option(..., "--entity-id"),
+    field: str = typer.Option(..., "--field"),
+    value: str = typer.Option(..., "--value"),
+    reason: str = typer.Option("", "--reason"),
+    source: str = typer.Option(None, "--source"),
+    review: str = typer.Option(None, "--review"),
+    no_apply: bool = typer.Option(False, "--no-apply"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    db.init_db()
+    try:
+        with db.connection() as conn:
+            payload = record_correction(
+                conn,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                field_name=field,
+                after_value=value,
+                reason=reason,
+                source_record_id=source,
+                review_item_id=review,
+                apply_change=not no_apply,
+            )
+    except Exception as exc:
+        fail(exc)
+    print_result(payload, json_output)
+
+
+@correction_app.command("list")
+def correction_list(
+    entity_type: str = typer.Option(None, "--entity-type"),
+    entity_id: str = typer.Option(None, "--entity-id"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    db.init_db()
+    with db.connection() as conn:
+        payload = list_corrections(conn, entity_type=entity_type, entity_id=entity_id)
     print_result(payload, json_output)
 
 

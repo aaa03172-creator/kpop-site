@@ -16,9 +16,12 @@ PREFIXES = {
     "litter": "LIT",
     "event": "EVT",
     "genotype": "GT",
+    "source": "SRC",
+    "review": "REV",
+    "correction": "COR",
 }
 
-YEARLY = {"mouse", "mating", "litter", "event", "genotype"}
+YEARLY = {"mouse", "mating", "litter", "event", "genotype", "source", "review", "correction"}
 
 
 def normalize_cage_id(value: str) -> str:
