@@ -530,8 +530,11 @@ def main() -> None:
                 assert_true("Canonical Candidate Drafts" in index_html, "Local UI should expose canonical candidate drafts.")
                 assert_true("canonicalCandidateRows" in index_html, "Local UI should render canonical candidate drafts.")
                 assert_true("Preview" in index_html and "apply-preview" in index_html, "Local UI should expose canonical apply preview.")
+                assert_true("Void Applied" in index_html and "/audit" in index_html, "Local UI should expose applied candidate audit and void controls.")
                 assert_true("transcriptionPhotoPreview" in index_html, "Local UI should preview selected raw cage-card photos.")
                 assert_true("/api/photos/${encodeURIComponent(photo.photo_id)}/image" in index_html, "Local UI should load raw photo evidence from the local image endpoint.")
+                assert_true("firstPendingPhotoButton" in index_html and "photoQueueSummary" in index_html, "Local UI should expose batch photo review queue controls.")
+                assert_true("/api/photo-review-workbench" in index_html, "Local UI should load the batch photo review workbench view.")
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -735,6 +738,14 @@ def main() -> None:
                     "Photo image endpoint should preserve an image content type.",
                 )
                 photo_image.close()
+                photo_workbench = client.get("/api/photo-review-workbench").json()
+                assert_true(photo_workbench["boundary"] == "export or view", "Photo review workbench should remain a review/export view.")
+                assert_true(photo_workbench["pending_transcription_count"] >= 1, "Untranscribed photos should be queued for manual transcription.")
+                workbench_row = next(item for item in photo_workbench["rows"] if item["photo_id"] == photo_payload["photo_id"])
+                assert_true(
+                    workbench_row["next_action"] == "transcribe_photo" and workbench_row["image_url"].endswith("/image"),
+                    "Photo review workbench should point raw photos to transcription and local image evidence.",
+                )
                 photos = client.get("/api/photos").json()
                 assert_true(
                     photos[0]["open_review_count"] >= 1 and photos[0]["latest_parse_id"],
@@ -772,6 +783,18 @@ def main() -> None:
                     transcription_payload["created_note_items"] == 2
                     and transcription_payload["created_mouse_candidates"] == 0,
                     "Manual photo transcription should create note evidence without canonical mouse candidates.",
+                )
+                assert_true(
+                    transcription_payload["resolved_photo_review_items"] >= 1,
+                    "Manual transcription should resolve the initial photo-level review candidate.",
+                )
+                transcribed_workbench = client.get("/api/photo-review-workbench").json()
+                transcribed_row = next(item for item in transcribed_workbench["rows"] if item["photo_id"] == photo_payload["photo_id"])
+                assert_true(
+                    transcribed_row["manual_parse_id"] == transcription_payload["parse_id"]
+                    and transcribed_row["note_line_count"] == 2
+                    and transcribed_row["next_action"] == "resolve_photo_reviews",
+                    "Photo review workbench should expose manual transcription progress and remaining review work.",
                 )
                 idempotent_photo_reviews = client.post("/api/photos/review-candidates")
                 assert_true(idempotent_photo_reviews.status_code == 200, "Could not run photo review candidate backfill.")
@@ -969,6 +992,19 @@ def main() -> None:
                 assert_true(
                     idempotent_apply.status_code == 409,
                     "Re-applying an applied canonical candidate should be blocked instead of silently rewriting state.",
+                )
+                candidate_audit = client.get(f"/api/canonical-candidates/{mapped_payload['canonical_candidate_id']}/audit")
+                assert_true(candidate_audit.status_code == 200, f"Could not audit applied canonical candidate: {candidate_audit.text}")
+                candidate_audit_payload = candidate_audit.json()
+                assert_true(
+                    candidate_audit_payload["boundary"] == "export or view",
+                    "Canonical candidate audit should remain a view.",
+                )
+                assert_true(
+                    candidate_audit_payload["can_void"] is True
+                    and candidate_audit_payload["summary"]["applied_mouse_count"] == 2
+                    and candidate_audit_payload["summary"]["event_count"] >= 2,
+                    "Applied candidate audit should expose linked mouse records and events before void.",
                 )
                 created = client.post(
                     "/api/assigned-strains",
@@ -1212,7 +1248,10 @@ def main() -> None:
                 assert_true(cage.status_code == 200, "Could not create cage registry entry.")
                 cage_payload = cage.json()
                 assert_true(cage_payload["source_record_id"], "Cage creation should create source evidence.")
-                moved_mouse = next(mouse for mouse in mice if mouse["display_id"] == "MT321")
+                moved_mouse = next(
+                    mouse for mouse in mice
+                    if mouse["display_id"] == "MT321" and mouse["status"] == "active"
+                )
                 moved_to_cage = client.post(
                     f"/api/mice/{moved_mouse['mouse_id']}/move-cage",
                     json={"cage_id": cage_payload["cage_id"], "note": "Verified cage movement flow."},
@@ -1352,7 +1391,10 @@ def main() -> None:
                     dashboard_before_rows.get("not_sampled", 0) >= 1,
                     "Genotyping dashboard should count newly separated mice that need sampling.",
                 )
-                genotyping_target = next(mouse for mouse in mice if mouse["display_id"] == "MT321")
+                genotyping_target = next(
+                    mouse for mouse in mice
+                    if mouse["display_id"] == "MT321" and mouse["status"] == "active"
+                )
                 audit_trace = client.get(f"/api/mice/{genotyping_target['mouse_id']}/audit-trace")
                 assert_true(audit_trace.status_code == 200, "Mouse audit trace endpoint failed.")
                 audit_payload = audit_trace.json()
@@ -1410,7 +1452,10 @@ def main() -> None:
                     any(item["cage_label"] == "A-101" and item["active_mouse_count"] == 1 for item in cages),
                     "Cage list should include active assignment counts.",
                 )
-                female_parent = next(mouse for mouse in mice if mouse["display_id"] == "MT322")
+                female_parent = next(
+                    mouse for mouse in mice
+                    if mouse["display_id"] == "MT322" and mouse["status"] == "active"
+                )
                 mating = client.post(
                     "/api/matings",
                     json={
@@ -1642,7 +1687,7 @@ def main() -> None:
                     "Audit trail should expose direct action log records for the mouse.",
                 )
                 assert_true(
-                    any(assignment["cage_label"] == "C-014" for assignment in audit_payload["cage_assignments"]),
+                    any(assignment["cage_label"] == "A-101" for assignment in audit_payload["cage_assignments"]),
                     "Audit trail should expose cage assignment history.",
                 )
                 offspring_audit = client.get(f"/api/mice/{requested_payload['mouse_id']}/audit-trail").json()
@@ -2011,6 +2056,60 @@ def main() -> None:
                 assert_true(
                     ready_export_log["blocked_review_count"] == 0,
                     "Ready export log should record zero review blockers after resolution.",
+                )
+                void_candidate = client.post(f"/api/canonical-candidates/{mapped_payload['canonical_candidate_id']}/void")
+                assert_true(void_candidate.status_code == 200, f"Could not void applied canonical candidate: {void_candidate.text}")
+                void_payload = void_candidate.json()
+                assert_true(
+                    void_payload["boundary"] == "canonical structured state",
+                    "Voiding an applied candidate should be classified as canonical structured state.",
+                )
+                assert_true(
+                    void_payload["updated_mice"] == 2 and void_payload["created_events"] == 2,
+                    "Voiding should mark applied mouse records without deleting their evidence-backed rows.",
+                )
+                voided_candidates = client.get("/api/canonical-candidates").json()
+                voided_candidate = next(
+                    item for item in voided_candidates
+                    if item["candidate_id"] == mapped_payload["canonical_candidate_id"]
+                )
+                assert_true(voided_candidate["status"] == "voided", "Voided canonical candidate should expose voided status.")
+                voided_mice = client.get("/api/mice").json()
+                voided_mt321 = next((mouse for mouse in voided_mice if mouse["display_id"] == "MT321"), None)
+                voided_mt322 = next((mouse for mouse in voided_mice if mouse["display_id"] == "MT322"), None)
+                assert_true(
+                    voided_mt321 is not None
+                    and voided_mt322 is not None
+                    and voided_mt321["status"] == "voided"
+                    and voided_mt322["status"] == "voided",
+                    "Voiding should preserve mouse records and mark them voided instead of deleting them.",
+                )
+                assert_true(
+                    voided_mt321["source_note_item_id"] and voided_mt322["source_note_item_id"],
+                    "Voided mouse records should retain source note-line anchors.",
+                )
+                void_events = [
+                    item
+                    for item in client.get("/api/mouse-events").json()
+                    if item["related_entity_id"] == mapped_payload["canonical_candidate_id"]
+                    and item["event_type"] == "canonical_candidate_voided"
+                ]
+                assert_true(len(void_events) == 2, "Voiding should create explicit candidate void events.")
+                voided_audit = client.get(f"/api/canonical-candidates/{mapped_payload['canonical_candidate_id']}/audit").json()
+                assert_true(
+                    voided_audit["can_void"] is False
+                    and voided_audit["summary"]["voided_event_count"] == 2,
+                    "Audit should show that an already voided candidate cannot be voided again.",
+                )
+                idempotent_void = client.post(f"/api/canonical-candidates/{mapped_payload['canonical_candidate_id']}/void")
+                assert_true(
+                    idempotent_void.status_code == 409,
+                    "Re-voiding a voided canonical candidate should be blocked.",
+                )
+                apply_after_void = client.post(f"/api/canonical-candidates/{mapped_payload['canonical_candidate_id']}/apply")
+                assert_true(
+                    apply_after_void.status_code == 409,
+                    "Applying a voided canonical candidate should be blocked.",
                 )
 
     print("Local app scaffold verification passed.")
