@@ -136,6 +136,7 @@ def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
             "parsed_ear_label_review_status": "TEXT NOT NULL DEFAULT 'auto_filled'",
             "parsed_event_date": "TEXT",
             "parsed_count": "INTEGER",
+            "parsed_metadata_json": "TEXT NOT NULL DEFAULT '{}'",
             "confidence": "REAL NOT NULL DEFAULT 0",
             "needs_review": "INTEGER NOT NULL DEFAULT 0",
             "created_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
@@ -273,6 +274,34 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (review_id) REFERENCES review_queue(review_id),
+                FOREIGN KEY (parse_id) REFERENCES parse_result(parse_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS card_snapshot (
+                card_snapshot_id TEXT PRIMARY KEY,
+                photo_id TEXT,
+                parse_id TEXT,
+                card_type TEXT NOT NULL DEFAULT 'unknown',
+                card_id_raw TEXT NOT NULL DEFAULT '',
+                raw_strain_text TEXT NOT NULL DEFAULT '',
+                matched_strain_text TEXT NOT NULL DEFAULT '',
+                sex_raw TEXT NOT NULL DEFAULT '',
+                sex_normalized TEXT NOT NULL DEFAULT '',
+                sex_count_raw TEXT NOT NULL DEFAULT '',
+                count_value INTEGER,
+                dob_raw TEXT NOT NULL DEFAULT '',
+                dob_start TEXT,
+                dob_end TEXT,
+                mating_date_raw TEXT NOT NULL DEFAULT '',
+                mating_date_normalized TEXT NOT NULL DEFAULT '',
+                lmo_raw TEXT NOT NULL DEFAULT '',
+                note_summary_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'review',
+                source_layer TEXT NOT NULL DEFAULT 'parsed or intermediate result',
+                confidence REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (photo_id) REFERENCES photo_log(photo_id),
                 FOREIGN KEY (parse_id) REFERENCES parse_result(parse_id)
             );
 
@@ -516,6 +545,7 @@ def init_db() -> None:
                 parsed_ear_label_review_status TEXT NOT NULL DEFAULT 'auto_filled',
                 parsed_event_date TEXT,
                 parsed_count INTEGER,
+                parsed_metadata_json TEXT NOT NULL DEFAULT '{}',
                 confidence REAL NOT NULL DEFAULT 0,
                 needs_review INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -593,6 +623,8 @@ def init_db() -> None:
                 ON correction_log(entity_type, entity_id, corrected_at);
             CREATE INDEX IF NOT EXISTS idx_canonical_candidate_review
                 ON canonical_candidate(review_id, status);
+            CREATE INDEX IF NOT EXISTS idx_card_snapshot_photo
+                ON card_snapshot(photo_id, updated_at);
             CREATE INDEX IF NOT EXISTS idx_export_log_type_time
                 ON export_log(export_type, exported_at);
             CREATE INDEX IF NOT EXISTS idx_mouse_event_mouse

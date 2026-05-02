@@ -109,6 +109,11 @@ class ReviewResolutionCreate(BaseModel):
     correction_before_value: str = ""
     correction_after_value: str = ""
     correction_source_record_id: str | None = None
+    note_item_id: str = ""
+    note_label_decision: str = ""
+    note_label_mouse_id: str = ""
+    note_label_count: int | None = Field(default=None, ge=0)
+    note_label_interpreted_status: str = ""
 
 
 class PhotoManualTranscriptionCreate(BaseModel):
@@ -119,6 +124,9 @@ class PhotoManualTranscriptionCreate(BaseModel):
     id_raw: str = ""
     dob_raw: str = ""
     dob_normalized: str = ""
+    mating_date_raw: str = ""
+    mating_date_normalized: str = ""
+    lmo_raw: str = ""
     mouse_count: str = ""
     confidence: float = Field(default=75, ge=0, le=100)
     notes: list[dict[str, Any]] = Field(default_factory=list)
@@ -352,6 +360,9 @@ def ai_draft_schema() -> dict[str, Any]:
             "id_raw": {"type": "string"},
             "dob_raw": {"type": "string"},
             "dob_normalized": {"type": "string"},
+            "mating_date_raw": {"type": "string"},
+            "mating_date_normalized": {"type": "string"},
+            "lmo_raw": {"type": "string"},
             "mouse_count": {"type": "string"},
             "notes": {
                 "type": "array",
@@ -379,6 +390,9 @@ def ai_draft_schema() -> dict[str, Any]:
             "id_raw",
             "dob_raw",
             "dob_normalized",
+            "mating_date_raw",
+            "mating_date_normalized",
+            "lmo_raw",
             "mouse_count",
             "notes",
             "confidence",
@@ -420,6 +434,9 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
         "id_raw": str(draft.get("id_raw") or ""),
         "dob_raw": str(draft.get("dob_raw") or ""),
         "dob_normalized": str(draft.get("dob_normalized") or ""),
+        "mating_date_raw": str(draft.get("mating_date_raw") or ""),
+        "mating_date_normalized": str(draft.get("mating_date_normalized") or ""),
+        "lmo_raw": str(draft.get("lmo_raw") or ""),
         "mouse_count": str(draft.get("mouse_count") or ""),
         "notes": normalized_notes,
         "confidence": bounded_float(draft.get("confidence")),
@@ -475,9 +492,11 @@ def create_photo_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCrea
                         "text": (
                             "Read this mouse cage card photo. Return only JSON matching the schema. "
                             "Fields: card_type, raw_strain, matched_strain, sex_raw, id_raw, dob_raw, "
-                            "dob_normalized, mouse_count, notes. sex_raw is the visible Sex field and may "
+                            "dob_normalized, mating_date_raw, mating_date_normalized, lmo_raw, mouse_count, "
+                            "notes. sex_raw is the visible Sex field and may "
                             "include symbols such as male/female marks, mixed, or unclear handwriting. id_raw "
-                            "is the visible I.D field, not the internal database id. Notes should preserve each "
+                            "is the visible I.D field, not the internal database id. lmo_raw preserves visible "
+                            "LMO/O/N or similar checkbox marks without interpretation. Notes should preserve each "
                             "visible mouse ID, date/event line, or numeric-only temporary label line. "
                             "For numeric-only post-separation labels, keep the raw numbers as notes and mark "
                             "meaning as unlabeled_numeric_note rather than inventing mouse IDs. "
@@ -1025,6 +1044,168 @@ def create_canonical_candidate_draft(
         ),
     )
     return candidate_id
+
+
+def review_note_item_id(review_id: str, payload_note_item_id: str = "") -> str:
+    if payload_note_item_id.strip():
+        return payload_note_item_id.strip()
+    for prefix in ("review_unlabeled_numeric_", "review_ear_"):
+        if review_id.startswith(prefix):
+            return review_id[len(prefix) :]
+    return ""
+
+
+def resolve_note_label_correction(
+    conn: Any,
+    *,
+    review_id: str,
+    parse_id: str,
+    payload: ReviewResolutionCreate,
+    resolved_at: str,
+) -> dict[str, Any] | None:
+    decision = payload.note_label_decision.strip()
+    if not decision:
+        return None
+    allowed_decisions = {"mouse_item", "count_note", "reviewed_note", "ignored_note"}
+    if decision not in allowed_decisions:
+        raise HTTPException(
+            status_code=400,
+            detail="note_label_decision must be mouse_item, count_note, reviewed_note, or ignored_note.",
+        )
+
+    note_item_id = review_note_item_id(review_id, payload.note_item_id)
+    if not note_item_id:
+        raise HTTPException(status_code=400, detail="note_item_id is required for note label review corrections.")
+    note = conn.execute(
+        """
+        SELECT note_item_id, parse_id, card_type, line_number, raw_line_text, strike_status,
+               parsed_type, interpreted_status, parsed_mouse_display_id,
+               parsed_ear_label_raw, parsed_ear_label_code, parsed_ear_label_confidence,
+               parsed_ear_label_review_status, parsed_event_date, parsed_count,
+               confidence, needs_review
+        FROM card_note_item_log
+        WHERE note_item_id = ?
+        """,
+        (note_item_id,),
+    ).fetchone()
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note item not found for label review correction.")
+    if note["parse_id"] != parse_id:
+        raise HTTPException(status_code=409, detail="Review item and note item parse IDs do not match.")
+
+    before = dict(note)
+    after = dict(before)
+    after.update(
+        {
+            "parsed_type": decision,
+            "interpreted_status": payload.note_label_interpreted_status.strip() or decision,
+            "parsed_mouse_display_id": None,
+            "parsed_ear_label_raw": None,
+            "parsed_ear_label_code": None,
+            "parsed_ear_label_confidence": None,
+            "parsed_ear_label_review_status": "user_corrected",
+            "parsed_event_date": None,
+            "parsed_count": None,
+            "confidence": 1.0,
+            "needs_review": 0,
+        }
+    )
+    if decision == "mouse_item":
+        display_id = (payload.note_label_mouse_id or payload.resolved_value).strip()
+        if not display_id:
+            raise HTTPException(status_code=400, detail="note_label_mouse_id is required when decision is mouse_item.")
+        after["parsed_mouse_display_id"] = display_id
+        after["interpreted_status"] = payload.note_label_interpreted_status.strip() or interpreted_status(
+            note["card_type"],
+            note["strike_status"],
+        )
+    elif decision == "count_note":
+        count_value = payload.note_label_count
+        if count_value is None:
+            match = re.search(r"\d+", payload.resolved_value or note["raw_line_text"] or "")
+            if match:
+                count_value = int(match.group(0))
+        if count_value is None:
+            raise HTTPException(status_code=400, detail="note_label_count is required when decision is count_note.")
+        after["parsed_count"] = count_value
+        after["interpreted_status"] = payload.note_label_interpreted_status.strip() or "reviewed_count"
+    elif decision == "reviewed_note":
+        after["interpreted_status"] = payload.note_label_interpreted_status.strip() or "reviewed_note"
+    elif decision == "ignored_note":
+        after["interpreted_status"] = payload.note_label_interpreted_status.strip() or "ignored"
+
+    conn.execute(
+        """
+        UPDATE card_note_item_log
+        SET parsed_type = ?,
+            interpreted_status = ?,
+            parsed_mouse_display_id = ?,
+            parsed_ear_label_raw = ?,
+            parsed_ear_label_code = ?,
+            parsed_ear_label_confidence = ?,
+            parsed_ear_label_review_status = ?,
+            parsed_event_date = ?,
+            parsed_count = ?,
+            confidence = ?,
+            needs_review = ?
+        WHERE note_item_id = ?
+        """,
+        (
+            after["parsed_type"],
+            after["interpreted_status"],
+            after["parsed_mouse_display_id"],
+            after["parsed_ear_label_raw"],
+            after["parsed_ear_label_code"],
+            after["parsed_ear_label_confidence"],
+            after["parsed_ear_label_review_status"],
+            after["parsed_event_date"],
+            after["parsed_count"],
+            after["confidence"],
+            after["needs_review"],
+            note_item_id,
+        ),
+    )
+    correction_id = record_correction(
+        conn,
+        CorrectionCreate(
+            entity_type="note_item",
+            entity_id=note_item_id,
+            field_name="parsed_label",
+            before_value=json.dumps(before, ensure_ascii=False),
+            after_value=json.dumps(after, ensure_ascii=False),
+            reason=payload.resolution_note,
+            review_id=review_id,
+        ),
+        resolved_at,
+    )
+    conn.execute(
+        """
+        INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id("action"),
+            "note_label_reviewed",
+            note_item_id,
+            json.dumps(before, ensure_ascii=False),
+            json.dumps(
+                {
+                    "review_id": review_id,
+                    "decision": decision,
+                    "after": after,
+                    "boundary": "parsed or intermediate result",
+                },
+                ensure_ascii=False,
+            ),
+            resolved_at,
+        ),
+    )
+    return {
+        "note_item_id": note_item_id,
+        "decision": decision,
+        "correction_id": correction_id,
+        "boundary": "parsed or intermediate result",
+    }
 
 
 @app.post("/api/corrections")
@@ -1965,6 +2146,34 @@ def split_dob_range(raw: Any, normalized: Any) -> tuple[str, str | None, str | N
     return dob_raw, None, None
 
 
+def normalize_sex_raw(raw: Any) -> str:
+    text = str(raw or "").strip()
+    lowered = text.lower()
+    if "\u2642" in text or lowered in {"m", "male", "man"}:
+        return "male"
+    if "\u2640" in text or lowered in {"f", "female", "woman"}:
+        return "female"
+    if any(token in lowered for token in ["mixed", "both", "m/f", "f/m", "mf"]):
+        return "mixed"
+    return "unknown" if text else ""
+
+
+def first_int(value: Any) -> int | None:
+    match = re.search(r"\d+", str(value or ""))
+    return int(match.group(0)) if match else None
+
+
+def unlabeled_numeric_metadata(raw_line: str) -> dict[str, Any]:
+    labels = re.findall(r"\d+", raw_line)
+    return {
+        "labels": labels,
+        "count": len(labels),
+        "display": f"Label pending {', '.join(labels)} ({len(labels)}p)" if labels else "Label pending",
+        "display_ko": f"라벨 미정 {', '.join(labels)} ({len(labels)}p)" if labels else "라벨 미정",
+        "export_policy": "block_final_export_until_labeled_or_confirmed",
+    }
+
+
 def mouse_id_prefix(display_id: str) -> str:
     match = re.match(r"^([A-Za-z]+)", display_id)
     return match.group(1) if match else ""
@@ -2027,6 +2236,7 @@ def parse_note_line(raw_line: str, card_type: str) -> dict[str, Any]:
     numeric_tokens = re.findall(r"\d+", line)
     numeric_only = bool(numeric_tokens) and re.fullmatch(r"[\d\s,./\\-]+", line)
     if numeric_only and not re.search(r"\d{2,4}[./-]\d{1,2}[./-]\d{1,2}", line):
+        metadata = unlabeled_numeric_metadata(line)
         return {
             "parsed_type": "unlabeled_numeric_note",
             "parsed_mouse_display_id": None,
@@ -2035,7 +2245,8 @@ def parse_note_line(raw_line: str, card_type: str) -> dict[str, Any]:
             "parsed_ear_label_confidence": None,
             "parsed_ear_label_review_status": "needs_review",
             "parsed_event_date": None,
-            "parsed_count": None,
+            "parsed_count": metadata["count"],
+            "parsed_metadata": metadata,
             "confidence": 0.5,
             "needs_review": 1,
         }
@@ -2051,6 +2262,7 @@ def parse_note_line(raw_line: str, card_type: str) -> dict[str, Any]:
             "parsed_ear_label_review_status": "needs_review",
             "parsed_event_date": litter_match.group(1),
             "parsed_count": int(litter_match.group(2)),
+            "parsed_metadata": {},
             "confidence": 0.9,
             "needs_review": 0,
         }
@@ -2068,6 +2280,7 @@ def parse_note_line(raw_line: str, card_type: str) -> dict[str, Any]:
             "parsed_ear_label_review_status": ear["status"],
             "parsed_event_date": None,
             "parsed_count": None,
+            "parsed_metadata": {},
             "confidence": ear["confidence"],
             "needs_review": 1 if ear["status"] in {"check", "needs_review"} else 0,
         }
@@ -2081,6 +2294,7 @@ def parse_note_line(raw_line: str, card_type: str) -> dict[str, Any]:
         "parsed_ear_label_review_status": "needs_review",
         "parsed_event_date": None,
         "parsed_count": None,
+        "parsed_metadata": {},
         "confidence": 0.0,
         "needs_review": 1,
     }
@@ -2115,6 +2329,85 @@ def declared_total_count(record: dict[str, Any]) -> int | None:
         return None
     match = re.search(r"\d+", mouse_count)
     return int(match.group(0)) if match else None
+
+
+def card_note_summary(record: dict[str, Any]) -> dict[str, Any]:
+    card_type = str(record.get("type") or "unknown")
+    notes = record.get("notes") if isinstance(record.get("notes"), list) else []
+    summary = {
+        "note_count": 0,
+        "mouse_item_count": 0,
+        "litter_event_count": 0,
+        "unlabeled_numeric_count": 0,
+        "unlabeled_numeric_labels": [],
+        "unlabeled_numeric_display": [],
+        "unknown_count": 0,
+        "needs_review_count": 0,
+    }
+    for note in notes:
+        raw_line = str(note.get("raw") if isinstance(note, dict) else note)
+        if not raw_line.strip():
+            continue
+        parsed = parse_note_line(raw_line, card_type)
+        summary["note_count"] += 1
+        parsed_type = parsed["parsed_type"]
+        if parsed_type == "mouse_item":
+            summary["mouse_item_count"] += 1
+        elif parsed_type == "litter_event":
+            summary["litter_event_count"] += 1
+        elif parsed_type == "unlabeled_numeric_note":
+            metadata = parsed.get("parsed_metadata") or {}
+            summary["unlabeled_numeric_count"] += int(metadata.get("count") or 0)
+            summary["unlabeled_numeric_labels"].extend(metadata.get("labels") or [])
+            summary["unlabeled_numeric_display"].append(metadata.get("display_ko") or raw_line)
+        else:
+            summary["unknown_count"] += 1
+        if parsed["needs_review"]:
+            summary["needs_review_count"] += 1
+    return summary
+
+
+def create_card_snapshot(conn: Any, parse_id: str, photo_id: str | None, record: dict[str, Any], created_at: str) -> str:
+    card_snapshot_id = new_id("card_snapshot")
+    dob_raw, dob_start, dob_end = split_dob_range(record.get("dobRaw"), record.get("dobNormalized"))
+    note_summary = card_note_summary(record)
+    conn.execute(
+        """
+        INSERT INTO card_snapshot
+            (card_snapshot_id, photo_id, parse_id, card_type, card_id_raw,
+             raw_strain_text, matched_strain_text, sex_raw, sex_normalized,
+             sex_count_raw, count_value, dob_raw, dob_start, dob_end,
+             mating_date_raw, mating_date_normalized, lmo_raw, note_summary_json,
+             status, source_layer, confidence, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            card_snapshot_id,
+            photo_id,
+            parse_id,
+            str(record.get("type") or "unknown"),
+            str(record.get("idRaw") or ""),
+            str(record.get("rawStrain") or ""),
+            str(record.get("matchedStrain") or ""),
+            str(record.get("sexRaw") or ""),
+            normalize_sex_raw(record.get("sexRaw")),
+            str(record.get("mouseCount") or ""),
+            first_int(record.get("mouseCount")),
+            dob_raw,
+            dob_start,
+            dob_end,
+            str(record.get("matingDateRaw") or ""),
+            str(record.get("matingDateNormalized") or ""),
+            str(record.get("lmoRaw") or ""),
+            json.dumps(note_summary, ensure_ascii=False),
+            "review",
+            "parsed or intermediate result",
+            bounded_float(record.get("confidence")),
+            created_at,
+            created_at,
+        ),
+    )
+    return card_snapshot_id
 
 
 def validation_review_for_record(conn: Any, record: dict[str, Any], status: str) -> dict[str, str] | None:
@@ -2161,7 +2454,13 @@ def validation_review_for_record(conn: Any, record: dict[str, Any], status: str)
     return None
 
 
-def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict[str, Any], status: str) -> tuple[int, int, int]:
+def write_note_items_and_mouse_candidates(
+    conn: Any,
+    parse_id: str,
+    record: dict[str, Any],
+    status: str,
+    card_snapshot_id: str = "",
+) -> tuple[int, int, int]:
     card_type = str(record.get("type") or "unknown").lower()
     notes = record.get("notes") if isinstance(record.get("notes"), list) else []
     note_count = 0
@@ -2170,6 +2469,8 @@ def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict
     write_mouse = should_write_mouse_candidate(record, status)
     dob_raw, dob_start, dob_end = split_dob_range(record.get("dobRaw"), record.get("dobNormalized"))
     raw_strain_text = str(record.get("matchedStrain") or record.get("rawStrain") or "")
+    photo_id = str(record.get("sourcePhotoId") or "")
+    snapshot_id = card_snapshot_id or str(record.get("cardSnapshotId") or "")
 
     for index, note in enumerate(notes, start=1):
         raw_line = str(note.get("raw") if isinstance(note, dict) else note)
@@ -2185,15 +2486,17 @@ def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict
         conn.execute(
             """
             INSERT OR REPLACE INTO card_note_item_log
-                (note_item_id, parse_id, card_type, line_number, raw_line_text, strike_status,
+                (note_item_id, photo_id, parse_id, card_snapshot_id, card_type, line_number, raw_line_text, strike_status,
                  parsed_type, interpreted_status, parsed_mouse_display_id, parsed_ear_label_raw,
                  parsed_ear_label_code, parsed_ear_label_confidence, parsed_ear_label_review_status,
-                 parsed_event_date, parsed_count, confidence, needs_review)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 parsed_event_date, parsed_count, parsed_metadata_json, confidence, needs_review)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 note_item_id,
+                photo_id or None,
                 parse_id,
+                snapshot_id or None,
                 card_type,
                 index,
                 raw_line,
@@ -2207,6 +2510,7 @@ def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict
                 parsed["parsed_ear_label_review_status"],
                 parsed["parsed_event_date"],
                 parsed["parsed_count"],
+                json.dumps(parsed.get("parsed_metadata") or {}, ensure_ascii=False),
                 parsed["confidence"],
                 parsed["needs_review"],
             ),
@@ -2251,8 +2555,8 @@ def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict
                     "Medium",
                     "Unlabeled numeric note needs review",
                     raw_line,
-                    "Confirm whether these are temporary labels, count-only notes, or mouse IDs before export/canonical writes.",
-                    f"Note item {note_item_id} contains only numbers. Preserve it as raw note evidence until the separated cage is labeled.",
+                    parsed.get("parsed_metadata", {}).get("display_ko") or "라벨 미정",
+                    f"Note item {note_item_id} contains only numbers. Treat it as temporary unlabeled cage evidence until labels are assigned.",
                     "open",
                     utc_now(),
                 ),
@@ -2902,6 +3206,9 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             "idRaw": payload.id_raw,
             "dobRaw": payload.dob_raw,
             "dobNormalized": payload.dob_normalized,
+            "matingDateRaw": payload.mating_date_raw,
+            "matingDateNormalized": payload.mating_date_normalized,
+            "lmoRaw": payload.lmo_raw,
             "mouseCount": payload.mouse_count,
             "confidence": payload.confidence,
             "status": "review",
@@ -2938,7 +3245,19 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                 1,
             ),
         )
-        note_count, mouse_count, ear_review_count = write_note_items_and_mouse_candidates(conn, parse_id, record, "review")
+        card_snapshot_id = create_card_snapshot(conn, parse_id, photo_id, record, now)
+        record = {**record, "cardSnapshotId": card_snapshot_id}
+        conn.execute(
+            "UPDATE parse_result SET raw_payload = ? WHERE parse_id = ?",
+            (json.dumps(record, ensure_ascii=False), parse_id),
+        )
+        note_count, mouse_count, ear_review_count = write_note_items_and_mouse_candidates(
+            conn,
+            parse_id,
+            record,
+            "review",
+            card_snapshot_id,
+        )
         review_id = f"review_{parse_id}"
         conn.execute(
             """
@@ -3001,6 +3320,7 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                 json.dumps(
                     {
                         "parse_id": parse_id,
+                        "card_snapshot_id": card_snapshot_id,
                         "review_id": review_id,
                         "note_count": note_count,
                         "resolved_photo_review_items": len(resolved_photo_review_ids),
@@ -3014,6 +3334,7 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
     return {
         "parse_id": parse_id,
         "review_id": review_id,
+        "card_snapshot_id": card_snapshot_id,
         "photo_id": photo_id,
         "created_note_items": note_count,
         "created_mouse_candidates": mouse_count,
@@ -3032,6 +3353,11 @@ def list_review_items() -> list[dict[str, Any]]:
                    review.current_value, review.suggested_value, review.review_reason,
                    review.status, review.created_at, review.resolved_at, review.resolution_note,
                    parse.source_name, parse.photo_id, photo.original_filename,
+                   review_note.note_item_id, review_note.raw_line_text AS review_note_raw_line,
+                   review_note.parsed_type AS review_note_parsed_type,
+                   review_note.interpreted_status AS review_note_interpreted_status,
+                   review_note.parsed_mouse_display_id AS review_note_mouse_display_id,
+                   review_note.parsed_count AS review_note_count,
                    (
                        SELECT COUNT(*)
                        FROM card_note_item_log note
@@ -3045,6 +3371,14 @@ def list_review_items() -> list[dict[str, Any]]:
             FROM review_queue review
             LEFT JOIN parse_result parse ON parse.parse_id = review.parse_id
             LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
+            LEFT JOIN card_note_item_log review_note
+                ON review_note.note_item_id = CASE
+                    WHEN review.review_id LIKE 'review_unlabeled_numeric_note_%'
+                        THEN SUBSTR(review.review_id, LENGTH('review_unlabeled_numeric_') + 1)
+                    WHEN review.review_id LIKE 'review_ear_note_%'
+                        THEN SUBSTR(review.review_id, LENGTH('review_ear_') + 1)
+                    ELSE ''
+                END
             ORDER BY review.created_at DESC
             """
         ).fetchall()
@@ -3101,6 +3435,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
             )
         before = dict(existing)
         canonical_candidate_id = None
+        note_label_update = None
         after = {
             "status": "resolved",
             "resolved_value": payload.resolved_value,
@@ -3132,6 +3467,13 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
                 json.dumps(after, ensure_ascii=False),
                 resolved_at,
             ),
+        )
+        note_label_update = resolve_note_label_correction(
+            conn,
+            review_id=review_id,
+            parse_id=existing["parse_id"],
+            payload=payload,
+            resolved_at=resolved_at,
         )
         legacy_row_review_status = None
         if legacy_decision in legacy_status_by_decision:
@@ -3208,6 +3550,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "legacy_row_review_status": legacy_row_review_status,
         "canonical_candidate_id": canonical_candidate_id,
         "correction_id": correction_id,
+        "note_label_update": note_label_update,
     }
 
 
@@ -4431,12 +4774,49 @@ def list_note_items() -> list[dict[str, Any]]:
                    strike_status, parsed_type, interpreted_status, parsed_mouse_display_id,
                    parsed_ear_label_raw, parsed_ear_label_code, parsed_ear_label_confidence,
                    parsed_ear_label_review_status, parsed_event_date, parsed_count,
-                   confidence, needs_review, created_at
+                   parsed_metadata_json, confidence, needs_review, created_at
             FROM card_note_item_log
             ORDER BY parse_id, line_number
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    result = []
+    for row in rows:
+        payload = dict(row)
+        payload["parsed_metadata"] = json_object(payload.pop("parsed_metadata_json", "{}"))
+        payload["display_value"] = (
+            payload["parsed_metadata"].get("display_ko")
+            if payload["parsed_type"] == "unlabeled_numeric_note"
+            else payload["raw_line_text"]
+        )
+        result.append(payload)
+    return result
+
+
+@app.get("/api/card-snapshots")
+def list_card_snapshots() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT snapshot.card_snapshot_id, snapshot.photo_id, snapshot.parse_id,
+                   snapshot.card_type, snapshot.card_id_raw, snapshot.raw_strain_text,
+                   snapshot.matched_strain_text, snapshot.sex_raw, snapshot.sex_normalized,
+                   snapshot.sex_count_raw, snapshot.count_value, snapshot.dob_raw,
+                   snapshot.dob_start, snapshot.dob_end, snapshot.mating_date_raw,
+                   snapshot.mating_date_normalized, snapshot.lmo_raw, snapshot.note_summary_json,
+                   snapshot.status, snapshot.source_layer, snapshot.confidence,
+                   snapshot.created_at, snapshot.updated_at, photo.original_filename
+            FROM card_snapshot snapshot
+            LEFT JOIN photo_log photo ON photo.photo_id = snapshot.photo_id
+            ORDER BY snapshot.updated_at DESC, snapshot.card_snapshot_id
+            """
+        ).fetchall()
+    result = []
+    for row in rows:
+        payload = dict(row)
+        payload["note_summary"] = json_object(payload.pop("note_summary_json", "{}"))
+        payload["boundary"] = payload["source_layer"]
+        result.append(payload)
+    return result
 
 
 MOUSE_SELECT = """
@@ -4708,6 +5088,7 @@ def export_staleness(conn: Any) -> dict[str, Any]:
             UNION ALL SELECT imported_at FROM source_record
             UNION ALL SELECT updated_at FROM strain_registry
             UNION ALL SELECT corrected_at FROM correction_log
+            UNION ALL SELECT updated_at FROM card_snapshot
             UNION ALL SELECT created_at FROM mouse_event
             UNION ALL SELECT updated_at FROM genotyping_record
             UNION ALL SELECT updated_at FROM cage_registry
