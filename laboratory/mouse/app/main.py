@@ -511,6 +511,16 @@ def distribution_row_payload(row: Any) -> dict[str, Any]:
     return result
 
 
+def json_object(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {"raw": value}
+    return parsed if isinstance(parsed, dict) else {"value": parsed}
+
+
 def split_dob_range(raw: Any, normalized: Any) -> tuple[str, str | None, str | None]:
     dob_raw = str(raw or "")
     normalized_text = str(normalized or "")
@@ -2610,6 +2620,308 @@ def list_mice(query: str = "") -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+@app.get("/api/mice/{mouse_id}/audit-trace")
+@app.get("/api/mice/{mouse_id}/audit-trail")
+def mouse_audit_trace(mouse_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        mouse = conn.execute(
+            f"""
+            {MOUSE_SELECT}
+            WHERE mouse_id = ?
+            """,
+            (mouse_id,),
+        ).fetchone()
+        if mouse is None:
+            raise HTTPException(status_code=404, detail="Mouse not found.")
+
+        note_items = conn.execute(
+            """
+            SELECT note_item_id, photo_id, parse_id, line_number, raw_line_text,
+                   strike_status, parsed_type, interpreted_status,
+                   parsed_ear_label_raw, parsed_ear_label_code,
+                   parsed_ear_label_review_status, confidence, needs_review, created_at
+            FROM card_note_item_log
+            WHERE note_item_id = ?
+               OR parsed_mouse_display_id = ?
+            ORDER BY created_at, line_number
+            """,
+            (mouse["source_note_item_id"], mouse["display_id"]),
+        ).fetchall()
+        parse_ids = sorted({row["parse_id"] for row in note_items if row["parse_id"]})
+
+        event_rows = conn.execute(
+            """
+            SELECT event_id, event_type, event_date, related_entity_type,
+                   related_entity_id, source_record_id, details, created_by, created_at
+            FROM mouse_event
+            WHERE mouse_id = ?
+            ORDER BY event_date, created_at, event_id
+            """,
+            (mouse_id,),
+        ).fetchall()
+        correction_rows = conn.execute(
+            """
+            SELECT correction_id, entity_type, entity_id, field_name,
+                   before_value, after_value, reason, source_record_id,
+                   review_id, corrected_at
+            FROM correction_log
+            WHERE entity_type = 'mouse' AND entity_id IN (?, ?)
+            ORDER BY corrected_at, correction_id
+            """,
+            (mouse_id, mouse["display_id"]),
+        ).fetchall()
+        genotype_rows = conn.execute(
+            """
+            SELECT genotyping_id, sample_id, sample_date, submitted_date, result_date,
+                   target_name, raw_result, normalized_result, result_status, source_photo_id,
+                   confidence, notes, created_at
+            FROM genotyping_record
+            WHERE mouse_id = ? OR sample_id IN (?, ?)
+            ORDER BY created_at, genotyping_id
+            """,
+            (mouse_id, mouse["sample_id"] or "", mouse["display_id"]),
+        ).fetchall()
+        cage_assignment_rows = conn.execute(
+            """
+            SELECT a.assignment_id, a.cage_id, c.cage_label, c.location,
+                   a.status, a.assigned_at, a.ended_at, a.source_record_id, a.note
+            FROM mouse_cage_assignment a
+            JOIN cage_registry c ON c.cage_id = a.cage_id
+            WHERE a.mouse_id = ?
+            ORDER BY a.assigned_at, a.assignment_id
+            """,
+            (mouse_id,),
+        ).fetchall()
+
+        action_target_ids = {mouse_id, mouse["display_id"]}
+        if mouse["litter_id"]:
+            action_target_ids.add(mouse["litter_id"])
+        action_target_ids = {target_id for target_id in action_target_ids if target_id}
+        action_rows = []
+        if action_target_ids:
+            placeholders = ", ".join("?" for _ in action_target_ids)
+            action_rows = conn.execute(
+                f"""
+                SELECT action_id, action_type, target_id, before_value, after_value, created_at
+                FROM action_log
+                WHERE target_id IN ({placeholders})
+                ORDER BY created_at, action_id
+                """,
+                sorted(action_target_ids),
+            ).fetchall()
+
+        father = (
+            conn.execute(f"{MOUSE_SELECT} WHERE mouse_id = ?", (mouse["father_id"],)).fetchone()
+            if mouse["father_id"]
+            else None
+        )
+        mother = (
+            conn.execute(f"{MOUSE_SELECT} WHERE mouse_id = ?", (mouse["mother_id"],)).fetchone()
+            if mouse["mother_id"]
+            else None
+        )
+        litter = (
+            conn.execute(
+                """
+                SELECT l.litter_id, l.litter_label, l.mating_id, m.mating_label,
+                       l.birth_date, l.number_born, l.number_alive, l.number_weaned,
+                       l.weaning_date, l.status, l.source_record_id
+                FROM litter_registry l
+                LEFT JOIN mating_registry m ON m.mating_id = l.mating_id
+                WHERE l.litter_id = ?
+                """,
+                (mouse["litter_id"],),
+            ).fetchone()
+            if mouse["litter_id"]
+            else None
+        )
+
+        display_like = f"%{mouse['display_id']}%"
+        mouse_id_like = f"%{mouse_id}%"
+        review_clause = """
+            (current_value LIKE ? OR suggested_value LIKE ? OR review_reason LIKE ?
+             OR issue LIKE ? OR parse_id LIKE ?
+             OR current_value LIKE ? OR suggested_value LIKE ? OR review_reason LIKE ?
+             OR issue LIKE ? OR parse_id LIKE ?)
+        """
+        review_clauses = [review_clause]
+        review_params: list[Any] = [display_like] * 5 + [mouse_id_like] * 5
+        if parse_ids:
+            placeholders = ", ".join("?" for _ in parse_ids)
+            review_clauses.append(f"parse_id IN ({placeholders})")
+            review_params.extend(parse_ids)
+        review_rows = conn.execute(
+            f"""
+            SELECT review_id, parse_id, severity, issue, current_value,
+                   suggested_value, review_reason, status, created_at,
+                   resolved_at, resolution_note
+            FROM review_queue
+            WHERE {' OR '.join(review_clauses)}
+            ORDER BY created_at, review_id
+            """,
+            review_params,
+        ).fetchall()
+
+        source_ids = {
+            mouse["source_record_id"],
+            *[row["source_record_id"] for row in event_rows],
+            *[row["source_record_id"] for row in correction_rows],
+            *[row["source_record_id"] for row in cage_assignment_rows],
+            litter["source_record_id"] if litter else None,
+        }
+        source_ids = {source_id for source_id in source_ids if source_id}
+        source_rows = []
+        if source_ids:
+            placeholders = ", ".join("?" for _ in source_ids)
+            source_rows = conn.execute(
+                f"""
+                SELECT source_record_id, source_type, source_uri, source_label,
+                       checksum, note, imported_at
+                FROM source_record
+                WHERE source_record_id IN ({placeholders})
+                ORDER BY imported_at, source_record_id
+                """,
+                sorted(source_ids),
+            ).fetchall()
+
+    timeline = []
+    for row in note_items:
+        timeline.append(
+            {
+                "category": "note_line",
+                "at": row["created_at"],
+                "title": f"Note line {row['line_number'] or ''}".strip(),
+                "evidence_id": row["note_item_id"],
+                "source_record_id": None,
+                "details": {
+                    "raw_line_text": row["raw_line_text"],
+                    "strike_status": row["strike_status"],
+                    "interpreted_status": row["interpreted_status"],
+                    "ear_label_raw": row["parsed_ear_label_raw"],
+                    "ear_label_code": row["parsed_ear_label_code"],
+                    "review_status": row["parsed_ear_label_review_status"],
+                },
+            }
+        )
+    for row in event_rows:
+        timeline.append(
+            {
+                "category": "mouse_event",
+                "at": row["event_date"],
+                "title": row["event_type"],
+                "evidence_id": row["event_id"],
+                "source_record_id": row["source_record_id"],
+                "details": {
+                    "related": ":".join([row["related_entity_type"] or "", row["related_entity_id"] or ""]).strip(":"),
+                    "details": json_object(row["details"]),
+                    "created_by": row["created_by"],
+                },
+            }
+        )
+    for row in cage_assignment_rows:
+        timeline.append(
+            {
+                "category": "cage_assignment",
+                "at": row["assigned_at"],
+                "title": f"{row['status']} cage {row['cage_label']}",
+                "evidence_id": row["assignment_id"],
+                "source_record_id": row["source_record_id"],
+                "details": {
+                    "cage_id": row["cage_id"],
+                    "location": row["location"],
+                    "ended_at": row["ended_at"],
+                    "note": row["note"],
+                },
+            }
+        )
+    for row in review_rows:
+        timeline.append(
+            {
+                "category": "review",
+                "at": row["created_at"],
+                "title": row["issue"],
+                "evidence_id": row["review_id"],
+                "source_record_id": None,
+                "details": {
+                    "status": row["status"],
+                    "severity": row["severity"],
+                    "current_value": row["current_value"],
+                    "suggested_value": row["suggested_value"],
+                    "resolution_note": row["resolution_note"],
+                },
+            }
+        )
+    for row in correction_rows:
+        timeline.append(
+            {
+                "category": "correction",
+                "at": row["corrected_at"],
+                "title": row["field_name"],
+                "evidence_id": row["correction_id"],
+                "source_record_id": row["source_record_id"],
+                "details": {
+                    "before": row["before_value"],
+                    "after": row["after_value"],
+                    "reason": row["reason"],
+                    "review_id": row["review_id"],
+                },
+            }
+        )
+    for row in genotype_rows:
+        timeline.append(
+            {
+                "category": "genotyping",
+                "at": row["result_date"] or row["submitted_date"] or row["sample_date"] or row["created_at"],
+                "title": row["result_status"],
+                "evidence_id": row["genotyping_id"],
+                "source_record_id": None,
+                "details": {
+                    "sample_id": row["sample_id"],
+                    "target_name": row["target_name"],
+                    "raw_result": row["raw_result"],
+                    "normalized_result": row["normalized_result"],
+                    "confidence": row["confidence"],
+                    "notes": row["notes"],
+                },
+            }
+        )
+    for row in action_rows:
+        timeline.append(
+            {
+                "category": "action_log",
+                "at": row["created_at"],
+                "title": row["action_type"],
+                "evidence_id": row["action_id"],
+                "source_record_id": None,
+                "details": {
+                    "target_id": row["target_id"],
+                    "before": json_object(row["before_value"]),
+                    "after": json_object(row["after_value"]),
+                },
+            }
+        )
+    timeline.sort(key=lambda item: (item["at"] or "", item["category"], item["evidence_id"] or ""))
+
+    return {
+        "source_layer": "export or view",
+        "mouse": dict(mouse),
+        "lineage": {
+            "father": dict(father) if father else None,
+            "mother": dict(mother) if mother else None,
+            "litter": dict(litter) if litter else None,
+        },
+        "source_records": [dict(row) for row in source_rows],
+        "note_items": [dict(row) for row in note_items],
+        "review_items": [dict(row) for row in review_rows],
+        "corrections": [dict(row) for row in correction_rows],
+        "events": [dict(row) | {"details": json_object(row["details"])} for row in event_rows],
+        "cage_assignments": [dict(row) for row in cage_assignment_rows],
+        "actions": [dict(row) for row in action_rows],
+        "genotyping_records": [dict(row) for row in genotype_rows],
+        "timeline": timeline,
+    }
+
+
 @app.get("/api/search")
 def search_records(query: str = "") -> dict[str, Any]:
     term = query.strip()
@@ -3105,6 +3417,14 @@ def export_preview() -> dict[str, Any]:
         "source_layer": "export or view",
         "export_type": "separation_preview",
         "expected_filename": "mouse_records_preview.csv",
+        "expected_separation_filename": export_filename(
+            "separation",
+            {"separation_rows": separation_rows, "animal_sheet_rows": animal_rows},
+        ),
+        "expected_animal_sheet_filename": export_filename(
+            "animal",
+            {"separation_rows": separation_rows, "animal_sheet_rows": animal_rows},
+        ),
         "separation_columns": ["Cage number", "Strain", "Genotype", "total", "DOB", "WT", "Tg", "Sampling point", "Source note"],
         "animal_sheet_columns": ["Cage No.", "Strain", "Sex", "I.D", "genotype", "DOB", "Mating date", "Pubs", "Status", "Source"],
         "photos": photos,
