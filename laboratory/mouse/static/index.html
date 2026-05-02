@@ -114,6 +114,22 @@
       gap: 10px;
       align-items: end;
     }
+    .review-controls {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(120px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .review-actions {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) auto;
+      gap: 6px;
+      align-items: center;
+      min-width: 420px;
+    }
+    .review-actions input[type="text"] {
+      margin: 0;
+    }
     .metric-grid {
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -671,6 +687,33 @@
 
     <section>
       <h2>Review Queue</h2>
+      <div class="review-controls">
+        <label>
+          Status
+          <select id="reviewStatusFilter">
+            <option value="open">Open export blockers</option>
+            <option value="all">All reviews</option>
+            <option value="resolved">Resolved</option>
+          </select>
+        </label>
+        <label>
+          Severity
+          <select id="reviewSeverityFilter">
+            <option value="all">All severities</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+          </select>
+        </label>
+        <label>
+          Evidence
+          <select id="reviewEvidenceFilter">
+            <option value="all">All evidence states</option>
+            <option value="with_evidence">With note evidence</option>
+            <option value="missing_evidence">Missing note evidence</option>
+          </select>
+        </label>
+      </div>
       <table>
         <thead><tr><th>Issue</th><th>Severity</th><th>Evidence</th><th>Source</th><th>Status</th><th>Action</th></tr></thead>
         <tbody id="reviewRows"></tbody>
@@ -1110,6 +1153,9 @@
 
     let activeSearchQuery = "";
     let selectedAuditMouseId = "";
+    let reviewStatusFilter = "open";
+    let reviewSeverityFilter = "all";
+    let reviewEvidenceFilter = "all";
 
     function searchResultRows(results) {
       if (!results || !results.query) return row(["No search yet", "", "", ""]);
@@ -1127,6 +1173,19 @@
         rows.push(row(["source", source.source_record_id, source.source_label || source.source_type, source.note || source.source_uri || "--"]));
       });
       return rows.join("") || row(["No matches", "", "", ""]);
+    }
+
+    function filteredReviews(reviews) {
+      return reviews.filter((item) => {
+        const statusMatch = reviewStatusFilter === "all" || item.status === reviewStatusFilter;
+        const severityMatch = reviewSeverityFilter === "all" || item.severity === reviewSeverityFilter;
+        const hasEvidence = Boolean(item.evidence_preview || Number(item.note_line_count || 0) > 0);
+        const evidenceMatch =
+          reviewEvidenceFilter === "all" ||
+          (reviewEvidenceFilter === "with_evidence" && hasEvidence) ||
+          (reviewEvidenceFilter === "missing_evidence" && !hasEvidence);
+        return statusMatch && severityMatch && evidenceMatch;
+      });
     }
 
     async function renderAuditTrace(mice) {
@@ -1489,7 +1548,11 @@
       document.getElementById("photoRows").innerHTML = photos.map((photo) =>
         row([photo.photo_id, photo.original_filename, photo.status, photo.uploaded_at])
       ).join("") || row(["No photos yet", "", "", ""]);
-      document.getElementById("reviewRows").innerHTML = reviews.map((item) => `
+      document.getElementById("reviewStatusFilter").value = reviewStatusFilter;
+      document.getElementById("reviewSeverityFilter").value = reviewSeverityFilter;
+      document.getElementById("reviewEvidenceFilter").value = reviewEvidenceFilter;
+      const visibleReviews = filteredReviews(reviews);
+      document.getElementById("reviewRows").innerHTML = visibleReviews.map((item) => `
         <tr>
           <td><strong>${escapeHtml(item.issue)}</strong><br><span class="muted">${escapeHtml(item.review_reason || item.parse_id || "--")}</span></td>
           <td>${escapeHtml(item.severity)}</td>
@@ -1498,29 +1561,34 @@
           <td>${escapeHtml(item.status)}</td>
           <td>${
             item.status === "open"
-              ? `<button class="resolve-review" type="button"
-                   data-review-id="${escapeHtml(item.review_id)}"
-                   data-current-value="${escapeHtml(item.current_value || "")}"
-                   data-suggested-value="${escapeHtml(item.suggested_value || "")}">Resolve</button>`
+              ? `<div class="review-actions">
+                   <input class="review-resolved-value" type="text" value="${escapeHtml(item.suggested_value || "")}" aria-label="Resolved value">
+                   <input class="review-resolution-note" type="text" placeholder="Resolution note" aria-label="Resolution note">
+                   <button class="resolve-review" type="button"
+                     data-review-id="${escapeHtml(item.review_id)}"
+                     data-current-value="${escapeHtml(item.current_value || "")}">Resolve</button>
+                 </div>`
               : escapeHtml(item.resolution_note || "Resolved")
           }</td>
         </tr>
       `).join("") || row(["No review items", "", "", "", "", ""]);
       document.querySelectorAll(".resolve-review").forEach((button) => {
         button.addEventListener("click", async () => {
-          const note = window.prompt("Resolution note");
+          const container = button.closest(".review-actions");
+          const note = container.querySelector(".review-resolution-note").value;
+          const resolvedValue = container.querySelector(".review-resolved-value").value;
           if (!note || !note.trim()) return;
           await api(`/api/review-items/${button.dataset.reviewId}/resolve`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               resolution_note: note.trim(),
-              resolved_value: button.dataset.suggestedValue || "",
+              resolved_value: resolvedValue || "",
               correction_entity_type: "review_item",
               correction_entity_id: button.dataset.reviewId,
               correction_field_name: "reviewed_value",
               correction_before_value: button.dataset.currentValue || "",
-              correction_after_value: button.dataset.suggestedValue || ""
+              correction_after_value: resolvedValue || ""
             })
           });
           await refresh();
@@ -1816,6 +1884,21 @@
         activeSearchQuery = document.getElementById("searchQuery").value.trim();
         await refresh();
       }
+    });
+
+    document.getElementById("reviewStatusFilter").addEventListener("change", async (event) => {
+      reviewStatusFilter = event.target.value;
+      await refresh();
+    });
+
+    document.getElementById("reviewSeverityFilter").addEventListener("change", async (event) => {
+      reviewSeverityFilter = event.target.value;
+      await refresh();
+    });
+
+    document.getElementById("reviewEvidenceFilter").addEventListener("change", async (event) => {
+      reviewEvidenceFilter = event.target.value;
+      await refresh();
     });
 
     document.getElementById("exportMouseCsvButton").addEventListener("click", () => {
