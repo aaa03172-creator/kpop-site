@@ -5088,6 +5088,7 @@ def export_staleness(conn: Any) -> dict[str, Any]:
             UNION ALL SELECT imported_at FROM source_record
             UNION ALL SELECT updated_at FROM strain_registry
             UNION ALL SELECT corrected_at FROM correction_log
+            UNION ALL SELECT updated_at FROM card_snapshot
             UNION ALL SELECT created_at FROM mouse_event
             UNION ALL SELECT updated_at FROM genotyping_record
             UNION ALL SELECT updated_at FROM cage_registry
