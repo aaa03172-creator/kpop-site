@@ -513,6 +513,7 @@ def main() -> None:
                 assert_true("app-shell" in index_html and "Primary navigation" in index_html, "Local UI should use a persistent app shell with primary navigation.")
                 assert_true('data-view-target="photo"' in index_html and "Photo Review Workbench" in index_html, "Photo Review Workbench should be the default operational view.")
                 assert_true("reviewDetailPanel" in index_html and "inspect-review" in index_html, "Review Queue should expose a split list/detail workflow.")
+                assert_true("Review Note Evidence" in index_html and "reviewEvidencePanel" in index_html, "Review detail should expose linked note-line and card snapshot evidence.")
                 assert_true("Colony Records" in index_html, "Local UI should expose mouse records.")
                 assert_true("Parsed Note Evidence" in index_html, "Local UI should expose parsed note evidence.")
                 assert_true("Card Snapshots" in index_html and "cardSnapshotRows" in index_html, "Local UI should expose card transcription snapshots.")
@@ -576,6 +577,11 @@ def main() -> None:
                 assert_true("transcriptionSexRaw" in index_html and "transcriptionIdRaw" in index_html, "Manual transcription should capture raw Sex and I.D card fields.")
                 assert_true("unlabeled" in index_html or "1 2 3 4 5" in index_html, "Manual transcription should make numeric-only temporary labels visible in note entry.")
                 assert_true("note-label-decision" in index_html, "Review UI should expose structured transcription label correction controls.")
+                assert_true(
+                    "review-source-preview" in index_html
+                    and "reviewSourceEvidencePanel" in index_html,
+                    "Review detail should expose raw photo, note anchor, and card snapshot evidence in one panel.",
+                )
                 assert_true(
                     "Card Snapshots" in index_html
                     and "cardSnapshotRows" in index_html
@@ -888,6 +894,19 @@ def main() -> None:
                 assert_true(
                     numeric_review["note_item_id"] and numeric_review["review_note_raw_line"] == "1 2 3",
                     "Numeric note review items should expose the exact note-line anchor.",
+                )
+                assert_true(
+                    numeric_review["card_snapshot_id"] == transcription_payload["card_snapshot_id"]
+                    and numeric_review["review_card_type"].lower() == "separated"
+                    and numeric_review["review_note_summary"]["note_count"] == 3
+                    and numeric_review["image_url"].endswith("/image"),
+                    "Numeric note review detail should expose linked card snapshot and raw photo evidence.",
+                )
+                assert_true(
+                    numeric_review["image_url"].endswith("/image")
+                    and numeric_review["card_snapshot_id"] == transcription_payload["card_snapshot_id"]
+                    and numeric_review["review_note_summary"]["needs_review_count"] >= 1,
+                    "Review Queue items should expose raw photo preview URLs and card snapshot evidence context.",
                 )
                 numeric_resolution = client.post(
                     f"/api/review-items/{numeric_review['review_id']}/resolve",
