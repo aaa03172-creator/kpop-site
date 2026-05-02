@@ -131,6 +131,25 @@
     .review-actions select {
       margin: 0;
     }
+    .photo-review-layout {
+      display: grid;
+      grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 1.1fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .photo-preview-pane {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .photo-preview-image {
+      width: 100%;
+      max-height: 520px;
+      object-fit: contain;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0d1412;
+    }
     .metric-grid {
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -400,6 +419,7 @@
       main { grid-template-columns: 1fr; }
       .full { grid-column: auto; }
       .form-grid { grid-template-columns: 1fr; }
+      .photo-review-layout { grid-template-columns: 1fr; }
       .metric-grid { grid-template-columns: 1fr 1fr; }
       .viz-grid,
       .viz-kpis,
@@ -596,7 +616,8 @@
     <section class="full">
       <h2>Manual Photo Transcription</h2>
       <p>Enter only what you can verify from the latest cage-card photo; values stay reviewable until accepted.</p>
-      <div class="form-grid">
+      <div class="photo-review-layout">
+        <div class="form-grid">
         <label>
           Source photo
           <select id="transcriptionPhotoId"></select>
@@ -626,6 +647,11 @@
           <textarea id="transcriptionNotes" rows="3" placeholder="MT318 R'&#10;MT322 L'&#10;26.04.13 - 10p"></textarea>
         </label>
         <button id="transcriptionButton" type="button">Save Manual Transcription</button>
+        </div>
+        <div class="photo-preview-pane">
+          <img id="transcriptionPhotoPreview" class="photo-preview-image" alt="Selected cage card photo preview">
+          <p class="muted" id="transcriptionPhotoPreviewCaption">Select a source photo to review the raw cage-card evidence.</p>
+        </div>
       </div>
       <p class="muted" id="transcriptionMessage"></p>
     </section>
@@ -1415,6 +1441,20 @@
       return value;
     }
 
+    function updateTranscriptionPhotoPreview(photos) {
+      const select = document.getElementById("transcriptionPhotoId");
+      const image = document.getElementById("transcriptionPhotoPreview");
+      const caption = document.getElementById("transcriptionPhotoPreviewCaption");
+      const photo = photos.find((item) => item.photo_id === select.value);
+      if (!photo) {
+        image.removeAttribute("src");
+        caption.textContent = "Select a source photo to review the raw cage-card evidence.";
+        return;
+      }
+      image.src = `/api/photos/${encodeURIComponent(photo.photo_id)}/image`;
+      caption.textContent = `${photo.original_filename || photo.photo_id} is raw source evidence; transcribe only what is visible.`;
+    }
+
     function renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview }) {
       const aliveMice = mice.filter((mouse) => mouse.status !== "dead").length || mice.length;
       const activeStrains = assignedStrains.filter((strain) => strain.active).length || strains.filter((strain) => strain.status === "active").length;
@@ -1729,6 +1769,7 @@
       document.getElementById("transcriptionPhotoId").innerHTML = photos.map((photo) =>
         `<option value="${escapeHtml(photo.photo_id)}">${escapeHtml(photo.original_filename)} (${escapeHtml(photo.status)})</option>`
       ).join("") || '<option value="">No photos uploaded</option>';
+      updateTranscriptionPhotoPreview(photos);
       document.getElementById("reviewStatusFilter").value = reviewStatusFilter;
       document.getElementById("reviewSeverityFilter").value = reviewSeverityFilter;
       document.getElementById("reviewEvidenceFilter").value = reviewEvidenceFilter;
@@ -1797,11 +1838,20 @@
           <td>${escapeHtml(candidate.review_id)}</td>
           <td>${
             candidate.status === "draft"
-              ? `<button class="apply-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Apply</button>`
+              ? `<button class="preview-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Preview</button>
+                 <button class="apply-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Apply</button>`
               : escapeHtml(candidate.status)
           }</td>
         </tr>
       `).join("") || row(["No canonical candidate drafts yet", "", "", "", "", "", "", ""]);
+      document.querySelectorAll(".preview-canonical-candidate").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply-preview`);
+          const blockers = result.blockers.length ? ` Blockers: ${result.blockers.join("; ")}` : "";
+          document.getElementById("comparisonReviewMessage").textContent =
+            `Preview ${result.candidate_id}: ${result.summary.new_mouse_rows} new mouse row(s), ${result.summary.events} event(s), ${result.summary.duplicate_risks} duplicate risk(s).${blockers}`;
+        });
+      });
       document.querySelectorAll(".apply-canonical-candidate").forEach((button) => {
         button.addEventListener("click", async () => {
           const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply`, { method: "POST" });
@@ -2026,6 +2076,9 @@
       document.getElementById("uploadMessage").textContent =
         `Created ${result.created_review_candidates} photo review candidates; ${result.existing_review_candidates} already existed.`;
       await refresh();
+    });
+    document.getElementById("transcriptionPhotoId").addEventListener("change", async () => {
+      updateTranscriptionPhotoPreview(await api("/api/photos"));
     });
     document.getElementById("comparisonReviewButton").addEventListener("click", async () => {
       const result = await api("/api/evidence-comparison/review-candidates", { method: "POST" });

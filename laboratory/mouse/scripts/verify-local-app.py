@@ -341,7 +341,7 @@ def main() -> None:
             assert_true(summary["total_alive_mice"] >= 2, "MouseDB CLI colony summary should include live mouse totals.")
             assert_true(summary["active_matings"] == 1, "MouseDB CLI colony summary should include active mating counts.")
 
-    with tempfile.TemporaryDirectory() as temp_dir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
         db.DATA_DIR = Path(temp_dir)
         db.DB_PATH = Path(temp_dir) / "mouse_lims.sqlite"
         db.init_db()
@@ -529,6 +529,9 @@ def main() -> None:
                 assert_true("Review state" in index_html, "Local UI should show whether comparison reviews are open, resolved, or not created.")
                 assert_true("Canonical Candidate Drafts" in index_html, "Local UI should expose canonical candidate drafts.")
                 assert_true("canonicalCandidateRows" in index_html, "Local UI should render canonical candidate drafts.")
+                assert_true("Preview" in index_html and "apply-preview" in index_html, "Local UI should expose canonical apply preview.")
+                assert_true("transcriptionPhotoPreview" in index_html, "Local UI should preview selected raw cage-card photos.")
+                assert_true("/api/photos/${encodeURIComponent(photo.photo_id)}/image" in index_html, "Local UI should load raw photo evidence from the local image endpoint.")
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -724,6 +727,14 @@ def main() -> None:
                 photo_payload = photo_upload.json()
                 assert_true(photo_payload["status"] == "review_pending", "Uploaded photos should enter manual review state.")
                 assert_true(photo_payload["review_candidate"]["review_id"], "Photo upload should create a review candidate.")
+                photo_image = client.get(f"/api/photos/{photo_payload['photo_id']}/image")
+                assert_true(photo_image.status_code == 200, "Uploaded photo raw evidence image should be retrievable locally.")
+                assert_true(photo_image.content == b"fake local image bytes", "Photo image endpoint should return the preserved raw upload bytes.")
+                assert_true(
+                    photo_image.headers["content-type"].startswith("image/"),
+                    "Photo image endpoint should preserve an image content type.",
+                )
+                photo_image.close()
                 photos = client.get("/api/photos").json()
                 assert_true(
                     photos[0]["open_review_count"] >= 1 and photos[0]["latest_parse_id"],
@@ -898,6 +909,23 @@ def main() -> None:
                 assert_true(
                     client.get("/api/mice").json() == mice_before_comparison,
                     "Mapping a comparison review should not write canonical mouse state.",
+                )
+                preview_candidate = client.get(f"/api/canonical-candidates/{mapped_payload['canonical_candidate_id']}/apply-preview")
+                assert_true(preview_candidate.status_code == 200, f"Could not preview canonical candidate apply: {preview_candidate.text}")
+                preview_payload = preview_candidate.json()
+                assert_true(
+                    preview_payload["boundary"] == "export or view",
+                    "Canonical candidate apply preview should remain a view.",
+                )
+                assert_true(
+                    preview_payload["summary"]["new_mouse_rows"] == 2
+                    and preview_payload["summary"]["events"] == 2
+                    and preview_payload["blocked"] is False,
+                    "Canonical candidate apply preview should show mouse/event writes before applying.",
+                )
+                assert_true(
+                    client.get("/api/mice").json() == mice_before_comparison,
+                    "Canonical candidate apply preview should not write mouse state.",
                 )
                 apply_candidate = client.post(f"/api/canonical-candidates/{mapped_payload['canonical_candidate_id']}/apply")
                 assert_true(apply_candidate.status_code == 200, f"Could not apply canonical candidate draft: {apply_candidate.text}")
