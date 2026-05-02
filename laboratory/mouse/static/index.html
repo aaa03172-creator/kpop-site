@@ -424,9 +424,7 @@
         <article class="viz-card span-5">
           <h3>Genotype Distribution</h3>
           <table class="heatmap" aria-label="Genotype distribution heatmap">
-            <thead>
-              <tr><th></th><th>ApoM</th><th>PV-Cre</th><th>Ai14</th><th>GeneX</th><th>Other</th></tr>
-            </thead>
+            <thead id="vizHeatmapHead"></thead>
             <tbody id="vizHeatmapRows"></tbody>
           </table>
           <p class="viz-note">Display categories come from configured masters or accepted rows; uncertain values remain reviewable.</p>
@@ -508,7 +506,7 @@
     <section class="full visual-shell" aria-label="Strain detail visualization">
       <div class="visual-header">
         <div>
-          <h2>Strain Detail: PV-Cre</h2>
+          <h2 id="strainDetailTitle">Strain Detail</h2>
           <p>Relationship visualization for gene, allele, strain, cross, mice, and experiments.</p>
         </div>
         <span class="chip">view + configured master</span>
@@ -517,11 +515,11 @@
         <article class="viz-card span-8">
           <h3>Genetic Relationship Network</h3>
           <div class="network">
-            <div class="network-node"><div class="node-icon">Gene</div><strong>Pvalb</strong><span>MGI: 1930771</span></div>
-            <div class="network-node"><div class="node-icon">Allele</div><strong>Pvalb-IRES-Cre</strong><span>MGI: 5656652</span></div>
-            <div class="network-node"><div class="node-icon">Strain</div><strong>PV-Cre</strong><span>Configured master</span></div>
-            <div class="network-node"><div class="node-icon">Cross</div><strong>Ai14</strong><span>Reporter line</span></div>
-            <div class="network-node"><div class="node-icon">Exp</div><strong>EXP-2026-041</strong><span>Assigned view</span></div>
+            <div class="network-node"><div class="node-icon">Gene</div><strong id="networkGene">--</strong><span>Configured field</span></div>
+            <div class="network-node"><div class="node-icon">Allele</div><strong id="networkAllele">--</strong><span>Configured field</span></div>
+            <div class="network-node"><div class="node-icon">Strain</div><strong id="networkStrain">--</strong><span>Configured master</span></div>
+            <div class="network-node"><div class="node-icon">Cross</div><strong id="networkCross">--</strong><span>Mating goal</span></div>
+            <div class="network-node"><div class="node-icon">Event</div><strong id="networkEvent">--</strong><span>Mouse events</span></div>
           </div>
           <p class="viz-note">Network edges are explanatory relationship views. Keep source/config confirmation visible before acting on inferred relationships.</p>
         </article>
@@ -544,9 +542,9 @@
           <h3>Quick Reference</h3>
           <table aria-label="Strain quick reference">
             <tbody>
-              <tr><td>Cre expression</td><td>Parvalbumin promoter</td></tr>
-              <tr><td>Background</td><td>C57BL/6J</td></tr>
-              <tr><td>Recommended reporters</td><td>Ai14, Ai9, DIO series</td></tr>
+              <tr><td>Gene</td><td id="quickGene">--</td></tr>
+              <tr><td>Allele</td><td id="quickAllele">--</td></tr>
+              <tr><td>Background</td><td id="quickBackground">--</td></tr>
               <tr><td>Boundary</td><td>Configured info, not OCR source</td></tr>
             </tbody>
           </table>
@@ -871,6 +869,22 @@
       <div class="form-grid">
         <label>
           Mouse
+          <select id="requestGenotypingMouse"></select>
+        </label>
+        <label>
+          Sample ID
+          <input id="requestSampleId" type="text" placeholder="Tail-MT321">
+        </label>
+        <label>
+          Target
+          <input id="requestTargetName" type="text" placeholder="ApoM Tg/Tg">
+        </label>
+        <button id="requestGenotypingButton" type="button">Request Genotyping</button>
+      </div>
+      <p class="muted" id="requestGenotypingMessage"></p>
+      <div class="form-grid">
+        <label>
+          Mouse
           <select id="genotypingMouse"></select>
         </label>
         <label>
@@ -933,8 +947,12 @@
       <h2>Export Readiness</h2>
       <p id="exportPreview"></p>
       <table>
-        <thead><tr><th>Mouse</th><th>Strain</th><th>Genotype</th><th>DOB</th><th>Cage</th><th>Next action</th><th>Source note</th></tr></thead>
+        <thead><tr><th>Cage number</th><th>Strain</th><th>Genotype</th><th>Total</th><th>DOB</th><th>WT</th><th>Tg</th><th>Sampling point</th><th>Source note</th></tr></thead>
         <tbody id="exportRows"></tbody>
+      </table>
+      <table>
+        <thead><tr><th>Cage No.</th><th>Strain</th><th>Sex</th><th>I.D</th><th>genotype</th><th>DOB</th><th>Mating date</th><th>Pubs</th><th>Status</th><th>Source</th></tr></thead>
+        <tbody id="animalSheetRows"></tbody>
       </table>
       <table>
         <thead><tr><th>Blocker</th><th>Severity</th><th>Suggested</th><th>Reason</th></tr></thead>
@@ -1098,21 +1116,27 @@
       return ">32w";
     }
 
+    function unique(items) {
+      return Array.from(new Set(items.map((item) => String(item || "").trim()).filter(Boolean)));
+    }
+
     function firstMouse(mice) {
-      return mice[0] || {
-        display_id: "M-2026-0231",
-        raw_strain_text: "PV-Cre x Ai14",
-        sex: "Male",
-        dob_raw: "2026-01-04",
-        dob_start: "2026-01-04",
-        genotype_result: "Pending genotype",
-        genotype: "Pending genotype",
-        status: "available",
-        current_cage_label: "C-014",
-        source_note_item_id: "demo-note-1",
-        genotyping_status: "pending",
-        next_action: "review_needed"
-      };
+      return mice[0] || null;
+    }
+
+    function sourceCoverageScore(mice) {
+      if (!mice.length) return 0;
+      const withEvidence = mice.filter((mouse) => mouse.source_note_item_id || mouse.source_record_id || mouse.source_photo_id).length;
+      return Math.round((withEvidence / mice.length) * 10);
+    }
+
+    function genotypeBucket(mouse) {
+      const value = String(mouse.genotype_result || mouse.genotype || mouse.target_match_status || mouse.genotyping_status || "Unknown").trim();
+      const lower = value.toLowerCase();
+      if (!value || lower.includes("pending") || lower.includes("unknown") || lower.includes("not_sampled")) return "Unknown";
+      if (lower.includes("positive") || lower.includes("tg") || lower.includes("+")) return "Positive / Tg";
+      if (lower.includes("negative") || lower.includes("wt") || lower.includes("-")) return "Negative / WT";
+      return value;
     }
 
     function renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview }) {
@@ -1123,8 +1147,8 @@
       const activeMatings = matings.filter((mating) => mating.status === "active" || mating.status === "confirmed").length || matings.length;
       const weaningDue = litters.filter((litter) => litter.status !== "weaned").length;
       document.getElementById("vizKpis").innerHTML = [
-        ["Active strains", activeStrains || 1, "Configured scope"],
-        ["Alive mice", aliveMice || 184, "Accepted candidates"],
+        ["Active strains", activeStrains, "Configured scope"],
+        ["Alive mice", aliveMice, "Accepted candidates"],
         ["Active matings", activeMatings || 0, "Event-backed"],
         ["Weaning due", weaningDue || 0, "Rule preview"],
         ["Genotyping pending", genotypingPending || 0, "Review visible"],
@@ -1136,12 +1160,22 @@
         </div>
       `).join("");
 
-      const heatRows = [
-        ["+/+", 28, 12, 18, 8, 6],
-        ["+/-", 34, 16, 22, 14, 5],
-        ["f/f", 26, 8, 15, 24, 3],
-        ["Unknown", Math.max(1, reviewCount), 2, 1, 2, 4]
-      ];
+      const strainLabels = unique([
+        ...assignedStrains.filter((strain) => strain.active).map((strain) => strain.display_name),
+        ...strains.map((strain) => strain.strain_name),
+        ...mice.map((mouse) => mouse.raw_strain_text)
+      ].filter(Boolean)).slice(0, 5);
+      const heatStrains = strainLabels.length ? strainLabels : ["Unassigned"];
+      const genotypeLabels = unique(mice.map(genotypeBucket)).slice(0, 4);
+      const heatGenotypes = genotypeLabels.length ? genotypeLabels : ["Unknown"];
+      document.getElementById("vizHeatmapHead").innerHTML = `<tr><th></th>${heatStrains.map((label) => `<th>${escapeHtml(label)}</th>`).join("")}</tr>`;
+      const heatRows = heatGenotypes.map((genotype) => [
+        genotype,
+        ...heatStrains.map((strain) => mice.filter((mouse) =>
+          (mouse.raw_strain_text || "Unassigned") === strain
+          && genotypeBucket(mouse) === genotype
+        ).length)
+      ]);
       document.getElementById("vizHeatmapRows").innerHTML = heatRows.map((items) => `
         <tr>
           <th>${escapeHtml(items[0])}</th>
@@ -1151,21 +1185,20 @@
 
       const buckets = new Map([["<2w", 0], ["2-4w", 0], ["4-8w", 0], ["8-16w", 0], ["16-32w", 0], [">32w", 0]]);
       mice.forEach((mouse) => buckets.set(weekBucket(mouse.dob_start || mouse.dob_raw), (buckets.get(weekBucket(mouse.dob_start || mouse.dob_raw)) || 0) + 1));
-      if (![...buckets.values()].some(Boolean)) {
-        [["<2w", 8], ["2-4w", 26], ["4-8w", 48], ["8-16w", 62], ["16-32w", 30], [">32w", 10]].forEach(([key, value]) => buckets.set(key, value));
-      }
       const maxAgeBucket = Math.max(...buckets.values(), 1);
       document.getElementById("vizAgeBars").innerHTML = [...buckets.entries()].map(([label, value]) => `
         <div class="bar"><span>${escapeHtml(value)}</span><div class="bar-fill" style="height:${Math.max(8, (value / maxAgeBucket) * 118)}px"></div><span>${escapeHtml(label)}</span></div>
       `).join("");
 
-      const totalSex = aliveMice || 184;
-      const male = mice.filter((mouse) => String(mouse.sex || "").toLowerCase().startsWith("m")).length || Math.ceil(totalSex * 0.52);
-      const female = Math.max(0, totalSex - male);
+      const totalSex = aliveMice;
+      const male = mice.filter((mouse) => String(mouse.sex || "").toLowerCase().startsWith("m")).length;
+      const female = mice.filter((mouse) => String(mouse.sex || "").toLowerCase().startsWith("f")).length;
+      const unknownSex = Math.max(0, totalSex - male - female);
       document.getElementById("vizSexDonut").dataset.total = String(totalSex);
       document.getElementById("vizSexLegend").innerHTML = `
         <span><i class="dot" style="background:#1b72d8;"></i>Male ${male}</span>
         <span><i class="dot" style="background:#e64f83;"></i>Female ${female}</span>
+        <span><i class="dot" style="background:#aab4bd;"></i>Unknown ${unknownSex}</span>
       `;
 
       document.getElementById("vizWeaningRows").innerHTML = litters.slice(0, 5).map((litter) => row([
@@ -1188,52 +1221,75 @@
       `).join("") || row(["No open review alerts", ""]);
 
       const mouse = firstMouse(mice);
-      const mouseDob = mouse.dob_raw || mouse.dob_start || "--";
-      document.getElementById("detailMouseTitle").textContent = `${mouse.display_id || "Mouse"} detail`;
-      document.getElementById("detailMouseGrid").innerHTML = [
-        ["Strain", mouse.raw_strain_text || "--"],
-        ["DOB", mouseDob],
-        ["Current cage", mouse.current_cage_label || "--"],
-        ["Sex", mouse.sex || "--"],
-        ["Status", mouse.status || "--"],
-        ["Next action", mouse.next_action || "--"]
-      ].map(([label, value]) => `<div class="info-block"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
-      document.getElementById("detailMouseEvidence").textContent = `Traceability: ${mouse.source_note_item_id || "source photo / note line pending"}. Raw and normalized values remain separate.`;
-      document.getElementById("detailGenotypeRows").innerHTML = [
-        ["Current result", mouse.genotype_result || mouse.genotype || "--"],
-        ["Workflow", mouse.genotyping_status || "--"],
-        ["Target match", mouse.target_match_status || "--"],
-        ["Next action", mouse.next_action || "--"]
-      ].map((items) => row(items)).join("");
-      document.getElementById("detailPedigreeRows").innerHTML = [
-        ["Father", "Review source"],
-        ["Mother", "Review source"],
-        ["Litter", litters[0]?.litter_label || "--"]
-      ].map((items) => row(items)).join("");
-      const eventRows = mouseEvents.filter((event) => event.mouse_id === mouse.mouse_id).slice(0, 5);
-      document.getElementById("detailTimelineRows").innerHTML = eventRows.map((event) => row([
-        event.event_date,
-        event.event_type,
-        event.source_record_id || event.related_entity_id || "--"
-      ])).join("") || [
-        [mouseDob, "DOB source accepted", mouse.source_note_item_id || "--"],
-        ["2026-03-15", "Experiment assigned", "EXP-2026-041"]
-      ].map((items) => row(items)).join("");
-      const cage = cages.find((item) => item.cage_label === mouse.current_cage_label) || cages[0] || {};
+      if (!mouse) {
+        document.getElementById("detailMouseTitle").textContent = "No mouse detail yet";
+        document.getElementById("detailMouseGrid").innerHTML = `<div class="info-block"><span>Accepted records</span><strong>No source-backed mouse candidates</strong></div>`;
+        document.getElementById("detailMouseEvidence").textContent = "Import or accept cage-card evidence before this view becomes canonical.";
+        document.getElementById("detailGenotypeRows").innerHTML = row(["No genotype data", "--"]);
+        document.getElementById("detailPedigreeRows").innerHTML = row(["No pedigree data", "--"]);
+        document.getElementById("detailTimelineRows").innerHTML = row(["No events", "--", "--"]);
+      } else {
+        const mouseDob = mouse.dob_raw || mouse.dob_start || "--";
+        document.getElementById("detailMouseTitle").textContent = `${mouse.display_id || "Mouse"} detail`;
+        document.getElementById("detailMouseGrid").innerHTML = [
+          ["Strain", mouse.raw_strain_text || "--"],
+          ["DOB", mouseDob],
+          ["Current cage", mouse.current_cage_label || "--"],
+          ["Sex", mouse.sex || "--"],
+          ["Status", mouse.status || "--"],
+          ["Next action", mouse.next_action || "--"]
+        ].map(([label, value]) => `<div class="info-block"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+        document.getElementById("detailMouseEvidence").textContent = `Traceability: ${mouse.source_note_item_id || mouse.source_record_id || "source photo / note line pending"}. Raw and normalized values remain separate.`;
+        document.getElementById("detailGenotypeRows").innerHTML = [
+          ["Current result", mouse.genotype_result || mouse.genotype || "--"],
+          ["Workflow", mouse.genotyping_status || "--"],
+          ["Target match", mouse.target_match_status || "--"],
+          ["Next action", mouse.next_action || "--"]
+        ].map((items) => row(items)).join("");
+        document.getElementById("detailPedigreeRows").innerHTML = [
+          ["Father", mouse.father_id || "--"],
+          ["Mother", mouse.mother_id || "--"],
+          ["Litter", mouse.litter_id || "--"]
+        ].map((items) => row(items)).join("");
+        const eventRows = mouseEvents.filter((event) => event.mouse_id === mouse.mouse_id).slice(0, 5);
+        document.getElementById("detailTimelineRows").innerHTML = eventRows.map((event) => row([
+          event.event_date,
+          event.event_type,
+          event.source_record_id || event.related_entity_id || "--"
+        ])).join("") || row(["No events recorded", "--", "--"]);
+      }
+      const cage = mouse ? cages.find((item) => item.cage_label === mouse.current_cage_label) || cages[0] || {} : {};
       document.getElementById("detailCageRows").innerHTML = [
-        ["Cage", mouse.current_cage_label || cage.cage_label || "--"],
+        ["Cage", mouse?.current_cage_label || cage.cage_label || "--"],
         ["Location", cage.location || "--"],
         ["Rack", cage.rack || "--"],
         ["Active mice", cage.active_mouse_count ?? "--"]
       ].map((items) => row(items)).join("");
 
+      const selectedStrain = strains[0] || assignedStrains.find((strain) => strain.active) || {};
+      const selectedStrainName = selectedStrain.strain_name || selectedStrain.display_name || mouse?.raw_strain_text || "No configured strain";
+      const selectedGene = selectedStrain.gene || "--";
+      const selectedAllele = selectedStrain.allele || "--";
+      const selectedBackground = selectedStrain.background || "--";
+      const selectedMating = matings.find((mating) => (mating.strain_goal || "").includes(selectedStrainName)) || matings[0] || {};
+      const selectedEvent = mouseEvents.find((event) => event.related_entity_type === "mating" || event.related_entity_type === "litter") || mouseEvents[0] || {};
+      document.getElementById("strainDetailTitle").textContent = `Strain Detail: ${selectedStrainName}`;
+      document.getElementById("networkGene").textContent = selectedGene;
+      document.getElementById("networkAllele").textContent = selectedAllele;
+      document.getElementById("networkStrain").textContent = selectedStrainName;
+      document.getElementById("networkCross").textContent = selectedMating.strain_goal || selectedMating.expected_genotype || "--";
+      document.getElementById("networkEvent").textContent = selectedEvent.event_type || "--";
+      document.getElementById("quickGene").textContent = selectedGene;
+      document.getElementById("quickAllele").textContent = selectedAllele;
+      document.getElementById("quickBackground").textContent = selectedBackground;
+      const selectedStrainMice = mice.filter((item) => item.raw_strain_text === selectedStrainName);
       document.getElementById("strainProfileRows").innerHTML = [
-        ["Breeding difficulty", 7],
-        ["Genotyping complexity", 6],
-        ["Experimental relevance", 9],
-        ["Availability", 8],
-        ["Colony risk", 5],
-        ["Cost burden", 6]
+        ["Active mice", Math.min(10, selectedStrainMice.length || aliveMice || 0)],
+        ["Open reviews", Math.min(10, reviewCount)],
+        ["Genotyping pending", Math.min(10, genotypingPending || 0)],
+        ["Active matings", Math.min(10, activeMatings || 0)],
+        ["Litters not weaned", Math.min(10, weaningDue || 0)],
+        ["Source coverage", Math.min(10, sourceCoverageScore(mice))]
       ].map(([label, value]) => `
         <div class="profile-row">
           <span>${escapeHtml(label)}</span>
@@ -1241,20 +1297,25 @@
           <strong>${escapeHtml(value)}</strong>
         </div>
       `).join("");
+      const genotypeCounts = new Map();
+      selectedStrainMice.forEach((item) => {
+        const label = genotypeBucket(item);
+        genotypeCounts.set(label, (genotypeCounts.get(label) || 0) + 1);
+      });
+      const genotypeSegments = [...genotypeCounts.entries()];
+      const genotypeTotal = Math.max(1, genotypeSegments.reduce((sum, item) => sum + item[1], 0));
+      const genotypeColors = ["#2f9e44", "#1b72d8", "#f59f00", "#aab4bd"];
       document.getElementById("strainGenotypeStack").innerHTML = `
         <div style="display:flex;height:40px;border-radius:6px;overflow:hidden;color:#fff;font-weight:800;font-size:12px;">
-          <div style="width:40%;background:#2f9e44;display:grid;place-items:center;">18</div>
-          <div style="width:31%;background:#1b72d8;display:grid;place-items:center;">14</div>
-          <div style="width:11%;background:#f59f00;display:grid;place-items:center;">5</div>
-          <div style="width:18%;background:#aab4bd;display:grid;place-items:center;">8</div>
+          ${genotypeSegments.length ? genotypeSegments.map(([label, count], index) => `<div title="${escapeHtml(label)}" style="width:${Math.max(8, (count / genotypeTotal) * 100)}%;background:${genotypeColors[index % genotypeColors.length]};display:grid;place-items:center;">${escapeHtml(count)}</div>`).join("") : `<div style="width:100%;background:#aab4bd;display:grid;place-items:center;">0</div>`}
         </div>
-        <p class="viz-note">Configured categories should drive labels before this becomes a decision aid.</p>
+        <p class="viz-note">${escapeHtml(genotypeSegments.map(([label, count]) => `${label}: ${count}`).join(" | ") || "No accepted genotype data for the selected strain.")}</p>
       `;
-      document.getElementById("strainExperimentRows").innerHTML = [
-        ["EXP-2026-041", "Active", "Optogenetic activation"],
-        ["EXP-2026-015", "Completed", "PV+ interneuron imaging"],
-        ["EXP-2025-089", "Active", "Behavioral assay"]
-      ].map((items) => row(items)).join("");
+      const experimentRows = mouseEvents
+        .filter((event) => String(event.event_type || "").toLowerCase().includes("experiment") || String(event.related_entity_type || "").toLowerCase().includes("experiment"))
+        .slice(0, 5)
+        .map((event) => [event.related_entity_id || event.event_id || "--", event.event_date || "--", event.mouse_id || "--"]);
+      document.getElementById("strainExperimentRows").innerHTML = experimentRows.map((items) => row(items)).join("") || row(["No related experiment events", "--", "--"]);
     }
 
     async function refresh() {
@@ -1440,6 +1501,9 @@
       document.getElementById("offspringCage").innerHTML = '<option value="">--</option>' + cages.map((cage) =>
         `<option value="${escapeHtml(cage.cage_id)}">${escapeHtml(cage.cage_label)}</option>`
       ).join("");
+      document.getElementById("requestGenotypingMouse").innerHTML = mice.map((mouse) =>
+        `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.next_action || "")}</option>`
+      ).join("");
       document.getElementById("genotypingMouse").innerHTML = mice.map((mouse) =>
         `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.ear_label_raw || "")}</option>`
       ).join("");
@@ -1494,19 +1558,36 @@
       document.getElementById("exportPreview").textContent =
         `Type: ${preview.export_type}. Expected file: ${preview.expected_filename}. ` +
         `Photos: ${preview.photos}. Parsed results: ${preview.parsed_results}. ` +
-        `Preview rows: ${preview.preview_row_count}. Blocked review items: ${preview.blocked_review_items}. ` +
+        `Separation rows: ${preview.separation_row_count || 0}. Animal sheet rows: ${preview.animal_sheet_row_count || 0}. ` +
+        `Blocked review items: ${preview.blocked_review_items}. ` +
         `Ready: ${preview.ready ? "yes" : "no"}.`;
-      document.getElementById("exportRows").innerHTML = preview.preview_rows.map((item) =>
+      document.getElementById("exportRows").innerHTML = (preview.separation_rows || []).map((item) =>
         row([
-          item.display_id,
+          item.cage_number || "--",
           item.strain || "--",
           item.genotype || "--",
+          item.total || "--",
           item.dob || "--",
-          item.current_cage || "--",
-          item.next_action,
-          item.source_note_item_id || "--"
+          item.wt || "--",
+          item.tg || "--",
+          item.sampling_point || "--",
+          item.source_note_item_ids || "--"
         ])
-      ).join("") || row(["No export preview rows yet", "", "", "", "", "", ""]);
+      ).join("") || row(["No separation preview rows yet", "", "", "", "", "", "", "", ""]);
+      document.getElementById("animalSheetRows").innerHTML = (preview.animal_sheet_rows || []).map((item) =>
+        row([
+          item.cage_no || "--",
+          item.strain || "--",
+          item.sex || "--",
+          item.mouse_id || "--",
+          item.genotype || "--",
+          item.dob || "--",
+          item.mating_date || "--",
+          item.pubs || "--",
+          item.status || "--",
+          item.source || "--"
+        ])
+      ).join("") || row(["No animal sheet preview rows yet", "", "", "", "", "", "", "", "", ""]);
       document.getElementById("exportBlockerRows").innerHTML = preview.review_blockers.map((item) =>
         row([
           item.issue,
@@ -1800,6 +1881,29 @@
         `Weaned ${weaned.number_weaned} mice; source evidence ${weaned.source_record_id}.`;
       document.getElementById("weanDate").value = "";
       document.getElementById("weanCount").value = "";
+      await refresh();
+    });
+
+    document.getElementById("requestGenotypingButton").addEventListener("click", async () => {
+      const mouseId = document.getElementById("requestGenotypingMouse").value;
+      if (!mouseId) {
+        document.getElementById("requestGenotypingMessage").textContent = "Choose a mouse first.";
+        return;
+      }
+      const requested = await api("/api/genotyping/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mouse_id: mouseId,
+          sample_id: document.getElementById("requestSampleId").value.trim(),
+          target_name: document.getElementById("requestTargetName").value.trim(),
+          note: "Requested from local Genotyping Worklist."
+        })
+      });
+      document.getElementById("requestGenotypingMessage").textContent =
+        `Requested sample ${requested.sample_id || "--"}; source evidence ${requested.source_record_id}.`;
+      document.getElementById("requestSampleId").value = "";
+      document.getElementById("requestTargetName").value = "";
       await refresh();
     });
 
