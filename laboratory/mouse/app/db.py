@@ -428,6 +428,30 @@ def init_db() -> None:
                 FOREIGN KEY (distribution_import_id) REFERENCES distribution_import(distribution_import_id)
             );
 
+            CREATE TABLE IF NOT EXISTS legacy_workbook_import (
+                legacy_import_id TEXT PRIMARY KEY,
+                source_record_id TEXT NOT NULL,
+                source_file_name TEXT NOT NULL,
+                source_file_path TEXT NOT NULL DEFAULT '',
+                workbook_kind TEXT NOT NULL DEFAULT '',
+                sheet_name TEXT NOT NULL DEFAULT '',
+                imported_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'parsed',
+                notes TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS legacy_workbook_row (
+                legacy_row_id TEXT PRIMARY KEY,
+                legacy_import_id TEXT NOT NULL,
+                row_type TEXT NOT NULL DEFAULT '',
+                source_sheet TEXT NOT NULL DEFAULT '',
+                source_row_number INTEGER,
+                raw_row_json TEXT NOT NULL DEFAULT '{}',
+                review_status TEXT NOT NULL DEFAULT 'candidate',
+                FOREIGN KEY (legacy_import_id) REFERENCES legacy_workbook_import(legacy_import_id)
+            );
+
             CREATE TABLE IF NOT EXISTS ear_label_master (
                 ear_label_code TEXT PRIMARY KEY,
                 display_text TEXT NOT NULL,
@@ -529,6 +553,10 @@ def init_db() -> None:
                 ON mouse_master(sample_id);
             CREATE INDEX IF NOT EXISTS idx_distribution_assignment_import
                 ON distribution_assignment_row(distribution_import_id, source_row_number);
+            CREATE INDEX IF NOT EXISTS idx_legacy_workbook_import_time
+                ON legacy_workbook_import(imported_at);
+            CREATE INDEX IF NOT EXISTS idx_legacy_workbook_row_import
+                ON legacy_workbook_row(legacy_import_id, source_row_number);
             CREATE INDEX IF NOT EXISTS idx_strain_registry_name
                 ON strain_registry(strain_name COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS idx_source_record_type

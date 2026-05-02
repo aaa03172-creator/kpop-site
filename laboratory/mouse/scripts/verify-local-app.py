@@ -505,6 +505,9 @@ def main() -> None:
                 assert_true("auditTraceRows" in index_html, "Local UI should render audit trace rows.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
                 assert_true("Distribution Assignment Import" in index_html, "Local UI should expose distribution import.")
+                assert_true("Legacy Workbook Import" in index_html, "Local UI should expose legacy workbook import.")
+                assert_true("legacyWorkbookKind" in index_html, "Local UI should expose legacy workbook kind selection.")
+                assert_true("legacyWorkbookRows" in index_html, "Local UI should render legacy workbook rows.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
                 assert_true("Mouse Detail" in index_html, "Local UI should expose the mouse detail visualization.")
                 assert_true("Mouse Audit Trace" in index_html, "Local UI should expose mouse audit trace.")
@@ -578,6 +581,52 @@ def main() -> None:
                 assert_true(
                     stored_distribution["rows"][0]["traceability"]["source_cells"]["mating_type"] == "B35",
                     "Distribution import should preserve source cell traceability.",
+                )
+                mice_before_legacy = client.get("/api/mice").json()
+                with tempfile.TemporaryDirectory() as legacy_upload_dir:
+                    legacy_path = Path(legacy_upload_dir) / "legacy_animal_upload.xlsx"
+                    legacy_wb = Workbook()
+                    legacy_ws = legacy_wb.active
+                    legacy_ws.title = "animal sheet"
+                    legacy_ws.append(["Cage No.", "Strain", "Sex", "I.D", "genotype", "DOB", "Mating date", "Pubs"])
+                    legacy_ws.append(["C-014", "ApoM Tg/Tg", "M", "MT321", "Tg/Tg", "2026-01-01", "2026-05-01", ""])
+                    legacy_ws.append(["", "", "F1", "9p", "pre_weaning", "2026-05-02", "", "2026-05-02 9p"])
+                    legacy_wb.save(legacy_path)
+                    with legacy_path.open("rb") as legacy_file:
+                        legacy_import = client.post(
+                            "/api/legacy-workbook-imports",
+                            data={"kind": "animal"},
+                            files={
+                                "file": (
+                                    "legacy_animal_upload.xlsx",
+                                    legacy_file,
+                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                )
+                            },
+                        )
+                assert_true(legacy_import.status_code == 200, f"Could not import legacy workbook: {legacy_import.text}")
+                legacy_payload = legacy_import.json()
+                assert_true(legacy_payload["boundary"] == "parsed or intermediate result", "Legacy workbook import should stay non-canonical.")
+                assert_true(legacy_payload["stored_rows"] == 2, "Legacy workbook import row count is wrong.")
+                assert_true(legacy_payload["source_record_id"], "Legacy workbook import should create source evidence.")
+                legacy_imports = client.get("/api/legacy-workbook-imports").json()
+                stored_legacy = next(
+                    (
+                        item
+                        for item in legacy_imports
+                        if item["legacy_import_id"] == legacy_payload["legacy_import_id"]
+                    ),
+                    None,
+                )
+                assert_true(stored_legacy is not None, "Legacy workbook import list should include the stored import.")
+                assert_true(stored_legacy["workbook_kind"] == "legacy_animal_sheet", "Legacy workbook kind was not preserved.")
+                assert_true(
+                    stored_legacy["rows"][0]["raw_row"]["source_cells"]["display_id"] == "D2",
+                    "Legacy workbook import should preserve source cell traceability.",
+                )
+                assert_true(
+                    client.get("/api/mice").json() == mice_before_legacy,
+                    "Legacy workbook import should not write canonical mouse state.",
                 )
                 created = client.post(
                     "/api/assigned-strains",

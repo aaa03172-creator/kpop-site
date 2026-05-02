@@ -13,13 +13,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .db import ROOT, connection, init_db
-from .storage import new_id, save_upload, utc_now
+from .storage import new_id, save_legacy_workbook, save_upload, utc_now
+from scripts.parse_legacy_workbooks import parse_workbook
 
 
 STATIC_DIR = ROOT / "static"
@@ -519,6 +520,12 @@ def parse_optional_int(value: Any) -> int | None:
 def distribution_row_payload(row: Any) -> dict[str, Any]:
     result = dict(row)
     result["traceability"] = json.loads(result.get("traceability") or "{}")
+    return result
+
+
+def legacy_row_payload(row: Any) -> dict[str, Any]:
+    result = dict(row)
+    result["raw_row"] = json_object(result.pop("raw_row_json", "{}"))
     return result
 
 
@@ -1097,6 +1104,150 @@ def create_distribution_import(payload: DistributionImportPayload) -> dict[str, 
         "source_record_id": source_record_id,
         "source_file_name": source_file_name,
         "sheet_name": payload.sheet_name,
+        "imported_at": imported_at,
+        "status": "parsed",
+        "stored_rows": inserted_rows,
+        "boundary": "parsed or intermediate result",
+    }
+
+
+@app.get("/api/legacy-workbook-imports")
+def list_legacy_workbook_imports() -> list[dict[str, Any]]:
+    with connection() as conn:
+        imports = conn.execute(
+            """
+            SELECT legacy_import_id, source_record_id, source_file_name, source_file_path,
+                   workbook_kind, sheet_name, imported_at, status, notes
+            FROM legacy_workbook_import
+            ORDER BY imported_at DESC
+            """
+        ).fetchall()
+        rows = conn.execute(
+            """
+            SELECT legacy_row_id, legacy_import_id, row_type, source_sheet,
+                   source_row_number, raw_row_json, review_status
+            FROM legacy_workbook_row
+            ORDER BY legacy_import_id, source_row_number
+            """
+        ).fetchall()
+
+    rows_by_import: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        payload = legacy_row_payload(row)
+        rows_by_import.setdefault(payload["legacy_import_id"], []).append(payload)
+
+    return [
+        {**dict(import_row), "rows": rows_by_import.get(import_row["legacy_import_id"], [])}
+        for import_row in imports
+    ]
+
+
+@app.post("/api/legacy-workbook-imports")
+def create_legacy_workbook_import(
+    file: UploadFile = File(...),
+    kind: str = Form("auto"),
+    sheet_name: str = Form(""),
+) -> dict[str, Any]:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="A filename is required.")
+    if kind not in {"auto", "animal", "separation"}:
+        raise HTTPException(status_code=400, detail="Legacy workbook kind must be auto, animal, or separation.")
+
+    import_id = new_id("legacy_import")
+    stored_path = save_legacy_workbook(file, import_id)
+    source_uri = str(stored_path.relative_to(ROOT))
+    try:
+        parsed = parse_workbook(stored_path, kind=kind, sheet_name=sheet_name.strip() or None)
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=f"Could not parse legacy workbook: {error}") from error
+
+    rows = parsed.get("rows") or []
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=400, detail="Legacy workbook parser returned an invalid row payload.")
+
+    imported_at = utc_now()
+    raw_payload = json.dumps(parsed, ensure_ascii=False)
+    with connection() as conn:
+        source_record_id = create_source_record(
+            conn,
+            source_type="legacy_workbook",
+            source_uri=source_uri,
+            source_label=file.filename,
+            raw_payload=raw_payload,
+            note="Predecessor Excel workbook preserved as an export/view source; parsed rows stay review candidates.",
+        )
+        conn.execute(
+            """
+            INSERT INTO legacy_workbook_import
+                (legacy_import_id, source_record_id, source_file_name, source_file_path,
+                 workbook_kind, sheet_name, imported_at, status, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                import_id,
+                source_record_id,
+                file.filename,
+                source_uri,
+                str(parsed.get("workbook_kind") or ""),
+                str(parsed.get("sheet_name") or ""),
+                imported_at,
+                "parsed",
+                "Legacy Excel rows are parsed/intermediate review candidates, not canonical colony state.",
+            ),
+        )
+        inserted_rows = 0
+        for index, row in enumerate(rows, start=1):
+            if not isinstance(row, dict):
+                continue
+            conn.execute(
+                """
+                INSERT INTO legacy_workbook_row
+                    (legacy_row_id, legacy_import_id, row_type, source_sheet,
+                     source_row_number, raw_row_json, review_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("legacy_row"),
+                    import_id,
+                    str(row.get("row_type") or ""),
+                    str(row.get("source_sheet") or parsed.get("sheet_name") or ""),
+                    parse_optional_int(row.get("source_row_number")) or index,
+                    json.dumps(row, ensure_ascii=False),
+                    str(row.get("review_status") or "candidate"),
+                ),
+            )
+            inserted_rows += 1
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "legacy_workbook_import_created",
+                import_id,
+                None,
+                json.dumps(
+                    {
+                        "source_file_name": file.filename,
+                        "source_record_id": source_record_id,
+                        "workbook_kind": parsed.get("workbook_kind"),
+                        "rows": inserted_rows,
+                        "boundary": "parsed or intermediate result",
+                    },
+                    ensure_ascii=False,
+                ),
+                imported_at,
+            ),
+        )
+
+    return {
+        "legacy_import_id": import_id,
+        "source_record_id": source_record_id,
+        "source_file_name": file.filename,
+        "source_file_path": source_uri,
+        "workbook_kind": parsed.get("workbook_kind"),
+        "sheet_name": parsed.get("sheet_name"),
         "imported_at": imported_at,
         "status": "parsed",
         "stored_rows": inserted_rows,

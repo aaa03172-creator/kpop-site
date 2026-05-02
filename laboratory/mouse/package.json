@@ -5,8 +5,9 @@
   "main": "index.js",
   "scripts": {
     "mousedb": "python -m mousedb",
-    "parse:distribution": "python scripts/parse_distribution_workbook.py",
-    "parse:legacy": "python scripts/parse_legacy_workbooks.py",
+    "inspect:sources": "python -X utf8 scripts/inspect_sample_sources.py",
+    "parse:distribution": "python -X utf8 scripts/parse_distribution_workbook.py",
+    "parse:legacy": "python -X utf8 scripts/parse_legacy_workbooks.py",
     "test": "node scripts/verify-mvp.js",
     "test:local": "python scripts/verify-local-app.py",
     "test:python": "python -m pytest tests",

@@ -655,6 +655,39 @@
     </section>
 
     <section class="full">
+      <h2>Legacy Workbook Import</h2>
+      <p>Upload predecessor animal sheet or separation workbook views as reviewable, non-canonical evidence.</p>
+      <div class="form-grid">
+        <label>
+          Workbook kind
+          <select id="legacyWorkbookKind">
+            <option value="auto">Auto detect</option>
+            <option value="animal">animal sheet</option>
+            <option value="separation">분리 현황표</option>
+          </select>
+        </label>
+        <label>
+          Workbook file
+          <input id="legacyWorkbookFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+        </label>
+        <button id="legacyWorkbookButton" type="button">Import Legacy Workbook</button>
+      </div>
+      <p class="muted" id="legacyWorkbookMessage"></p>
+      <table>
+        <thead>
+          <tr>
+            <th>Workbook</th>
+            <th>Kind</th>
+            <th>Rows</th>
+            <th>Preview</th>
+            <th>Source evidence</th>
+          </tr>
+        </thead>
+        <tbody id="legacyWorkbookRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
       <h2>Search & CSV Export</h2>
       <p>Search across mouse IDs, strains, genotyping fields, review issues, and source evidence.</p>
       <div class="form-grid">
@@ -1144,6 +1177,27 @@
       `;
     }
 
+    function legacyWorkbookRow(item) {
+      const rows = item.rows || [];
+      const preview = rows.slice(0, 3).map((legacyRow) => {
+        const raw = legacyRow.raw_row || {};
+        return [
+          raw.cage_no_raw,
+          raw.strain_raw,
+          raw.display_id_raw,
+          raw.total_raw,
+          raw.dob_raw
+        ].filter(Boolean).join(" / ") || legacyRow.row_type || "--";
+      }).join(" | ");
+      return row([
+        item.source_file_name,
+        `${item.workbook_kind || "--"} / ${item.sheet_name || "--"}`,
+        String(rows.length),
+        preview || "--",
+        item.source_record_id || "--"
+      ]);
+    }
+
     function compactDetails(details) {
       if (!details || Object.keys(details).length === 0) return "--";
       return Object.entries(details).slice(0, 3).map(([key, value]) =>
@@ -1473,13 +1527,14 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, legacyWorkbookImports, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
         api("/api/source-records"),
         api("/api/corrections"),
         api("/api/distribution-imports"),
+        api("/api/legacy-workbook-imports"),
         api("/api/photos"),
         api("/api/review-items"),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
@@ -1526,6 +1581,8 @@
       const suggestions = distributionSuggestions(distributionImports, assignedStrains);
       document.getElementById("distributionRows").innerHTML = suggestions.map(distributionRow).join("") ||
         row(["No distribution candidates yet", "", "", "", "", ""]);
+      document.getElementById("legacyWorkbookRows").innerHTML = legacyWorkbookImports.map(legacyWorkbookRow).join("") ||
+        row(["No legacy workbooks imported yet", "", "", "", ""]);
       document.querySelectorAll(".add-distribution-scope").forEach((button) => {
         button.addEventListener("click", async () => {
           const canonical = button.dataset.canonical;
@@ -1871,6 +1928,32 @@
       document.getElementById("distributionMessage").textContent =
         `Imported ${result.stored_rows} assignment rows from ${result.source_file_name}.`;
       document.getElementById("distributionFile").value = "";
+      await refresh();
+    });
+
+    document.getElementById("legacyWorkbookButton").addEventListener("click", async () => {
+      const file = document.getElementById("legacyWorkbookFile").files[0];
+      if (!file) {
+        document.getElementById("legacyWorkbookMessage").textContent = "Choose a legacy workbook first.";
+        return;
+      }
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("kind", document.getElementById("legacyWorkbookKind").value);
+      const response = await fetch("/api/legacy-workbook-imports", {
+        method: "POST",
+        body: formData
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        document.getElementById("legacyWorkbookMessage").textContent =
+          payload.detail || "Could not import legacy workbook.";
+        return;
+      }
+      const result = await response.json();
+      document.getElementById("legacyWorkbookMessage").textContent =
+        `Imported ${result.stored_rows} candidate rows from ${result.source_file_name}; source evidence ${result.source_record_id}.`;
+      document.getElementById("legacyWorkbookFile").value = "";
       await refresh();
     });
 
