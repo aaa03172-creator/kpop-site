@@ -963,12 +963,16 @@ def canonical_candidate_audit_view(conn: Any, candidate_id: str) -> dict[str, An
         payload["after_value"] = json_object(payload.get("after_value"))
         actions.append(payload)
 
-    can_void = candidate["status"] == "applied" and bool(unique_mouse_ids)
+    found_mouse_ids = {item["mouse_id"] for item in mice}
+    missing_mouse_ids = [mouse_id for mouse_id in unique_mouse_ids if mouse_id not in found_mouse_ids]
+    can_void = candidate["status"] == "applied" and bool(unique_mouse_ids) and not missing_mouse_ids
     blockers = []
     if candidate["status"] != "applied":
         blockers.append(f"Candidate status is {candidate['status']}, not applied.")
     if not unique_mouse_ids:
         blockers.append("No applied mouse records are linked to this candidate.")
+    if missing_mouse_ids:
+        blockers.append(f"Applied mouse records are missing: {', '.join(missing_mouse_ids)}.")
 
     return {
         "boundary": "export or view",
@@ -978,6 +982,7 @@ def canonical_candidate_audit_view(conn: Any, candidate_id: str) -> dict[str, An
         },
         "applied_mouse_ids": unique_mouse_ids,
         "mice": mice,
+        "missing_mouse_ids": missing_mouse_ids,
         "events": events,
         "actions": actions,
         "can_void": can_void,
@@ -3446,37 +3451,37 @@ def genotyping_dashboard() -> list[dict[str, Any]]:
             "not_sampled",
             "Not sampled",
             "Separated active mice that still need tail sampling.",
-            "status = 'active' AND genotyping_status = 'not_sampled'",
+            "status IN ('active', 'mating', 'open') AND genotyping_status = 'not_sampled'",
         ),
         (
             "awaiting_result",
             "Awaiting result",
             "Sampled or submitted mice without an accepted genotype result.",
-            "status = 'active' AND (genotyping_status IN ('sampled', 'submitted', 'pending') OR next_action = 'awaiting_result')",
+            "status IN ('active', 'mating', 'open') AND (genotyping_status IN ('sampled', 'submitted', 'pending') OR next_action = 'awaiting_result')",
         ),
         (
             "failed_ambiguous",
             "Failed / ambiguous",
             "Genotyping records that need retry, interpretation, or review.",
-            "status = 'active' AND (genotyping_status = 'failed' OR next_action = 'review_result')",
+            "status IN ('active', 'mating', 'open') AND (genotyping_status = 'failed' OR next_action = 'review_result')",
         ),
         (
             "target_confirmed",
             "Target genotype confirmed",
             "Mice whose result matches a configured strain-level target genotype.",
-            "status = 'active' AND genotyping_status = 'resulted' AND target_match_status = 'matches_target'",
+            "status IN ('active', 'mating', 'open') AND genotyping_status = 'resulted' AND target_match_status = 'matches_target'",
         ),
         (
             "non_target",
             "Non-target genotype",
             "Resulted mice that do not match configured target genotype.",
-            "status = 'active' AND genotyping_status = 'resulted' AND target_match_status = 'does_not_match_target'",
+            "status IN ('active', 'mating', 'open') AND genotyping_status = 'resulted' AND target_match_status = 'does_not_match_target'",
         ),
         (
             "review_needed",
             "Review needed",
             "Mice with genotype workflow state that should not be acted on silently.",
-            "status = 'active' AND (next_action = 'review_needed' OR use_category = 'unknown' OR target_match_status = 'unknown')",
+            "status IN ('active', 'mating', 'open') AND (next_action = 'review_needed' OR use_category = 'unknown' OR target_match_status = 'unknown')",
         ),
     ]
     with connection() as conn:
