@@ -2,12 +2,14 @@
 
 import json
 import io
+import os
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from fastapi.testclient import TestClient
@@ -535,6 +537,8 @@ def main() -> None:
                 assert_true("/api/photos/${encodeURIComponent(photo.photo_id)}/image" in index_html, "Local UI should load raw photo evidence from the local image endpoint.")
                 assert_true("firstPendingPhotoButton" in index_html and "photoQueueSummary" in index_html, "Local UI should expose batch photo review queue controls.")
                 assert_true("/api/photo-review-workbench" in index_html, "Local UI should load the batch photo review workbench view.")
+                assert_true("aiDraftButton" in index_html, "Local UI should expose approval-gated AI transcription drafts.")
+                assert_true("ai-transcription-draft" in index_html, "Local UI should call the AI draft endpoint only from the review form.")
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -745,6 +749,23 @@ def main() -> None:
                 assert_true(
                     workbench_row["next_action"] == "transcribe_photo" and workbench_row["image_url"].endswith("/image"),
                     "Photo review workbench should point raw photos to transcription and local image evidence.",
+                )
+                blocked_ai_draft = client.post(
+                    f"/api/photos/{photo_payload['photo_id']}/ai-transcription-draft",
+                    json={"approved_external_inference": False},
+                )
+                assert_true(
+                    blocked_ai_draft.status_code == 403,
+                    "AI draft transcription should require explicit per-request external inference approval.",
+                )
+                with patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False):
+                    unavailable_ai_draft = client.post(
+                        f"/api/photos/{photo_payload['photo_id']}/ai-transcription-draft",
+                        json={"approved_external_inference": True},
+                    )
+                assert_true(
+                    unavailable_ai_draft.status_code == 503,
+                    "AI draft transcription should stay unavailable without an explicit API key.",
                 )
                 photos = client.get("/api/photos").json()
                 assert_true(

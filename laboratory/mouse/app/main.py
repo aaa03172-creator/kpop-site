@@ -8,6 +8,8 @@ import io
 import html
 import zipfile
 import mimetypes
+import base64
+import os
 from urllib.parse import quote
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -18,6 +20,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+import httpx
 
 from .db import ROOT, connection, init_db
 from .storage import new_id, save_legacy_workbook, save_upload, utc_now
@@ -117,6 +120,11 @@ class PhotoManualTranscriptionCreate(BaseModel):
     confidence: float = Field(default=75, ge=0, le=100)
     notes: list[dict[str, Any]] = Field(default_factory=list)
     reviewer_note: str = ""
+
+
+class PhotoAiDraftCreate(BaseModel):
+    approved_external_inference: bool = False
+    detail: str = "low"
 
 
 class GenotypingUpdate(BaseModel):
@@ -236,10 +244,16 @@ def list_photos() -> list[dict[str, Any]]:
 
 @app.get("/api/photos/{photo_id}/image")
 def get_photo_image(photo_id: str) -> FileResponse:
+    photo, image_path, media_type = photo_image_path(photo_id)
+    filename = photo["original_filename"] or image_path.name
+    return FileResponse(image_path, media_type=media_type, filename=filename)
+
+
+def photo_image_path(photo_id: str) -> tuple[Any, Path, str]:
     with connection() as conn:
         photo = conn.execute(
             """
-            SELECT original_filename, stored_path
+            SELECT photo_id, original_filename, stored_path, uploaded_at, status
             FROM photo_log
             WHERE photo_id = ?
             """,
@@ -258,7 +272,225 @@ def get_photo_image(photo_id: str) -> FileResponse:
 
     filename = photo["original_filename"] or image_path.name
     media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    return FileResponse(image_path, media_type=media_type, filename=filename)
+    return photo, image_path, media_type
+
+
+def assigned_strain_scope_for_prompt() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT display_name, aliases
+            FROM my_assigned_strain
+            WHERE active = 1
+            ORDER BY display_name COLLATE NOCASE
+            LIMIT 25
+            """
+        ).fetchall()
+    return [
+        {
+            "display_name": row["display_name"],
+            "aliases": json.loads(row["aliases"] or "[]"),
+        }
+        for row in rows
+    ]
+
+
+def bounded_float(value: Any, *, minimum: float = 0, maximum: float = 100) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = minimum
+    return max(minimum, min(maximum, number))
+
+
+def ai_draft_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "card_type": {"type": "string", "enum": ["Separated", "Mating", "unknown"]},
+            "raw_strain": {"type": "string"},
+            "matched_strain": {"type": "string"},
+            "dob_raw": {"type": "string"},
+            "dob_normalized": {"type": "string"},
+            "mouse_count": {"type": "string"},
+            "notes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "raw": {"type": "string"},
+                        "meaning": {"type": "string"},
+                        "strike": {"type": "string", "enum": ["none", "single", "double", "unclear"]},
+                        "confidence": {"type": "number"},
+                    },
+                    "required": ["raw", "meaning", "strike", "confidence"],
+                },
+            },
+            "confidence": {"type": "number"},
+            "uncertain_fields": {"type": "array", "items": {"type": "string"}},
+            "reviewer_note": {"type": "string"},
+        },
+        "required": [
+            "card_type",
+            "raw_strain",
+            "matched_strain",
+            "dob_raw",
+            "dob_normalized",
+            "mouse_count",
+            "notes",
+            "confidence",
+            "uncertain_fields",
+            "reviewer_note",
+        ],
+    }
+
+
+def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
+    draft = value if isinstance(value, dict) else {}
+    notes = draft.get("notes") if isinstance(draft.get("notes"), list) else []
+    normalized_notes = []
+    for note in notes[:25]:
+        if not isinstance(note, dict):
+            continue
+        raw = str(note.get("raw") or "").strip()
+        if not raw:
+            continue
+        strike = str(note.get("strike") or "unclear")
+        if strike not in {"none", "single", "double", "unclear"}:
+            strike = "unclear"
+        normalized_notes.append(
+            {
+                "raw": raw,
+                "meaning": str(note.get("meaning") or ""),
+                "strike": strike,
+                "confidence": bounded_float(note.get("confidence")),
+            }
+        )
+    card_type = str(draft.get("card_type") or "unknown")
+    if card_type not in {"Separated", "Mating", "unknown"}:
+        card_type = "unknown"
+    return {
+        "card_type": card_type,
+        "raw_strain": str(draft.get("raw_strain") or ""),
+        "matched_strain": str(draft.get("matched_strain") or ""),
+        "dob_raw": str(draft.get("dob_raw") or ""),
+        "dob_normalized": str(draft.get("dob_normalized") or ""),
+        "mouse_count": str(draft.get("mouse_count") or ""),
+        "notes": normalized_notes,
+        "confidence": bounded_float(draft.get("confidence")),
+        "uncertain_fields": [
+            str(item)
+            for item in (draft.get("uncertain_fields") if isinstance(draft.get("uncertain_fields"), list) else [])
+            if str(item).strip()
+        ],
+        "reviewer_note": str(draft.get("reviewer_note") or ""),
+    }
+
+
+@app.post("/api/photos/{photo_id}/ai-transcription-draft")
+def create_photo_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -> dict[str, Any]:
+    if not payload.approved_external_inference:
+        raise HTTPException(
+            status_code=403,
+            detail="External AI draft transcription requires explicit per-request approval.",
+        )
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="OPENAI_API_KEY is not configured; AI draft transcription is unavailable.",
+        )
+    if payload.detail not in {"low", "high", "auto"}:
+        raise HTTPException(status_code=400, detail="Image detail must be low, high, or auto.")
+
+    photo, image_path, media_type = photo_image_path(photo_id)
+    if not media_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="AI draft transcription requires an image source photo.")
+    image_bytes = image_path.read_bytes()
+    if len(image_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Photo is too large for AI draft transcription.")
+
+    data_url = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    assigned_scope = assigned_strain_scope_for_prompt()
+    request_payload = {
+        "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-4.1-mini"),
+        "store": False,
+        "instructions": (
+            "You draft cage-card transcription fields for review. "
+            "Never invent hidden text. Preserve visible raw text. "
+            "Use unknown/empty values when uncertain. "
+            "Classify all output as draft parsed evidence, not canonical state."
+        ),
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": (
+                            "Read this mouse cage card photo. Return only JSON matching the schema. "
+                            "Fields: card_type, raw_strain, matched_strain, dob_raw, dob_normalized, "
+                            "mouse_count, notes. Notes should preserve each visible mouse ID or date/event line. "
+                            "Strike marks: none, single, double, unclear. "
+                            f"Assigned strain scope for matching only: {json.dumps(assigned_scope, ensure_ascii=False)}"
+                        ),
+                    },
+                    {"type": "input_image", "image_url": data_url, "detail": payload.detail},
+                ],
+            }
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "cage_card_transcription_draft",
+                "strict": True,
+                "schema": ai_draft_schema(),
+            }
+        },
+    }
+    try:
+        with httpx.Client(timeout=60) as client:
+            response = client.post(
+                "https://api.openai.com/v1/responses",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=request_payload,
+            )
+        response.raise_for_status()
+        response_payload = response.json()
+    except httpx.HTTPStatusError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI draft transcription request failed: {error.response.text[:500]}",
+        ) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail=f"AI draft transcription request failed: {error}") from error
+
+    output_text = str(response_payload.get("output_text") or "")
+    if not output_text:
+        for item in response_payload.get("output", []):
+            for content in item.get("content", []):
+                if content.get("type") == "output_text":
+                    output_text += str(content.get("text") or "")
+    try:
+        draft = normalize_ai_draft_payload(json.loads(output_text))
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=502, detail="AI draft transcription returned invalid JSON.") from error
+
+    return {
+        "boundary": "parsed or intermediate result",
+        "source_layer": "parsed or intermediate result",
+        "photo_id": photo_id,
+        "photo_filename": photo["original_filename"],
+        "external_inference_used": True,
+        "payload_minimization": "Selected source photo only; active assigned strain names/aliases only; no colony records or Excel rows sent.",
+        "stored": False,
+        "draft": draft,
+    }
 
 
 @app.get("/api/photo-review-workbench")
