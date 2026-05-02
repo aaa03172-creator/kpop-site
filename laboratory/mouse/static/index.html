@@ -142,6 +142,17 @@
       gap: 8px;
       min-width: 0;
     }
+    .photo-queue-bar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin: 10px 0 12px;
+    }
+    .photo-queue-bar .muted {
+      font-size: 12px;
+      font-weight: 700;
+    }
     .photo-preview-image {
       width: 100%;
       max-height: 520px;
@@ -616,6 +627,12 @@
     <section class="full">
       <h2>Manual Photo Transcription</h2>
       <p>Enter only what you can verify from the latest cage-card photo; values stay reviewable until accepted.</p>
+      <div class="photo-queue-bar">
+        <button id="firstPendingPhotoButton" type="button">First Pending</button>
+        <button id="previousPendingPhotoButton" type="button">Previous</button>
+        <button id="nextPendingPhotoButton" type="button">Next</button>
+        <span class="muted" id="photoQueueSummary">No photo queue loaded.</span>
+      </div>
       <div class="photo-review-layout">
         <div class="form-grid">
         <label>
@@ -800,7 +817,7 @@
     <section>
       <h2>Photo Inbox</h2>
       <table>
-        <thead><tr><th>ID</th><th>File</th><th>Status</th><th>Uploaded</th></tr></thead>
+        <thead><tr><th>ID</th><th>File</th><th>Status</th><th>Uploaded</th><th>Action</th></tr></thead>
         <tbody id="photoRows"></tbody>
       </table>
     </section>
@@ -1165,6 +1182,9 @@
   </main>
 
   <script>
+    let latestPhotos = [];
+    let selectedTranscriptionPhotoId = "";
+
     async function api(path, options) {
       const response = await fetch(path, options);
       if (!response.ok) {
@@ -1445,6 +1465,7 @@
       const select = document.getElementById("transcriptionPhotoId");
       const image = document.getElementById("transcriptionPhotoPreview");
       const caption = document.getElementById("transcriptionPhotoPreviewCaption");
+      selectedTranscriptionPhotoId = select.value || selectedTranscriptionPhotoId;
       const photo = photos.find((item) => item.photo_id === select.value);
       if (!photo) {
         image.removeAttribute("src");
@@ -1453,6 +1474,32 @@
       }
       image.src = `/api/photos/${encodeURIComponent(photo.photo_id)}/image`;
       caption.textContent = `${photo.original_filename || photo.photo_id} is raw source evidence; transcribe only what is visible.`;
+    }
+
+    function pendingPhotoQueue() {
+      return latestPhotos.filter((photo) => photo.next_action !== "ready_for_candidate_mapping");
+    }
+
+    function setTranscriptionPhoto(photoId) {
+      const select = document.getElementById("transcriptionPhotoId");
+      if (!photoId || !latestPhotos.some((photo) => photo.photo_id === photoId)) return;
+      selectedTranscriptionPhotoId = photoId;
+      select.value = photoId;
+      updateTranscriptionPhotoPreview(latestPhotos);
+      const queue = pendingPhotoQueue();
+      const index = queue.findIndex((photo) => photo.photo_id === photoId);
+      const selected = latestPhotos.find((photo) => photo.photo_id === photoId);
+      const position = index >= 0 ? `${index + 1}/${queue.length}` : "not pending";
+      document.getElementById("photoQueueSummary").textContent =
+        `${position} - ${selected?.original_filename || photoId} - ${selected?.next_action || "ready"}`;
+    }
+
+    function movePhotoQueue(offset) {
+      const queue = pendingPhotoQueue();
+      if (!queue.length) return;
+      const currentIndex = queue.findIndex((photo) => photo.photo_id === selectedTranscriptionPhotoId);
+      const nextIndex = Math.min(queue.length - 1, Math.max(0, (currentIndex >= 0 ? currentIndex : 0) + offset));
+      setTranscriptionPhoto(queue[nextIndex].photo_id);
     }
 
     function renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview }) {
@@ -1662,7 +1709,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -1673,6 +1720,7 @@
         api("/api/legacy-workbook-imports"),
         api("/api/evidence-reconciliation"),
         api("/api/evidence-comparison"),
+        api("/api/photo-review-workbench"),
         api("/api/photos"),
         api("/api/review-items"),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
@@ -1763,13 +1811,31 @@
           await refresh();
         });
       });
-      document.getElementById("photoRows").innerHTML = photos.map((photo) =>
-        row([photo.photo_id, photo.original_filename, `${photo.status} (${photo.open_review_count || 0} open)`, photo.uploaded_at])
-      ).join("") || row(["No photos yet", "", "", ""]);
-      document.getElementById("transcriptionPhotoId").innerHTML = photos.map((photo) =>
+      latestPhotos = photoWorkbench.rows || [];
+      document.getElementById("photoRows").innerHTML = latestPhotos.map((photo) => `
+        <tr>
+          <td>${escapeHtml(photo.photo_id)}</td>
+          <td>${escapeHtml(photo.original_filename)}</td>
+          <td>${escapeHtml(`${photo.status} / ${photo.next_action} / ${photo.open_review_count || 0} open`)}</td>
+          <td>${escapeHtml(photo.uploaded_at)}</td>
+          <td><button class="select-photo-review" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">Use</button></td>
+        </tr>
+      `).join("") || row(["No photos yet", "", "", "", ""]);
+      document.getElementById("transcriptionPhotoId").innerHTML = latestPhotos.map((photo) =>
         `<option value="${escapeHtml(photo.photo_id)}">${escapeHtml(photo.original_filename)} (${escapeHtml(photo.status)})</option>`
       ).join("") || '<option value="">No photos uploaded</option>';
-      updateTranscriptionPhotoPreview(photos);
+      if (!selectedTranscriptionPhotoId || !latestPhotos.some((photo) => photo.photo_id === selectedTranscriptionPhotoId)) {
+        selectedTranscriptionPhotoId = pendingPhotoQueue()[0]?.photo_id || latestPhotos[0]?.photo_id || "";
+      }
+      if (selectedTranscriptionPhotoId) {
+        setTranscriptionPhoto(selectedTranscriptionPhotoId);
+      } else {
+        updateTranscriptionPhotoPreview(latestPhotos);
+        document.getElementById("photoQueueSummary").textContent = "No photo queue loaded.";
+      }
+      document.querySelectorAll(".select-photo-review").forEach((button) => {
+        button.addEventListener("click", () => setTranscriptionPhoto(button.dataset.photoId));
+      });
       document.getElementById("reviewStatusFilter").value = reviewStatusFilter;
       document.getElementById("reviewSeverityFilter").value = reviewSeverityFilter;
       document.getElementById("reviewEvidenceFilter").value = reviewEvidenceFilter;
@@ -1840,7 +1906,10 @@
             candidate.status === "draft"
               ? `<button class="preview-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Preview</button>
                  <button class="apply-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Apply</button>`
-              : escapeHtml(candidate.status)
+              : candidate.status === "applied"
+                ? `<button class="audit-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Audit</button>
+                   <button class="void-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Void Applied</button>`
+                : `<button class="audit-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Audit</button>`
           }</td>
         </tr>
       `).join("") || row(["No canonical candidate drafts yet", "", "", "", "", "", "", ""]);
@@ -1857,6 +1926,24 @@
           const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply`, { method: "POST" });
           document.getElementById("comparisonReviewMessage").textContent =
             `Applied ${result.created_mice} mouse record(s) from ${result.candidate_id}; ${result.existing_mice} already existed.`;
+          await refresh();
+        });
+      });
+      document.querySelectorAll(".audit-canonical-candidate").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/audit`);
+          const blockers = result.blockers.length ? ` Blockers: ${result.blockers.join("; ")}` : "";
+          document.getElementById("comparisonReviewMessage").textContent =
+            `Audit ${result.candidate.candidate_id}: ${result.candidate.status}, ` +
+            `${result.summary.applied_mouse_count} linked mouse record(s), ` +
+            `${result.summary.event_count} event(s), ${result.summary.action_count} action(s).${blockers}`;
+        });
+      });
+      document.querySelectorAll(".void-canonical-candidate").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/void`, { method: "POST" });
+          document.getElementById("comparisonReviewMessage").textContent =
+            `Voided ${result.updated_mice} mouse record(s) from ${result.candidate_id}; ${result.created_events} void event(s) recorded.`;
           await refresh();
         });
       });
@@ -2078,7 +2165,17 @@
       await refresh();
     });
     document.getElementById("transcriptionPhotoId").addEventListener("change", async () => {
-      updateTranscriptionPhotoPreview(await api("/api/photos"));
+      setTranscriptionPhoto(document.getElementById("transcriptionPhotoId").value);
+    });
+    document.getElementById("firstPendingPhotoButton").addEventListener("click", () => {
+      const first = pendingPhotoQueue()[0];
+      if (first) setTranscriptionPhoto(first.photo_id);
+    });
+    document.getElementById("previousPendingPhotoButton").addEventListener("click", () => {
+      movePhotoQueue(-1);
+    });
+    document.getElementById("nextPendingPhotoButton").addEventListener("click", () => {
+      movePhotoQueue(1);
     });
     document.getElementById("comparisonReviewButton").addEventListener("click", async () => {
       const result = await api("/api/evidence-comparison/review-candidates", { method: "POST" });

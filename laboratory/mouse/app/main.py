@@ -261,6 +261,112 @@ def get_photo_image(photo_id: str) -> FileResponse:
     return FileResponse(image_path, media_type=media_type, filename=filename)
 
 
+@app.get("/api/photo-review-workbench")
+def photo_review_workbench() -> dict[str, Any]:
+    with connection() as conn:
+        photos = conn.execute(
+            """
+            SELECT photo_id, original_filename, uploaded_at, status, raw_source_kind
+            FROM photo_log
+            ORDER BY uploaded_at DESC
+            """
+        ).fetchall()
+        rows = []
+        for photo in photos:
+            manual = conn.execute(
+                """
+                SELECT parse_id, parsed_at, status
+                FROM parse_result
+                WHERE photo_id = ? AND source_name = 'manual_photo_transcription'
+                ORDER BY parsed_at DESC
+                LIMIT 1
+                """,
+                (photo["photo_id"],),
+            ).fetchone()
+            manual_parse_id = manual["parse_id"] if manual is not None else ""
+            note_counts = {"note_lines": 0, "mouse_note_lines": 0}
+            if manual_parse_id:
+                note_row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS note_lines,
+                           SUM(CASE WHEN parsed_type = 'mouse_item' THEN 1 ELSE 0 END) AS mouse_note_lines
+                    FROM card_note_item_log
+                    WHERE parse_id = ?
+                    """,
+                    (manual_parse_id,),
+                ).fetchone()
+                note_counts = {
+                    "note_lines": int(note_row["note_lines"] or 0),
+                    "mouse_note_lines": int(note_row["mouse_note_lines"] or 0),
+                }
+            review_counts = conn.execute(
+                """
+                SELECT COUNT(*) AS total_reviews,
+                       SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_reviews
+                FROM parse_result parse
+                JOIN review_queue review ON review.parse_id = parse.parse_id
+                WHERE parse.photo_id = ?
+                """,
+                (photo["photo_id"],),
+            ).fetchone()
+            comparison_counts = {"comparison_reviews": 0, "open_comparison_reviews": 0, "resolved_comparison_reviews": 0}
+            if manual_parse_id:
+                comparison_row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS comparison_reviews,
+                           SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_comparison_reviews,
+                           SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) AS resolved_comparison_reviews
+                    FROM review_queue
+                    WHERE parse_id = ?
+                      AND issue LIKE 'Photo transcription%'
+                    """,
+                    (manual_parse_id,),
+                ).fetchone()
+                comparison_counts = {
+                    "comparison_reviews": int(comparison_row["comparison_reviews"] or 0),
+                    "open_comparison_reviews": int(comparison_row["open_comparison_reviews"] or 0),
+                    "resolved_comparison_reviews": int(comparison_row["resolved_comparison_reviews"] or 0),
+                }
+            open_reviews = int(review_counts["open_reviews"] or 0)
+            if not manual_parse_id:
+                next_action = "transcribe_photo"
+            elif open_reviews:
+                next_action = "resolve_photo_reviews"
+            elif comparison_counts["comparison_reviews"] == 0:
+                next_action = "create_comparison_review"
+            elif comparison_counts["open_comparison_reviews"]:
+                next_action = "resolve_evidence_comparison"
+            else:
+                next_action = "ready_for_candidate_mapping"
+            rows.append(
+                {
+                    "source_layer": "export or view",
+                    "photo_id": photo["photo_id"],
+                    "original_filename": photo["original_filename"],
+                    "uploaded_at": photo["uploaded_at"],
+                    "status": photo["status"],
+                    "raw_source_kind": photo["raw_source_kind"],
+                    "image_url": f"/api/photos/{quote(photo['photo_id'])}/image",
+                    "manual_parse_id": manual_parse_id,
+                    "manual_transcribed_at": manual["parsed_at"] if manual is not None else "",
+                    "note_line_count": note_counts["note_lines"],
+                    "mouse_note_line_count": note_counts["mouse_note_lines"],
+                    "total_review_count": int(review_counts["total_reviews"] or 0),
+                    "open_review_count": open_reviews,
+                    **comparison_counts,
+                    "next_action": next_action,
+                }
+            )
+    return {
+        "boundary": "export or view",
+        "source_priority": ["raw source photo", "manual transcription", "review item", "canonical candidate"],
+        "photo_count": len(rows),
+        "pending_transcription_count": sum(1 for row in rows if row["next_action"] == "transcribe_photo"),
+        "open_review_count": sum(row["open_review_count"] for row in rows),
+        "rows": rows,
+    }
+
+
 def stable_checksum(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -784,10 +890,118 @@ def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str,
     }
 
 
+def canonical_candidate_audit_view(conn: Any, candidate_id: str) -> dict[str, Any]:
+    candidate = conn.execute(
+        """
+        SELECT candidate.candidate_id, candidate.review_id, candidate.parse_id,
+               candidate.legacy_row_id, candidate.proposed_mouse_display_id,
+               candidate.proposed_strain, candidate.proposed_dob,
+               candidate.proposed_count, candidate.candidate_payload,
+               candidate.status, candidate.created_at, candidate.updated_at,
+               review.status AS review_status
+        FROM canonical_candidate candidate
+        JOIN review_queue review ON review.review_id = candidate.review_id
+        WHERE candidate.candidate_id = ?
+        """,
+        (candidate_id,),
+    ).fetchone()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Canonical candidate not found.")
+
+    event_rows = conn.execute(
+        """
+        SELECT event_id, mouse_id, event_type, event_date,
+               related_entity_type, related_entity_id, source_record_id,
+               details, created_by, created_at
+        FROM mouse_event
+        WHERE related_entity_type = 'canonical_candidate'
+          AND related_entity_id = ?
+        ORDER BY created_at, event_id
+        """,
+        (candidate_id,),
+    ).fetchall()
+    events = []
+    applied_mouse_ids: list[str] = []
+    for event in event_rows:
+        payload = dict(event)
+        payload["details"] = json_object(payload.get("details"))
+        if payload["event_type"] == "canonical_candidate_applied":
+            applied_mouse_ids.append(payload["mouse_id"])
+        events.append(payload)
+
+    unique_mouse_ids = list(dict.fromkeys(applied_mouse_ids))
+    mice = []
+    if unique_mouse_ids:
+        placeholders = ",".join("?" for _ in unique_mouse_ids)
+        mouse_rows = conn.execute(
+            f"""
+            SELECT mouse_id, display_id, raw_strain_text, dob_raw, dob_start, dob_end,
+                   ear_label_raw, ear_label_code, source_note_item_id, source_photo_id,
+                   status, updated_at
+            FROM mouse_master
+            WHERE mouse_id IN ({placeholders})
+            ORDER BY display_id COLLATE NOCASE
+            """,
+            unique_mouse_ids,
+        ).fetchall()
+        mice = [dict(row) for row in mouse_rows]
+
+    action_rows = conn.execute(
+        """
+        SELECT action_id, action_type, target_id, before_value, after_value, created_at
+        FROM action_log
+        WHERE target_id = ?
+          AND action_type LIKE 'canonical_candidate_%'
+        ORDER BY created_at, action_id
+        """,
+        (candidate_id,),
+    ).fetchall()
+    actions = []
+    for action in action_rows:
+        payload = dict(action)
+        payload["before_value"] = json_object(payload.get("before_value"))
+        payload["after_value"] = json_object(payload.get("after_value"))
+        actions.append(payload)
+
+    can_void = candidate["status"] == "applied" and bool(unique_mouse_ids)
+    blockers = []
+    if candidate["status"] != "applied":
+        blockers.append(f"Candidate status is {candidate['status']}, not applied.")
+    if not unique_mouse_ids:
+        blockers.append("No applied mouse records are linked to this candidate.")
+
+    return {
+        "boundary": "export or view",
+        "candidate": {
+            **dict(candidate),
+            "candidate_payload": json_object(candidate["candidate_payload"]),
+        },
+        "applied_mouse_ids": unique_mouse_ids,
+        "mice": mice,
+        "events": events,
+        "actions": actions,
+        "can_void": can_void,
+        "blockers": blockers,
+        "summary": {
+            "applied_mouse_count": len(unique_mouse_ids),
+            "current_mouse_count": len(mice),
+            "event_count": len(events),
+            "action_count": len(actions),
+            "voided_event_count": sum(1 for item in events if item["event_type"] == "canonical_candidate_voided"),
+        },
+    }
+
+
 @app.get("/api/canonical-candidates/{candidate_id}/apply-preview")
 def preview_canonical_candidate_apply(candidate_id: str) -> dict[str, Any]:
     with connection() as conn:
         return canonical_candidate_apply_preview(conn, candidate_id)
+
+
+@app.get("/api/canonical-candidates/{candidate_id}/audit")
+def audit_canonical_candidate(candidate_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        return canonical_candidate_audit_view(conn, candidate_id)
 
 
 @app.post("/api/canonical-candidates/{candidate_id}/apply")
@@ -986,6 +1200,128 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
         "existing_mice": existing_mice,
         "created_events": created_events,
         "mouse_ids": mouse_ids,
+        "boundary": "canonical structured state",
+    }
+
+
+@app.post("/api/canonical-candidates/{candidate_id}/void")
+def void_canonical_candidate(candidate_id: str) -> dict[str, Any]:
+    voided_at = utc_now()
+    created_events = 0
+    updated_mice = 0
+    affected_mouse_ids: list[str] = []
+    with connection() as conn:
+        audit = canonical_candidate_audit_view(conn, candidate_id)
+        if not audit["can_void"]:
+            raise HTTPException(status_code=409, detail=audit)
+
+        before_candidate = audit["candidate"]
+        affected_mouse_ids = audit["applied_mouse_ids"]
+        before_mouse_statuses = {item["mouse_id"]: item["status"] for item in audit["mice"]}
+        for mouse_id in affected_mouse_ids:
+            current_mouse = conn.execute(
+                """
+                SELECT mouse_id, status
+                FROM mouse_master
+                WHERE mouse_id = ?
+                """,
+                (mouse_id,),
+            ).fetchone()
+            if current_mouse is None:
+                continue
+            before_status = current_mouse["status"]
+            if before_status != "voided":
+                conn.execute(
+                    """
+                    UPDATE mouse_master
+                    SET status = 'voided',
+                        updated_at = ?
+                    WHERE mouse_id = ?
+                    """,
+                    (voided_at, mouse_id),
+                )
+                updated_mice += 1
+
+            event_id = f"event_void_{candidate_id}_{mouse_id}".replace(" ", "_")
+            existing_event = conn.execute(
+                "SELECT event_id FROM mouse_event WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if existing_event is None:
+                conn.execute(
+                    """
+                    INSERT INTO mouse_event
+                        (event_id, mouse_id, event_type, event_date, related_entity_type,
+                         related_entity_id, details, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        mouse_id,
+                        "canonical_candidate_voided",
+                        voided_at[:10],
+                        "canonical_candidate",
+                        candidate_id,
+                        json.dumps(
+                            {
+                                "candidate_id": candidate_id,
+                                "before_status": before_status,
+                                "after_status": "voided",
+                                "reason": "Applied canonical candidate was voided without deleting source-backed mouse records.",
+                                "boundary": "canonical structured state",
+                            },
+                            ensure_ascii=False,
+                        ),
+                        voided_at,
+                    ),
+                )
+                created_events += 1
+
+        conn.execute(
+            """
+            UPDATE canonical_candidate
+            SET status = 'voided',
+                updated_at = ?
+            WHERE candidate_id = ?
+            """,
+            (voided_at, candidate_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "canonical_candidate_voided",
+                candidate_id,
+                json.dumps(
+                    {
+                        "status": before_candidate["status"],
+                        "mouse_statuses": before_mouse_statuses,
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "status": "voided",
+                        "updated_mice": updated_mice,
+                        "created_events": created_events,
+                        "mouse_ids": affected_mouse_ids,
+                    },
+                    ensure_ascii=False,
+                ),
+                voided_at,
+            ),
+        )
+
+    return {
+        "candidate_id": candidate_id,
+        "status": "voided",
+        "voided_at": voided_at,
+        "updated_mice": updated_mice,
+        "created_events": created_events,
+        "mouse_ids": affected_mouse_ids,
         "boundary": "canonical structured state",
     }
 
@@ -2297,6 +2633,34 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             ),
         )
         conn.execute("UPDATE photo_log SET status = ? WHERE photo_id = ?", ("transcribed_review_pending", photo_id))
+        photo_review_rows = conn.execute(
+            """
+            SELECT review.review_id
+            FROM review_queue review
+            JOIN parse_result parse ON parse.parse_id = review.parse_id
+            WHERE parse.photo_id = ?
+              AND parse.source_name = 'photo_manual_review'
+              AND review.status = 'open'
+            """,
+            (photo_id,),
+        ).fetchall()
+        resolved_photo_review_ids = [row["review_id"] for row in photo_review_rows]
+        if resolved_photo_review_ids:
+            placeholders = ",".join("?" for _ in resolved_photo_review_ids)
+            conn.execute(
+                f"""
+                UPDATE review_queue
+                SET status = 'resolved',
+                    resolved_at = ?,
+                    resolution_note = ?
+                WHERE review_id IN ({placeholders})
+                """,
+                [
+                    now,
+                    "Manual cage-card transcription was entered; review the parsed transcription before canonical writes.",
+                    *resolved_photo_review_ids,
+                ],
+            )
         conn.execute(
             """
             INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
@@ -2306,8 +2670,16 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                 new_id("action"),
                 "manual_photo_transcription_created",
                 photo_id,
-                None,
-                json.dumps({"parse_id": parse_id, "review_id": review_id, "note_count": note_count}, ensure_ascii=False),
+                json.dumps({"resolved_photo_review_ids": resolved_photo_review_ids}, ensure_ascii=False),
+                json.dumps(
+                    {
+                        "parse_id": parse_id,
+                        "review_id": review_id,
+                        "note_count": note_count,
+                        "resolved_photo_review_items": len(resolved_photo_review_ids),
+                    },
+                    ensure_ascii=False,
+                ),
                 now,
             ),
         )
@@ -2319,6 +2691,7 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
         "created_note_items": note_count,
         "created_mouse_candidates": mouse_count,
         "created_ear_review_items": ear_review_count,
+        "resolved_photo_review_items": len(resolved_photo_review_ids),
         "boundary": "parsed or intermediate result",
     }
 
