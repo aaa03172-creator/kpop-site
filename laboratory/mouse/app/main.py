@@ -5,6 +5,9 @@ import re
 import hashlib
 import csv
 import io
+import html
+import zipfile
+from urllib.parse import quote
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -2489,6 +2492,117 @@ def mouse_rows(conn: Any, query: str = "") -> list[Any]:
     ).fetchall()
 
 
+def xlsx_column_name(index: int) -> str:
+    name = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def xlsx_cell_xml(row_number: int, column_number: int, value: Any) -> str:
+    ref = f"{xlsx_column_name(column_number)}{row_number}"
+    text = html.escape("" if value is None else str(value), quote=False)
+    return f'<c r="{ref}" t="inlineStr"><is><t>{text}</t></is></c>'
+
+
+def build_xlsx(sheet_name: str, headers: list[str], rows: list[list[Any]]) -> bytes:
+    safe_sheet_name = html.escape(sheet_name[:31] or "Sheet1", quote=True)
+    matrix = [headers, *rows]
+    row_xml = []
+    for row_index, values in enumerate(matrix, start=1):
+        cells = "".join(xlsx_cell_xml(row_index, column_index, value) for column_index, value in enumerate(values, start=1))
+        row_xml.append(f'<row r="{row_index}">{cells}</row>')
+    last_col = xlsx_column_name(max(len(headers), 1))
+    last_row = max(len(matrix), 1)
+    sheet_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:{last_col}{last_row}"/>
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <sheetData>{''.join(row_xml)}</sheetData>
+</worksheet>"""
+    workbook_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="{safe_sheet_name}" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"""
+    workbook_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"""
+    root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"""
+    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"""
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as workbook:
+        workbook.writestr("[Content_Types].xml", content_types)
+        workbook.writestr("_rels/.rels", root_rels)
+        workbook.writestr("xl/workbook.xml", workbook_xml)
+        workbook.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
+        workbook.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    return output.getvalue()
+
+
+def export_filename(export_kind: str, preview: dict[str, Any], query: str = "") -> str:
+    if query.strip():
+        strain = query.strip()
+    elif export_kind == "animal":
+        strain = next((row.get("strain") for row in preview["animal_sheet_rows"] if row.get("strain")), "selected strain")
+    else:
+        strain = next((row.get("strain") for row in preview["separation_rows"] if row.get("strain")), "selected strain")
+    safe_strain = re.sub(r'[<>:"/\\|?*]+', " ", strain).strip() or "selected strain"
+    safe_strain = re.sub(r"\s+", " ", safe_strain)
+    date_label = utc_now()[:10].replace("-", "")
+    suffix = "animal sheet" if export_kind == "animal" else "분리 현황표"
+    return f"{date_label} {safe_strain} {suffix}.xlsx"
+
+
+def workbook_content_disposition(filename: str, fallback: str) -> str:
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename)}"
+
+
+def log_workbook_export(
+    export_type: str,
+    filename: str,
+    query: str,
+    row_count: int,
+    blocked_review_count: int,
+    status: str,
+) -> None:
+    note = (
+        "Blocked final XLSX export because open review items remain."
+        if status == "blocked"
+        else "XLSX generated from workbook preview."
+    )
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO export_log
+                (export_id, export_type, filename, query, row_count,
+                 blocked_review_count, status, exported_at, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("export"),
+                export_type,
+                filename,
+                query.strip(),
+                row_count,
+                blocked_review_count,
+                status,
+                utc_now(),
+                note,
+            ),
+        )
+
+
 @app.get("/api/mice")
 def list_mice(query: str = "") -> list[dict[str, Any]]:
     with connection() as conn:
@@ -2736,6 +2850,87 @@ def list_export_log() -> list[dict[str, Any]]:
             """
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+@app.get("/api/exports/separation.xlsx")
+def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Response:
+    preview = export_preview()
+    rows = [
+        [
+            row["cage_number"],
+            row["strain"],
+            row["genotype"],
+            row["total"],
+            row["dob"],
+            row["wt"],
+            row["tg"],
+            row["sampling_point"],
+            row["source_note_item_ids"],
+        ]
+        for row in preview["separation_rows"]
+        if not query.strip() or query.strip().lower() in row["strain"].lower()
+    ]
+    filename = export_filename("separation", preview, query)
+    blocked_count = preview["blocked_review_items"]
+    if require_ready and blocked_count:
+        log_workbook_export("separation_xlsx", filename, query, len(rows), blocked_count, "blocked")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Resolve open review items before final separation workbook export.",
+                "blocked_review_count": blocked_count,
+                "filename": filename,
+                "source_layer": "export or view",
+            },
+        )
+    payload = build_xlsx("Separation", preview["separation_columns"], rows)
+    log_workbook_export("separation_xlsx", filename, query, len(rows), blocked_count, "generated")
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": workbook_content_disposition(filename, "separation.xlsx")},
+    )
+
+
+@app.get("/api/exports/animal-sheet.xlsx")
+def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Response:
+    preview = export_preview()
+    rows = [
+        [
+            row["cage_no"],
+            row["strain"],
+            row["sex"],
+            row["mouse_id"],
+            row["genotype"],
+            row["dob"],
+            row["mating_date"],
+            row["pubs"],
+            row["status"],
+            row["source"],
+        ]
+        for row in preview["animal_sheet_rows"]
+        if not query.strip() or not row["strain"] or query.strip().lower() in row["strain"].lower()
+    ]
+    filename = export_filename("animal", preview, query)
+    blocked_count = preview["blocked_review_items"]
+    if require_ready and blocked_count:
+        log_workbook_export("animal_sheet_xlsx", filename, query, len(rows), blocked_count, "blocked")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Resolve open review items before final animal sheet workbook export.",
+                "blocked_review_count": blocked_count,
+                "filename": filename,
+                "source_layer": "export or view",
+            },
+        )
+    payload = build_xlsx("Animal sheet", preview["animal_sheet_columns"], rows)
+    log_workbook_export("animal_sheet_xlsx", filename, query, len(rows), blocked_count, "generated")
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": workbook_content_disposition(filename, "animal sheet.xlsx")},
+    )
 
 
 @app.get("/api/export-preview")
