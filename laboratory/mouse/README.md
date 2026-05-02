@@ -118,6 +118,17 @@ MouseDB JSON output is an integration contract. Future PaperPipe or Research Ass
 
 State-changing operations that update current mouse state also write event history in the same database transaction. Important records include traceability fields such as `source_type`, `source_ref`, `confidence`, and `reviewed_status`.
 
+## Local Workbook Exports
+
+The local FastAPI prototype exposes workbook-shaped previews and direct `.xlsx` downloads for the two current lab handoff formats:
+
+- `GET /api/exports/separation.xlsx`: exports the current `분리 현황표` preview.
+- `GET /api/exports/animal-sheet.xlsx`: exports the current `animal sheet` preview.
+
+Both endpoints default to `require_ready=true`. Open review blockers return `409` and create a blocked export log entry instead of silently generating a risky file. After review blockers are resolved, downloads are generated from accepted structured state, not from Excel as the source of truth.
+
+The browser UI has matching buttons: `Download Separation XLSX` and `Download Animal Sheet XLSX`.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
