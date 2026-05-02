@@ -1345,6 +1345,7 @@
         <button id="previousPendingPhotoButton" type="button">Previous</button>
         <button id="nextPendingPhotoButton" type="button">Next</button>
         <button id="aiDraftButton" type="button">Create AI Draft</button>
+        <button id="aiExtractButton" type="button">Extract & Save Review</button>
         <span class="muted" id="photoQueueSummary">No photo queue loaded.</span>
       </div>
       <div class="photo-review-layout">
@@ -1409,7 +1410,7 @@
         </div>
       </div>
       <p class="muted" id="transcriptionMessage"></p>
-      <p class="muted" id="aiDraftMessage">AI draft sends only the selected photo and active assigned strain names after button approval.</p>
+      <p class="muted" id="aiDraftMessage">AI extraction sends only the selected photo and active assigned strain names after button approval. Saved results remain parsed evidence for review.</p>
       <div class="form-grid">
         <label>
           OpenAI API key
@@ -1982,7 +1983,7 @@
             <h3>Separation workbook preview</h3>
             <div class="export-table-wrap">
               <table>
-                <thead><tr><th>Cage number</th><th>Strain</th><th>Genotype</th><th>Total</th><th>DOB</th><th>WT</th><th>Tg</th><th>Sampling point</th><th>Source note</th></tr></thead>
+                <thead><tr><th>Cage number</th><th>Strain</th><th>Genotype</th><th>Total</th><th>DOB</th><th>WT</th><th>Tg</th><th>Sampling point</th><th>Source note</th><th>Evidence</th><th>Uncertainty</th></tr></thead>
                 <tbody id="exportRows"></tbody>
               </table>
             </div>
@@ -1991,7 +1992,7 @@
             <h3>Animal sheet preview</h3>
             <div class="export-table-wrap">
               <table>
-                <thead><tr><th>Cage No.</th><th>Strain</th><th>Sex</th><th>I.D</th><th>genotype</th><th>DOB</th><th>Mating date</th><th>Pubs</th><th>Status</th><th>Source</th></tr></thead>
+                <thead><tr><th>Cage No.</th><th>Strain</th><th>Sex</th><th>I.D</th><th>genotype</th><th>DOB</th><th>Mating date</th><th>Pubs</th><th>Status</th><th>Source</th><th>Evidence</th><th>Uncertainty</th></tr></thead>
                 <tbody id="animalSheetRows"></tbody>
               </table>
             </div>
@@ -2988,9 +2989,11 @@
           item.wt || "--",
           item.tg || "--",
           item.sampling_point || "--",
-          item.source_note_item_ids || "--"
+          item.source_note_item_ids || "--",
+          [item.source_photo_ids && `photo ${item.source_photo_ids}`, item.card_snapshot_ids && `snapshot ${item.card_snapshot_ids}`, item.raw_note_lines && `raw ${item.raw_note_lines}`].filter(Boolean).join(" / ") || "--",
+          item.uncertainty || "--"
         ])
-      ).join("") || row(["No separation preview rows yet", "", "", "", "", "", "", "", ""]);
+      ).join("") || row(["No separation preview rows yet", "", "", "", "", "", "", "", "", "", ""]);
       document.getElementById("animalSheetRows").innerHTML = (preview.animal_sheet_rows || []).map((item) =>
         row([
           item.cage_no || "--",
@@ -3002,9 +3005,11 @@
           item.mating_date || "--",
           item.pubs || "--",
           item.status || "--",
-          item.source || "--"
+          item.source || "--",
+          [item.source_photo_ids && `photo ${item.source_photo_ids}`, item.card_snapshot_ids && `snapshot ${item.card_snapshot_ids}`, item.raw_note_lines && `raw ${item.raw_note_lines}`].filter(Boolean).join(" / ") || "--",
+          item.uncertainty || "--"
         ])
-      ).join("") || row(["No animal sheet preview rows yet", "", "", "", "", "", "", "", "", ""]);
+      ).join("") || row(["No animal sheet preview rows yet", "", "", "", "", "", "", "", "", "", "", ""]);
       document.getElementById("exportBlockerRows").innerHTML = blockers.map((item) =>
         row([
           item.issue,
@@ -3539,6 +3544,34 @@
           `Draft filled from ${result.photo_filename}; confidence ${result.draft?.confidence ?? "--"}. Review uncertain fields: ${uncertain}.`;
       } catch (error) {
         message.textContent = `AI draft unavailable: ${error.message}`;
+      }
+    });
+    document.getElementById("aiExtractButton").addEventListener("click", async () => {
+      const photoId = document.getElementById("transcriptionPhotoId").value;
+      const message = document.getElementById("aiDraftMessage");
+      if (!photoId) {
+        message.textContent = "Choose a source photo first.";
+        return;
+      }
+      const approved = window.confirm(
+        "Extract cage-card values and save them as reviewable parsed evidence by sending only this selected source photo and active assigned strain names to the external inference service?"
+      );
+      if (!approved) {
+        message.textContent = "AI extraction cancelled; no external inference request was sent.";
+        return;
+      }
+      message.textContent = "Extracting cage-card values and saving a review item...";
+      try {
+        const result = await api(`/api/photos/${encodeURIComponent(photoId)}/ai-extract-transcription`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approved_external_inference: true, detail: "low" })
+        });
+        message.textContent =
+          `Saved extracted review ${result.parse_id}; ${result.created_note_items} note line(s), confidence ${result.draft_confidence ?? "--"}.`;
+        await refresh();
+      } catch (error) {
+        message.textContent = `AI extraction unavailable: ${error.message}`;
       }
     });
     document.getElementById("saveAiKeyButton").addEventListener("click", async () => {

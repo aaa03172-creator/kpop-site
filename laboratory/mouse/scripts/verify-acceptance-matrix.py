@@ -27,6 +27,7 @@ def main() -> None:
 
     evidence_checks = {
         "A01": ["Photo image endpoint should return the preserved raw upload bytes"],
+        "A02": ["AI extraction should save parsed note evidence", "Extract & Save Review"],
         "A03": ["created_mouse_candidates", "Manual photo transcription should stay parsed/intermediate"],
         "A04": ["/api/card-snapshots", "card_snapshot_id"],
         "A06": ["Review Note Evidence", "review_note_summary", "image_url"],
