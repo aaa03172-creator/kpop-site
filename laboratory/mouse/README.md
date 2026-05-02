@@ -132,12 +132,13 @@ The browser UI has matching buttons: `Download Separation XLSX` and `Download An
 Legacy workbook rows can be parsed into reviewable JSON with:
 
 ```powershell
+npm run inspect:sources -- --workbook "path\to\animal sheet.xlsx" --photo-folder "path\to\latest cage photos"
 python scripts/parse_legacy_workbooks.py "path\to\animal sheet.xlsx" --kind animal --out fixtures\legacy_animal.json
 python scripts/parse_legacy_workbooks.py "path\to\separation.xlsx" --kind separation --out fixtures\legacy_separation.json
 npm run parse:legacy -- "path\to\animal sheet.xlsx" --kind animal
 ```
 
-The parser treats predecessor Excel files as `export or view` snapshots, keeps raw values and source-cell references, and does not write canonical mouse state. Parsed rows are `candidate` review inputs only; photo-backed cage-card records, accepted note lines, and correction history remain the stronger continuity evidence.
+The inspection helper lists workbook sheet shapes, compact sample rows, photo dimensions, and local file timestamps before any parse/import decision. The parser treats predecessor Excel files as `export or view` snapshots, keeps raw values and source-cell references, and does not write canonical mouse state. Parsed rows are `candidate` review inputs only; newer photo-backed cage-card records, accepted note lines, and correction history remain the stronger continuity evidence.
 
 ## MVP Non-Goals
 

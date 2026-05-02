@@ -34,3 +34,14 @@ def save_upload(file: UploadFile, photo_id: str) -> Path:
     with target.open("wb") as out:
         shutil.copyfileobj(file.file, out)
     return target
+
+
+def save_legacy_workbook(file: UploadFile, workbook_id: str) -> Path:
+    ensure_data_dirs()
+    day = datetime.now().strftime("%Y%m%d")
+    target_dir = DATA_DIR / "legacy_workbooks" / day
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"{workbook_id}{safe_suffix(file.filename or '')}"
+    with target.open("wb") as out:
+        shutil.copyfileobj(file.file, out)
+    return target
