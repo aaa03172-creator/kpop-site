@@ -524,6 +524,7 @@ def main() -> None:
                 assert_true("Evidence Reconciliation" in index_html, "Local UI should expose photo/workbook reconciliation.")
                 assert_true("Evidence Comparison" in index_html, "Local UI should expose photo/workbook comparison.")
                 assert_true("evidenceComparisonRows" in index_html, "Local UI should render evidence comparison rows.")
+                assert_true("comparisonReviewButton" in index_html, "Local UI should create comparison review candidates explicitly.")
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -797,6 +798,44 @@ def main() -> None:
                 assert_true(
                     client.get("/api/mice").json() == mice_before_comparison,
                     "Evidence comparison should not write canonical mouse state.",
+                )
+                comparison_review = client.post("/api/evidence-comparison/review-candidates")
+                assert_true(
+                    comparison_review.status_code == 200,
+                    f"Could not create evidence comparison review candidates: {comparison_review.text}",
+                )
+                comparison_review_payload = comparison_review.json()
+                assert_true(
+                    comparison_review_payload["boundary"] == "review item",
+                    "Evidence comparison review candidate creation should stay in the review layer.",
+                )
+                assert_true(
+                    comparison_review_payload["created_review_items"] >= 1,
+                    "Evidence comparison mismatches should create review candidates.",
+                )
+                comparison_review_ids = set(comparison_review_payload["review_ids"])
+                review_items_after_comparison = client.get("/api/review-items").json()
+                comparison_review_items = [
+                    item
+                    for item in review_items_after_comparison
+                    if item["review_id"] in comparison_review_ids
+                ]
+                assert_true(
+                    comparison_review_items,
+                    (
+                        "Evidence comparison review candidates should be visible in Review Queue. "
+                        f"Expected ids: {sorted(comparison_review_ids)}; "
+                        f"recent ids: {[item['review_id'] for item in review_items_after_comparison[:8]]}"
+                    ),
+                )
+                idempotent_comparison_review = client.post("/api/evidence-comparison/review-candidates")
+                assert_true(
+                    idempotent_comparison_review.json()["created_review_items"] == 0,
+                    "Evidence comparison review candidate creation should be idempotent.",
+                )
+                assert_true(
+                    client.get("/api/mice").json() == mice_before_comparison,
+                    "Evidence comparison review candidate creation should not write canonical mouse state.",
                 )
                 created = client.post(
                     "/api/assigned-strains",
