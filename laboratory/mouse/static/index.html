@@ -820,6 +820,22 @@
         <button id="offspringButton" type="button">Create Offspring</button>
       </div>
       <p class="muted" id="offspringMessage"></p>
+      <div class="form-grid">
+        <label>
+          Litter
+          <select id="weanLitter"></select>
+        </label>
+        <label>
+          Weaning date
+          <input id="weanDate" type="text" placeholder="2026-05-23">
+        </label>
+        <label>
+          Weaned count
+          <input id="weanCount" type="text" placeholder="6">
+        </label>
+        <button id="weanButton" type="button">Complete Weaning</button>
+      </div>
+      <p class="muted" id="weanMessage"></p>
     </section>
 
     <section class="full">
@@ -1418,6 +1434,9 @@
       document.getElementById("offspringLitter").innerHTML = litters.map((litter) =>
         `<option value="${escapeHtml(litter.litter_id)}">${escapeHtml(litter.litter_label)}</option>`
       ).join("");
+      document.getElementById("weanLitter").innerHTML = litters.map((litter) =>
+        `<option value="${escapeHtml(litter.litter_id)}">${escapeHtml(litter.litter_label)}</option>`
+      ).join("");
       document.getElementById("offspringCage").innerHTML = '<option value="">--</option>' + cages.map((cage) =>
         `<option value="${escapeHtml(cage.cage_id)}">${escapeHtml(cage.cage_label)}</option>`
       ).join("");
@@ -1758,6 +1777,29 @@
       document.getElementById("offspringCount").value = "";
       document.getElementById("offspringPrefix").value = "";
       document.getElementById("offspringStartNumber").value = "";
+      await refresh();
+    });
+
+    document.getElementById("weanButton").addEventListener("click", async () => {
+      const litterId = document.getElementById("weanLitter").value;
+      if (!litterId) {
+        document.getElementById("weanMessage").textContent = "Choose a litter first.";
+        return;
+      }
+      const countText = document.getElementById("weanCount").value.trim();
+      const weaned = await api(`/api/litters/${litterId}/wean`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          weaning_date: document.getElementById("weanDate").value.trim(),
+          number_weaned: countText ? Number(countText) : null,
+          note: "Completed from local Breeding / Litter View."
+        })
+      });
+      document.getElementById("weanMessage").textContent =
+        `Weaned ${weaned.number_weaned} mice; source evidence ${weaned.source_record_id}.`;
+      document.getElementById("weanDate").value = "";
+      document.getElementById("weanCount").value = "";
       await refresh();
     });
 

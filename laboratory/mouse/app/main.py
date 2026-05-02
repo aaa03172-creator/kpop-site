@@ -154,6 +154,12 @@ class LitterOffspringCreate(BaseModel):
     note: str = ""
 
 
+class LitterWeanCreate(BaseModel):
+    weaning_date: str = ""
+    number_weaned: int | None = Field(default=None, ge=0)
+    note: str = ""
+
+
 class MouseCageMove(BaseModel):
     cage_id: str = Field(min_length=1)
     note: str = ""
@@ -2117,6 +2123,136 @@ def create_litter_offspring(litter_id: str, payload: LitterOffspringCreate) -> d
         "created_mice": created,
         "source_record_id": source_record_id,
         "created_at": now,
+    }
+
+
+@app.post("/api/litters/{litter_id}/wean")
+def wean_litter(litter_id: str, payload: LitterWeanCreate) -> dict[str, Any]:
+    now = utc_now()
+    weaning_date = payload.weaning_date or now[:10]
+    raw_payload = payload.model_dump_json()
+    with connection() as conn:
+        litter = conn.execute(
+            """
+            SELECT l.litter_id, l.litter_label, l.mating_id, l.birth_date,
+                   l.number_born, l.number_alive, l.number_weaned, l.weaning_date,
+                   l.status, m.mating_label
+            FROM litter_registry l
+            JOIN mating_registry m ON m.mating_id = l.mating_id
+            WHERE l.litter_id = ?
+            """,
+            (litter_id,),
+        ).fetchone()
+        if litter is None:
+            raise HTTPException(status_code=404, detail="Litter not found.")
+        if litter["status"] == "weaned":
+            raise HTTPException(status_code=409, detail="Litter is already weaned.")
+
+        offspring_rows = conn.execute(
+            """
+            SELECT mouse_id, display_id, status
+            FROM mouse_master
+            WHERE litter_id = ?
+            ORDER BY display_id COLLATE NOCASE
+            """,
+            (litter_id,),
+        ).fetchall()
+        requested_count = payload.number_weaned
+        if requested_count is None:
+            requested_count = len(offspring_rows) if offspring_rows else (litter["number_alive"] or litter["number_born"] or 0)
+        if offspring_rows and requested_count > len(offspring_rows):
+            raise HTTPException(status_code=409, detail="Weaned count exceeds generated offspring records.")
+
+        source_record_id = create_source_record(
+            conn,
+            source_type="manual_entry",
+            source_label=f"Manual litter weaning: {litter['litter_label']}",
+            raw_payload=raw_payload,
+            note="Weaning completion entered from local Breeding / Litter View.",
+        )
+        before = dict(litter)
+        selected_offspring = offspring_rows[:requested_count]
+        conn.execute(
+            """
+            UPDATE litter_registry
+            SET number_weaned = ?,
+                weaning_date = ?,
+                status = 'weaned',
+                updated_at = ?
+            WHERE litter_id = ?
+            """,
+            (requested_count, weaning_date, now, litter_id),
+        )
+        for offspring in selected_offspring:
+            conn.execute(
+                """
+                UPDATE mouse_master
+                SET status = CASE WHEN status IN ('weaning_pending', 'pre_weaning') THEN 'active' ELSE status END,
+                    next_action = CASE WHEN next_action = 'weaning_due' THEN 'sample_needed' ELSE next_action END,
+                    updated_at = ?
+                WHERE mouse_id = ?
+                """,
+                (now, offspring["mouse_id"]),
+            )
+            conn.execute(
+                """
+                INSERT INTO mouse_event
+                    (event_id, mouse_id, event_type, event_date, related_entity_type,
+                     related_entity_id, source_record_id, details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("event"),
+                    offspring["mouse_id"],
+                    "weaned",
+                    weaning_date,
+                    "litter",
+                    litter_id,
+                    source_record_id,
+                    json.dumps(
+                        {
+                            "display_id": offspring["display_id"],
+                            "litter_label": litter["litter_label"],
+                            "mating_label": litter["mating_label"],
+                            "previous_status": offspring["status"],
+                            "note": payload.note,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    now,
+                ),
+            )
+        after = {
+            "litter_id": litter_id,
+            "status": "weaned",
+            "number_weaned": requested_count,
+            "weaning_date": weaning_date,
+            "source_record_id": source_record_id,
+            "weaned_mouse_ids": [row["mouse_id"] for row in selected_offspring],
+        }
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "litter_weaned",
+                litter_id,
+                json.dumps(before, ensure_ascii=False),
+                json.dumps(after, ensure_ascii=False),
+                now,
+            ),
+        )
+
+    return {
+        "litter_id": litter_id,
+        "status": "weaned",
+        "number_weaned": requested_count,
+        "weaning_date": weaning_date,
+        "weaned_mouse_count": len(selected_offspring),
+        "source_record_id": source_record_id,
+        "updated_at": now,
     }
 
 
