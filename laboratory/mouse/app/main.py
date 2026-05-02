@@ -527,6 +527,92 @@ def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -
     return correction_id
 
 
+def create_canonical_candidate_draft(
+    conn: Any,
+    *,
+    review_id: str,
+    parse_id: str,
+    created_at: str,
+) -> str | None:
+    existing = conn.execute(
+        """
+        SELECT candidate_id
+        FROM canonical_candidate
+        WHERE review_id = ?
+        """,
+        (review_id,),
+    ).fetchone()
+    if existing is not None:
+        return existing["candidate_id"]
+
+    review = conn.execute(
+        """
+        SELECT review_id, current_value, suggested_value, review_reason
+        FROM review_queue
+        WHERE review_id = ?
+        """,
+        (review_id,),
+    ).fetchone()
+    if review is None:
+        return None
+
+    current_value = json_object(review["current_value"])
+    suggested_value = json_object(review["suggested_value"])
+    manual = current_value.get("manual") if isinstance(current_value.get("manual"), dict) else current_value
+    legacy = current_value.get("legacy") if isinstance(current_value.get("legacy"), dict) else suggested_value
+    legacy_summary = legacy.get("summary") if isinstance(legacy.get("summary"), dict) else {}
+    proposed = {
+        "display_id": manual.get("display_id") or legacy_summary.get("display_id") or "",
+        "strain": manual.get("strain") or legacy_summary.get("strain") or "",
+        "dob": manual.get("dob") or legacy_summary.get("dob") or "",
+        "count": manual.get("count_raw") or manual.get("count") or legacy_summary.get("count_raw") or legacy_summary.get("count") or "",
+        "manual": manual,
+        "legacy": legacy,
+        "review_reason": review["review_reason"],
+        "boundary": "review item",
+        "note": "Draft only. Does not write mouse_master or other canonical colony tables.",
+    }
+    candidate_id = new_id("candidate")
+    conn.execute(
+        """
+        INSERT INTO canonical_candidate
+            (candidate_id, review_id, parse_id, legacy_row_id, proposed_mouse_display_id,
+             proposed_strain, proposed_dob, proposed_count, candidate_payload, status,
+             created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            candidate_id,
+            review_id,
+            parse_id,
+            str(legacy.get("legacy_row_id") or ""),
+            str(proposed["display_id"] or ""),
+            str(proposed["strain"] or ""),
+            str(proposed["dob"] or ""),
+            str(proposed["count"] or ""),
+            json.dumps(proposed, ensure_ascii=False),
+            "draft",
+            created_at,
+            created_at,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id("action"),
+            "canonical_candidate_draft_created",
+            candidate_id,
+            None,
+            json.dumps({"review_id": review_id, "parse_id": parse_id, "boundary": "review item"}, ensure_ascii=False),
+            created_at,
+        ),
+    )
+    return candidate_id
+
+
 @app.post("/api/corrections")
 def create_correction(payload: CorrectionCreate) -> dict[str, Any]:
     corrected_at = utc_now()
@@ -534,6 +620,28 @@ def create_correction(payload: CorrectionCreate) -> dict[str, Any]:
         correction_id = record_correction(conn, payload, corrected_at)
 
     return {"correction_id": correction_id, "corrected_at": corrected_at}
+
+
+@app.get("/api/canonical-candidates")
+def list_canonical_candidates() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT candidate_id, review_id, parse_id, legacy_row_id,
+                   proposed_mouse_display_id, proposed_strain, proposed_dob,
+                   proposed_count, candidate_payload, status, created_at, updated_at
+            FROM canonical_candidate
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+    result = []
+    for row in rows:
+        payload = dict(row)
+        payload["candidate_payload"] = json_object(payload.get("candidate_payload"))
+        payload["boundary"] = "review item"
+        payload["source_layer"] = "review item"
+        result.append(payload)
+    return result
 
 
 @app.get("/api/mouse-events")
@@ -786,7 +894,6 @@ def build_evidence_comparison_payload(conn: Any) -> dict[str, Any]:
         FROM legacy_workbook_row row
         LEFT JOIN legacy_workbook_import legacy ON legacy.legacy_import_id = row.legacy_import_id
         ORDER BY legacy.imported_at DESC, row.source_row_number
-        LIMIT 300
         """
     ).fetchall()
 
@@ -813,7 +920,7 @@ def build_evidence_comparison_payload(conn: Any) -> dict[str, Any]:
         ranked = []
         for legacy in legacy_candidates:
             score, matched, mismatched = comparison_score(manual_summary, legacy["summary"])
-            if score > 0:
+            if score >= 2:
                 ranked.append((score, matched, mismatched, legacy))
         ranked.sort(key=lambda item: item[0], reverse=True)
         best = ranked[0] if ranked else None
@@ -850,8 +957,28 @@ def build_evidence_comparison_payload(conn: Any) -> dict[str, Any]:
                 "detail": detail,
                 "review_required": status != "exact_match",
                 "review_id": review_id,
+                "review_status": "not_created" if status != "exact_match" else "not_required",
             }
         )
+
+    review_ids = [comparison["review_id"] for comparison in comparisons if comparison.get("review_required")]
+    if review_ids:
+        placeholders = ",".join("?" for _ in review_ids)
+        review_rows = conn.execute(
+            f"""
+            SELECT review_id, status, severity, issue
+            FROM review_queue
+            WHERE review_id IN ({placeholders})
+            """,
+            review_ids,
+        ).fetchall()
+        reviews_by_id = {row["review_id"]: dict(row) for row in review_rows}
+        for comparison in comparisons:
+            review = reviews_by_id.get(comparison["review_id"])
+            if review:
+                comparison["review_status"] = review["status"]
+                comparison["review_severity"] = review["severity"]
+                comparison["review_issue"] = review["issue"]
 
     return {
         "boundary": "export or view",
@@ -1927,6 +2054,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
                 detail="Correction entity type, entity id, and field name are required when recording a review correction.",
             )
         before = dict(existing)
+        canonical_candidate_id = None
         after = {
             "status": "resolved",
             "resolved_value": payload.resolved_value,
@@ -2002,6 +2130,13 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
                         resolved_at,
                     ),
                 )
+        if legacy_decision == "map_to_canonical_candidate":
+            canonical_candidate_id = create_canonical_candidate_draft(
+                conn,
+                review_id=review_id,
+                parse_id=existing["parse_id"],
+                created_at=resolved_at,
+            )
         if all(correction_identity_fields):
             correction_id = record_correction(
                 conn,
@@ -2025,6 +2160,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "resolved_value": payload.resolved_value,
         "legacy_decision": legacy_decision,
         "legacy_row_review_status": legacy_row_review_status,
+        "canonical_candidate_id": canonical_candidate_id,
         "correction_id": correction_id,
     }
 

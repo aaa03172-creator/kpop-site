@@ -362,6 +362,7 @@ def main() -> None:
                 "source_record",
                 "strain_registry",
                 "correction_log",
+                "canonical_candidate",
                 "export_log",
                 "mouse_event",
                 "genotyping_record",
@@ -525,6 +526,9 @@ def main() -> None:
                 assert_true("Evidence Comparison" in index_html, "Local UI should expose photo/workbook comparison.")
                 assert_true("evidenceComparisonRows" in index_html, "Local UI should render evidence comparison rows.")
                 assert_true("comparisonReviewButton" in index_html, "Local UI should create comparison review candidates explicitly.")
+                assert_true("Review state" in index_html, "Local UI should show whether comparison reviews are open, resolved, or not created.")
+                assert_true("Canonical Candidate Drafts" in index_html, "Local UI should expose canonical candidate drafts.")
+                assert_true("canonicalCandidateRows" in index_html, "Local UI should render canonical candidate drafts.")
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -792,8 +796,12 @@ def main() -> None:
                 )
                 first_comparison = comparison_payload["comparisons"][0]
                 assert_true(
-                    {"source_layer", "manual_summary", "status", "detail"}.issubset(first_comparison),
+                    {"source_layer", "manual_summary", "status", "detail", "review_required", "review_status"}.issubset(first_comparison),
                     "Evidence comparison rows should expose review-view context.",
+                )
+                assert_true(
+                    first_comparison["review_status"] in {"not_created", "not_required", "open", "resolved"},
+                    "Evidence comparison rows should expose actionable review state.",
                 )
                 assert_true(
                     client.get("/api/mice").json() == mice_before_comparison,
@@ -828,6 +836,16 @@ def main() -> None:
                         f"recent ids: {[item['review_id'] for item in review_items_after_comparison[:8]]}"
                     ),
                 )
+                comparison_after_review = client.get("/api/evidence-comparison").json()
+                comparison_review_states = {
+                    item["review_id"]: item["review_status"]
+                    for item in comparison_after_review["comparisons"]
+                    if item["review_id"] in comparison_review_ids
+                }
+                assert_true(
+                    comparison_review_states and set(comparison_review_states.values()) == {"open"},
+                    "Evidence comparison rows should reflect Review Queue state after candidate creation.",
+                )
                 idempotent_comparison_review = client.post("/api/evidence-comparison/review-candidates")
                 assert_true(
                     idempotent_comparison_review.json()["created_review_items"] == 0,
@@ -836,6 +854,50 @@ def main() -> None:
                 assert_true(
                     client.get("/api/mice").json() == mice_before_comparison,
                     "Evidence comparison review candidate creation should not write canonical mouse state.",
+                )
+                draft_candidates_before = client.get("/api/canonical-candidates").json()
+                mapped_review_id = comparison_review_payload["review_ids"][0]
+                mapped_review_item = next(item for item in comparison_review_items if item["review_id"] == mapped_review_id)
+                mapped_review = client.post(
+                    f"/api/review-items/{mapped_review_id}/resolve",
+                    json={
+                        "resolution_note": "Map reviewed photo-vs-Excel comparison into a draft candidate.",
+                        "resolved_value": "draft candidate",
+                        "legacy_decision": "map_to_canonical_candidate",
+                    },
+                )
+                assert_true(mapped_review.status_code == 200, f"Could not map comparison review: {mapped_review.text}")
+                mapped_payload = mapped_review.json()
+                assert_true(
+                    mapped_payload["canonical_candidate_id"],
+                    "Mapping a comparison review should create a canonical candidate draft.",
+                )
+                draft_candidates_after = client.get("/api/canonical-candidates").json()
+                assert_true(
+                    len(draft_candidates_after) == len(draft_candidates_before) + 1,
+                    "Canonical candidate draft list should include the mapped comparison review.",
+                )
+                created_candidate = next(
+                    item for item in draft_candidates_after
+                    if item["candidate_id"] == mapped_payload["canonical_candidate_id"]
+                )
+                assert_true(
+                    created_candidate["status"] == "draft"
+                    and created_candidate["review_id"] == mapped_review_id,
+                    "Canonical candidate should remain a draft linked to the resolved review.",
+                )
+                assert_true(
+                    created_candidate["boundary"] == "review item"
+                    and created_candidate["source_layer"] == "review item",
+                    "Canonical candidate drafts should be explicitly classified as review-layer records.",
+                )
+                assert_true(
+                    created_candidate["parse_id"] == mapped_review_item["parse_id"],
+                    "Canonical candidate drafts should retain parse traceability.",
+                )
+                assert_true(
+                    client.get("/api/mice").json() == mice_before_comparison,
+                    "Mapping a comparison review should not write canonical mouse state.",
                 )
                 created = client.post(
                     "/api/assigned-strains",
