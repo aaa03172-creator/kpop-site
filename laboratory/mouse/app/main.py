@@ -115,6 +115,8 @@ class PhotoManualTranscriptionCreate(BaseModel):
     card_type: str = "Separated"
     raw_strain: str = ""
     matched_strain: str = ""
+    sex_raw: str = ""
+    id_raw: str = ""
     dob_raw: str = ""
     dob_normalized: str = ""
     mouse_count: str = ""
@@ -346,6 +348,8 @@ def ai_draft_schema() -> dict[str, Any]:
             "card_type": {"type": "string", "enum": ["Separated", "Mating", "unknown"]},
             "raw_strain": {"type": "string"},
             "matched_strain": {"type": "string"},
+            "sex_raw": {"type": "string"},
+            "id_raw": {"type": "string"},
             "dob_raw": {"type": "string"},
             "dob_normalized": {"type": "string"},
             "mouse_count": {"type": "string"},
@@ -371,6 +375,8 @@ def ai_draft_schema() -> dict[str, Any]:
             "card_type",
             "raw_strain",
             "matched_strain",
+            "sex_raw",
+            "id_raw",
             "dob_raw",
             "dob_normalized",
             "mouse_count",
@@ -410,6 +416,8 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
         "card_type": card_type,
         "raw_strain": str(draft.get("raw_strain") or ""),
         "matched_strain": str(draft.get("matched_strain") or ""),
+        "sex_raw": str(draft.get("sex_raw") or ""),
+        "id_raw": str(draft.get("id_raw") or ""),
         "dob_raw": str(draft.get("dob_raw") or ""),
         "dob_normalized": str(draft.get("dob_normalized") or ""),
         "mouse_count": str(draft.get("mouse_count") or ""),
@@ -466,8 +474,13 @@ def create_photo_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCrea
                         "type": "input_text",
                         "text": (
                             "Read this mouse cage card photo. Return only JSON matching the schema. "
-                            "Fields: card_type, raw_strain, matched_strain, dob_raw, dob_normalized, "
-                            "mouse_count, notes. Notes should preserve each visible mouse ID or date/event line. "
+                            "Fields: card_type, raw_strain, matched_strain, sex_raw, id_raw, dob_raw, "
+                            "dob_normalized, mouse_count, notes. sex_raw is the visible Sex field and may "
+                            "include symbols such as male/female marks, mixed, or unclear handwriting. id_raw "
+                            "is the visible I.D field, not the internal database id. Notes should preserve each "
+                            "visible mouse ID, date/event line, or numeric-only temporary label line. "
+                            "For numeric-only post-separation labels, keep the raw numbers as notes and mark "
+                            "meaning as unlabeled_numeric_note rather than inventing mouse IDs. "
                             "Strike marks: none, single, double, unclear. "
                             f"Assigned strain scope for matching only: {json.dumps(assigned_scope, ensure_ascii=False)}"
                         ),
@@ -1764,6 +1777,8 @@ def manual_transcription_summary(record: dict[str, Any]) -> dict[str, Any]:
     notes = record.get("notes") if isinstance(record.get("notes"), list) else []
     return {
         "strain": record.get("matchedStrain") or record.get("rawStrain") or "",
+        "sex": record.get("sexRaw") or "",
+        "id": record.get("idRaw") or "",
         "dob": record.get("dobRaw") or record.get("dobNormalized") or "",
         "count": first_count(record.get("mouseCount")) or len(notes) or None,
         "count_raw": record.get("mouseCount") or "",
@@ -2009,6 +2024,22 @@ def interpreted_status(card_type: str, strike_status: str) -> str:
 
 def parse_note_line(raw_line: str, card_type: str) -> dict[str, Any]:
     line = str(raw_line or "").strip()
+    numeric_tokens = re.findall(r"\d+", line)
+    numeric_only = bool(numeric_tokens) and re.fullmatch(r"[\d\s,./\\-]+", line)
+    if numeric_only and not re.search(r"\d{2,4}[./-]\d{1,2}[./-]\d{1,2}", line):
+        return {
+            "parsed_type": "unlabeled_numeric_note",
+            "parsed_mouse_display_id": None,
+            "parsed_ear_label_raw": None,
+            "parsed_ear_label_code": None,
+            "parsed_ear_label_confidence": None,
+            "parsed_ear_label_review_status": "needs_review",
+            "parsed_event_date": None,
+            "parsed_count": None,
+            "confidence": 0.5,
+            "needs_review": 1,
+        }
+
     litter_match = re.search(r"(\d{2,4}[./-]\d{1,2}[./-]\d{1,2})\s*[-\u2013]\s*(\d+)\s*p?", line, re.IGNORECASE)
     if litter_match:
         return {
@@ -2145,6 +2176,11 @@ def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict
         strike_status = str(note.get("strike") or "none") if isinstance(note, dict) else "none"
         parsed = parse_note_line(raw_line, card_type)
         status_from_strike = interpreted_status(card_type, strike_status)
+        interpreted = (
+            "needs_label_review"
+            if parsed["parsed_type"] == "unlabeled_numeric_note"
+            else status_from_strike if parsed["parsed_type"] != "unknown" else "unknown"
+        )
         note_item_id = f"note_{parse_id}_{index}"
         conn.execute(
             """
@@ -2163,7 +2199,7 @@ def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict
                 raw_line,
                 strike_status,
                 parsed["parsed_type"],
-                status_from_strike if parsed["parsed_type"] != "unknown" else "unknown",
+                interpreted,
                 parsed["parsed_mouse_display_id"],
                 parsed["parsed_ear_label_raw"],
                 parsed["parsed_ear_label_code"],
@@ -2199,6 +2235,28 @@ def write_note_items_and_mouse_candidates(conn: Any, parse_id: str, record: dict
                 ),
             )
             ear_review_count += 1
+
+        if parsed["parsed_type"] == "unlabeled_numeric_note":
+            review_id = f"review_unlabeled_numeric_{note_item_id}"
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value, suggested_value,
+                     review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    review_id,
+                    parse_id,
+                    "Medium",
+                    "Unlabeled numeric note needs review",
+                    raw_line,
+                    "Confirm whether these are temporary labels, count-only notes, or mouse IDs before export/canonical writes.",
+                    f"Note item {note_item_id} contains only numbers. Preserve it as raw note evidence until the separated cage is labeled.",
+                    "open",
+                    utc_now(),
+                ),
+            )
 
         if write_mouse and parsed["parsed_type"] == "mouse_item" and parsed["parsed_mouse_display_id"]:
             display_id = str(parsed["parsed_mouse_display_id"])
@@ -2840,6 +2898,8 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             "type": payload.card_type or "Separated",
             "rawStrain": payload.raw_strain,
             "matchedStrain": payload.matched_strain or payload.raw_strain,
+            "sexRaw": payload.sex_raw,
+            "idRaw": payload.id_raw,
             "dobRaw": payload.dob_raw,
             "dobNormalized": payload.dob_normalized,
             "mouseCount": payload.mouse_count,

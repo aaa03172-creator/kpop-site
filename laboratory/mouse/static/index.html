@@ -1241,6 +1241,14 @@
           <input id="transcriptionRawStrain" type="text" placeholder="ApoM Tg/Tg">
         </label>
         <label>
+          Sex
+          <input id="transcriptionSexRaw" type="text" placeholder="♂, ♀, mixed, or unclear">
+        </label>
+        <label>
+          I.D
+          <input id="transcriptionIdRaw" type="text" placeholder="MT, Atg, or blank">
+        </label>
+        <label>
           DOB
           <input id="transcriptionDobRaw" type="text" placeholder="25.10.20-28">
         </label>
@@ -1250,7 +1258,7 @@
         </label>
         <label>
           Note lines
-          <textarea id="transcriptionNotes" rows="3" placeholder="MT318 R'&#10;MT322 L'&#10;26.04.13 - 10p"></textarea>
+          <textarea id="transcriptionNotes" rows="3" placeholder="MT318 R'&#10;MT322 L'&#10;1 2 3 4 5&#10;26.04.13 - 10p"></textarea>
         </label>
         <button id="transcriptionButton" type="button">Save Manual Transcription</button>
         </div>
@@ -2363,6 +2371,8 @@
     function fillTranscriptionDraft(draft) {
       document.getElementById("transcriptionCardType").value = draft.card_type || "unknown";
       document.getElementById("transcriptionRawStrain").value = draft.matched_strain || draft.raw_strain || "";
+      document.getElementById("transcriptionSexRaw").value = draft.sex_raw || "";
+      document.getElementById("transcriptionIdRaw").value = draft.id_raw || "";
       document.getElementById("transcriptionDobRaw").value = draft.dob_raw || draft.dob_normalized || "";
       document.getElementById("transcriptionMouseCount").value = draft.mouse_count || "";
       document.getElementById("transcriptionNotes").value = (draft.notes || [])
@@ -3217,6 +3227,8 @@
           card_type: document.getElementById("transcriptionCardType").value,
           raw_strain: document.getElementById("transcriptionRawStrain").value,
           matched_strain: document.getElementById("transcriptionRawStrain").value,
+          sex_raw: document.getElementById("transcriptionSexRaw").value,
+          id_raw: document.getElementById("transcriptionIdRaw").value,
           dob_raw: document.getElementById("transcriptionDobRaw").value,
           mouse_count: document.getElementById("transcriptionMouseCount").value,
           notes
