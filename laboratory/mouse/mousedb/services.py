@@ -471,12 +471,41 @@ def list_litters(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def wean_litter(conn: sqlite3.Connection, litter_id: str, weaning_date: str | None = None) -> dict[str, Any]:
-    require_row(conn, "litter", "litter_id", litter_id)
+    litter = require_row(conn, "litter", "litter_id", litter_id)
+    if litter["status"] == "weaned":
+        raise ValueError(f"litter is already weaned: {litter_id}")
+    weaned_at = weaning_date or today_iso()
+    offspring = conn.execute(
+        "SELECT * FROM mouse WHERE litter_id = ? ORDER BY display_id, mouse_id",
+        (litter_id,),
+    ).fetchall()
+    weaned_count = len(offspring) if offspring else int(litter["number_alive"] or 0)
     conn.execute(
-        "UPDATE litter SET status = 'weaned', weaning_date = ?, number_weaned = number_alive, updated_at = CURRENT_TIMESTAMP WHERE litter_id = ?",
-        (weaning_date or today_iso(), litter_id),
+        "UPDATE litter SET status = 'weaned', weaning_date = ?, number_weaned = ?, updated_at = CURRENT_TIMESTAMP WHERE litter_id = ?",
+        (weaned_at, weaned_count, litter_id),
     )
-    return show_litter(conn, litter_id)
+    for mouse in offspring:
+        previous_status = mouse["current_status"]
+        new_status = "alive" if previous_status == "weaning_pending" else previous_status
+        if new_status != previous_status:
+            conn.execute(
+                "UPDATE mouse SET current_status = ?, updated_at = CURRENT_TIMESTAMP WHERE mouse_id = ?",
+                (new_status, mouse["mouse_id"]),
+            )
+        event(
+            conn,
+            mouse_id=mouse["mouse_id"],
+            event_type="weaned",
+            event_date=weaned_at,
+            details=f"Weaned from litter {litter_id}",
+            related_entity_type="litter",
+            related_entity_id=litter_id,
+            previous_value=previous_status,
+            new_value=new_status,
+        )
+    result = show_litter(conn, litter_id)
+    result["weaned_mouse_count"] = weaned_count
+    return result
 
 
 def create_litter_mice(conn: sqlite3.Connection, litter_id: str, count: int, strain_id: str, sex: str = "unknown") -> list[dict[str, Any]]:
