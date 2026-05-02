@@ -1785,6 +1785,25 @@
     </section>
 
     <section class="full" data-view="records">
+      <h2>Card Snapshots</h2>
+      <p>Cage-card transcription snapshots remain parsed evidence; corrections update the snapshot summary without overwriting raw photo records.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Photo</th>
+            <th>Card</th>
+            <th>Strain</th>
+            <th>Sex / Count</th>
+            <th>DOB</th>
+            <th>Notes</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="cardSnapshotRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full" data-view="records">
       <h2>Mouse Events</h2>
       <p>Durable mouse history, separate from the latest mouse card state.</p>
       <table>
@@ -2819,7 +2838,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, photos, reviews, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -2835,6 +2854,7 @@
         api("/api/review-items"),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
         api("/api/note-items"),
+        api("/api/card-snapshots"),
         api("/api/mouse-events"),
         api("/api/cages"),
         api("/api/matings"),
@@ -3220,6 +3240,24 @@
           item.needs_review ? "Needs review" : "No"
         ])
       ).join("") || row(["No parsed note evidence yet", "", "", "", "", "", "", "", ""]);
+      document.getElementById("cardSnapshotRows").innerHTML = cardSnapshots.map((snapshot) => {
+        const summary = snapshot.note_summary || {};
+        const noteSummary = [
+          `${summary.note_count || 0} line(s)`,
+          `${summary.mouse_item_count || 0} mouse`,
+          summary.count_note_lines ? `${summary.count_note_total || 0} count-reviewed` : "",
+          summary.needs_review_count ? `${summary.needs_review_count} review` : ""
+        ].filter(Boolean).join(" / ");
+        return row([
+          snapshot.original_filename || snapshot.photo_id || "--",
+          `${snapshot.card_type || "--"} / ${snapshot.card_id_raw || "--"}`,
+          snapshot.matched_strain_text || snapshot.raw_strain_text || "--",
+          `${snapshot.sex_raw || "--"} / ${snapshot.sex_count_raw || snapshot.count_value || "--"}`,
+          snapshot.dob_raw || snapshot.dob_start || "--",
+          noteSummary || "--",
+          `${snapshot.status} / ${snapshot.boundary}`
+        ]);
+      }).join("") || row(["No card snapshots yet", "", "", "", "", "", ""]);
       document.getElementById("eventRows").innerHTML = mouseEvents.map((event) =>
         row([
           event.mouse_id,

@@ -515,6 +515,7 @@ def main() -> None:
                 assert_true("reviewDetailPanel" in index_html and "inspect-review" in index_html, "Review Queue should expose a split list/detail workflow.")
                 assert_true("Colony Records" in index_html, "Local UI should expose mouse records.")
                 assert_true("Parsed Note Evidence" in index_html, "Local UI should expose parsed note evidence.")
+                assert_true("Card Snapshots" in index_html and "cardSnapshotRows" in index_html, "Local UI should expose card transcription snapshots.")
                 assert_true("Strain Registry" in index_html, "Local UI should expose strain registry.")
                 assert_true("Source Evidence" in index_html, "Local UI should expose source evidence.")
                 assert_true("Mouse Events" in index_html, "Local UI should expose mouse events.")
@@ -575,6 +576,12 @@ def main() -> None:
                 assert_true("transcriptionSexRaw" in index_html and "transcriptionIdRaw" in index_html, "Manual transcription should capture raw Sex and I.D card fields.")
                 assert_true("unlabeled" in index_html or "1 2 3 4 5" in index_html, "Manual transcription should make numeric-only temporary labels visible in note entry.")
                 assert_true("note-label-decision" in index_html, "Review UI should expose structured transcription label correction controls.")
+                assert_true(
+                    "Card Snapshots" in index_html
+                    and "cardSnapshotRows" in index_html
+                    and "/api/card-snapshots" in index_html,
+                    "Local UI should expose parsed cage-card snapshots and render them from the card snapshot API.",
+                )
                 assert_true(
                     "photoZoomInButton" in index_html
                     and "photoRotateRightButton" in index_html
@@ -898,6 +905,22 @@ def main() -> None:
                     numeric_resolution_payload["note_label_update"]["boundary"] == "parsed or intermediate result"
                     and numeric_resolution_payload["note_label_update"]["decision"] == "count_note",
                     "Resolving a numeric note label should stay in the parsed/intermediate layer.",
+                )
+                card_snapshots = client.get("/api/card-snapshots").json()
+                assert_true(
+                    card_snapshots
+                    and card_snapshots[0]["boundary"] == "parsed or intermediate result"
+                    and any(item["card_snapshot_id"] == transcription_payload["card_snapshot_id"] for item in card_snapshots),
+                    "Manual transcription should create a parsed card snapshot that remains non-canonical evidence.",
+                )
+                reviewed_snapshot = next(
+                    item for item in card_snapshots
+                    if item["card_snapshot_id"] == transcription_payload["card_snapshot_id"]
+                )
+                assert_true(
+                    reviewed_snapshot["note_summary"].get("count_note_total") == 3
+                    and reviewed_snapshot["status"] in {"review", "reviewed"},
+                    "Resolving a numeric note label should refresh the card snapshot note summary.",
                 )
                 corrected_note_items = client.get("/api/note-items").json()
                 corrected_numeric_note = next(
