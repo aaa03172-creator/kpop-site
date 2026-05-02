@@ -2252,6 +2252,19 @@
 
     function reviewResolutionControls(item) {
       if (!item || item.status !== "open") return escapeHtml(item?.resolution_note || "Resolved");
+      const noteLabelControls = item.issue === "Unlabeled numeric note needs review"
+        ? `
+          <select class="note-label-decision" aria-label="Note label decision">
+            <option value="">No note label correction</option>
+            <option value="count_note">Count note</option>
+            <option value="mouse_item">Mouse ID</option>
+            <option value="reviewed_note">Reviewed note</option>
+            <option value="ignored_note">Ignore line</option>
+          </select>
+          <input class="note-label-mouse-id" type="text" value="" placeholder="Mouse ID if selected" aria-label="Corrected mouse ID">
+          <input class="note-label-count" type="number" min="0" value="" placeholder="Count if selected" aria-label="Corrected count">
+        `
+        : "";
       return `
         <div class="review-actions">
           <select class="review-legacy-decision" aria-label="Legacy decision">
@@ -2262,9 +2275,11 @@
           </select>
           <input class="review-resolved-value" type="text" value="${escapeHtml(item.suggested_value || "")}" aria-label="Resolved value">
           <input class="review-resolution-note" type="text" placeholder="Resolution note required" aria-label="Resolution note">
+          ${noteLabelControls}
           <button class="resolve-review" type="button"
             data-review-id="${escapeHtml(item.review_id)}"
-            data-current-value="${escapeHtml(item.current_value || "")}">Resolve</button>
+            data-current-value="${escapeHtml(item.current_value || "")}"
+            data-note-item-id="${escapeHtml(item.note_item_id || "")}">Resolve</button>
         </div>
       `;
     }
@@ -2998,6 +3013,9 @@
           const note = container.querySelector(".review-resolution-note").value;
           const resolvedValue = container.querySelector(".review-resolved-value").value;
           const legacyDecision = container.querySelector(".review-legacy-decision").value;
+          const noteLabelDecision = container.querySelector(".note-label-decision")?.value || "";
+          const noteLabelMouseId = container.querySelector(".note-label-mouse-id")?.value || "";
+          const noteLabelCountValue = container.querySelector(".note-label-count")?.value || "";
           if (!note || !note.trim()) return;
           await api(`/api/review-items/${button.dataset.reviewId}/resolve`, {
             method: "POST",
@@ -3010,7 +3028,11 @@
               correction_entity_id: button.dataset.reviewId,
               correction_field_name: "reviewed_value",
               correction_before_value: button.dataset.currentValue || "",
-              correction_after_value: resolvedValue || ""
+              correction_after_value: resolvedValue || "",
+              note_item_id: button.dataset.noteItemId || "",
+              note_label_decision: noteLabelDecision,
+              note_label_mouse_id: noteLabelMouseId,
+              note_label_count: noteLabelCountValue ? Number(noteLabelCountValue) : null
             })
           });
           await refresh();

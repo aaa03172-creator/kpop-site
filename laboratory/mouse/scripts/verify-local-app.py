@@ -574,6 +574,7 @@ def main() -> None:
                 assert_true("ai-draft-settings" in index_html, "Local UI should update AI draft settings without storing the key in app records.")
                 assert_true("transcriptionSexRaw" in index_html and "transcriptionIdRaw" in index_html, "Manual transcription should capture raw Sex and I.D card fields.")
                 assert_true("unlabeled" in index_html or "1 2 3 4 5" in index_html, "Manual transcription should make numeric-only temporary labels visible in note entry.")
+                assert_true("note-label-decision" in index_html, "Review UI should expose structured transcription label correction controls.")
                 assert_true(
                     "photoZoomInButton" in index_html
                     and "photoRotateRightButton" in index_html
@@ -872,6 +873,52 @@ def main() -> None:
                     and transcribed_row["note_line_count"] == 3
                     and transcribed_row["next_action"] == "resolve_photo_reviews",
                     "Photo review workbench should expose manual transcription progress and remaining review work.",
+                )
+                numeric_review = next(
+                    item for item in manual_review_items
+                    if item["issue"] == "Unlabeled numeric note needs review"
+                )
+                assert_true(
+                    numeric_review["note_item_id"] and numeric_review["review_note_raw_line"] == "1 2 3",
+                    "Numeric note review items should expose the exact note-line anchor.",
+                )
+                numeric_resolution = client.post(
+                    f"/api/review-items/{numeric_review['review_id']}/resolve",
+                    json={
+                        "resolution_note": "Confirmed numeric-only line is a reviewed count note, not a mouse ID.",
+                        "resolved_value": "3 temporary labels",
+                        "note_item_id": numeric_review["note_item_id"],
+                        "note_label_decision": "count_note",
+                        "note_label_count": 3,
+                    },
+                )
+                assert_true(numeric_resolution.status_code == 200, f"Could not resolve numeric note label: {numeric_resolution.text}")
+                numeric_resolution_payload = numeric_resolution.json()
+                assert_true(
+                    numeric_resolution_payload["note_label_update"]["boundary"] == "parsed or intermediate result"
+                    and numeric_resolution_payload["note_label_update"]["decision"] == "count_note",
+                    "Resolving a numeric note label should stay in the parsed/intermediate layer.",
+                )
+                corrected_note_items = client.get("/api/note-items").json()
+                corrected_numeric_note = next(
+                    item for item in corrected_note_items
+                    if item["note_item_id"] == numeric_review["note_item_id"]
+                )
+                assert_true(
+                    corrected_numeric_note["parsed_type"] == "count_note"
+                    and corrected_numeric_note["parsed_count"] == 3
+                    and corrected_numeric_note["needs_review"] == 0,
+                    "Numeric note label correction should update the note item without inventing a mouse record.",
+                )
+                numeric_corrections = [
+                    item for item in client.get("/api/corrections").json()
+                    if item["entity_type"] == "note_item"
+                    and item["entity_id"] == numeric_review["note_item_id"]
+                    and item["field_name"] == "parsed_label"
+                ]
+                assert_true(
+                    numeric_corrections,
+                    "Numeric note label correction should preserve before/after values in correction_log.",
                 )
                 idempotent_photo_reviews = client.post("/api/photos/review-candidates")
                 assert_true(idempotent_photo_reviews.status_code == 200, "Could not run photo review candidate backfill.")
@@ -1302,11 +1349,12 @@ def main() -> None:
                 assert_true(
                     any(
                         item["raw_line_text"] == "1 2 3"
-                        and item["parsed_type"] == "unlabeled_numeric_note"
-                        and item["needs_review"] == 1
+                        and item["parsed_type"] == "count_note"
+                        and item["parsed_count"] == 3
+                        and item["needs_review"] == 0
                         for item in note_items
                     ),
-                    "Numeric-only post-separation note lines should stay reviewable and should not become mouse IDs.",
+                    "Reviewed numeric-only post-separation note lines should keep raw evidence without becoming mouse IDs.",
                 )
                 assert_true(
                     any(
