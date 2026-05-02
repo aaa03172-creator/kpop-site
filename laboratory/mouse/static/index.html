@@ -672,7 +672,7 @@
     <section>
       <h2>Review Queue</h2>
       <table>
-        <thead><tr><th>Issue</th><th>Severity</th><th>Suggested</th><th>Status</th><th>Action</th></tr></thead>
+        <thead><tr><th>Issue</th><th>Severity</th><th>Evidence</th><th>Source</th><th>Status</th><th>Action</th></tr></thead>
         <tbody id="reviewRows"></tbody>
       </table>
     </section>
@@ -1491,9 +1491,10 @@
       ).join("") || row(["No photos yet", "", "", ""]);
       document.getElementById("reviewRows").innerHTML = reviews.map((item) => `
         <tr>
-          <td>${escapeHtml(item.issue)}</td>
+          <td><strong>${escapeHtml(item.issue)}</strong><br><span class="muted">${escapeHtml(item.review_reason || item.parse_id || "--")}</span></td>
           <td>${escapeHtml(item.severity)}</td>
-          <td>${escapeHtml(item.suggested_value)}</td>
+          <td>${escapeHtml(item.evidence_preview || item.suggested_value || "--")}<br><span class="muted">${escapeHtml(item.note_line_count ? `${item.note_line_count} note lines` : "No note lines")}</span></td>
+          <td>${escapeHtml(item.original_filename || item.source_name || item.photo_id || "--")}</td>
           <td>${escapeHtml(item.status)}</td>
           <td>${
             item.status === "open"
@@ -1501,7 +1502,7 @@
               : escapeHtml(item.resolution_note || "Resolved")
           }</td>
         </tr>
-      `).join("") || row(["No review items", "", "", "", ""]);
+      `).join("") || row(["No review items", "", "", "", "", ""]);
       document.querySelectorAll(".resolve-review").forEach((button) => {
         button.addEventListener("click", async () => {
           const note = window.prompt("Resolution note");
@@ -1819,7 +1820,11 @@
     function blockedExportMessage(detail, fallback) {
       const blockers = (detail.review_blockers || [])
         .slice(0, 3)
-        .map((item) => `${item.issue}${item.parse_id ? ` (${item.parse_id})` : ""}`);
+        .map((item) => {
+          const source = item.original_filename || item.source_name || item.photo_id || item.parse_id || "";
+          const evidence = item.evidence_preview ? `: ${item.evidence_preview}` : "";
+          return `${item.issue}${source ? ` (${source})` : ""}${evidence}`;
+        });
       const suffix = blockers.length ? ` Blockers: ${blockers.join("; ")}.` : "";
       return `${detail.message || fallback}${suffix}`;
     }

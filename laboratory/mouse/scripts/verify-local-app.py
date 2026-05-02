@@ -411,6 +411,7 @@ def main() -> None:
                 assert_true("exportFilenames" in index_html, "Local UI should expose expected workbook filenames.")
                 assert_true("exportBlockerRows" in index_html, "Local UI should expose export blockers.")
                 assert_true("exportLogRows" in index_html, "Local UI should expose export history.")
+                assert_true("Review Queue" in index_html and "Evidence" in index_html, "Local UI should show review evidence context.")
                 assert_true("Mouse Audit Trace" in index_html, "Local UI should expose mouse audit trace view.")
                 assert_true("auditTraceRows" in index_html, "Local UI should render audit trace rows.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
@@ -585,6 +586,14 @@ def main() -> None:
                 review_items = client.get("/api/review-items").json()
                 assert_true(len(review_items) >= 4, "Fixture import should create review and validation items.")
                 assert_true(
+                    any(item["evidence_preview"] and item["note_line_count"] >= 1 for item in review_items),
+                    "Review items should expose source note evidence context.",
+                )
+                assert_true(
+                    any(item["source_name"] or item["photo_id"] or item["original_filename"] for item in review_items),
+                    "Review items should expose source record or photo context.",
+                )
+                assert_true(
                     not any(item["issue"] == "Outside assigned strain scope" for item in review_items),
                     "Assigned ApoM scope should clear stale outside-scope review items for now-accepted rows.",
                 )
@@ -730,7 +739,14 @@ def main() -> None:
                 )
                 assert_true(
                     blocked_payload["review_blockers"]
-                    and {"review_id", "issue", "severity", "review_reason"}.issubset(blocked_payload["review_blockers"][0]),
+                    and {
+                        "review_id",
+                        "issue",
+                        "severity",
+                        "review_reason",
+                        "evidence_preview",
+                        "note_line_count",
+                    }.issubset(blocked_payload["review_blockers"][0]),
                     "Blocked final CSV export should include actionable review blocker details.",
                 )
                 blocked_separation_payload = blocked_separation_xlsx.json()["detail"]

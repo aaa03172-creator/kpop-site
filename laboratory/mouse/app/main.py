@@ -1135,10 +1135,24 @@ def list_review_items() -> list[dict[str, Any]]:
     with connection() as conn:
         rows = conn.execute(
             """
-            SELECT review_id, parse_id, severity, issue, current_value, suggested_value,
-                   review_reason, status, created_at, resolved_at, resolution_note
-            FROM review_queue
-            ORDER BY created_at DESC
+            SELECT review.review_id, review.parse_id, review.severity, review.issue,
+                   review.current_value, review.suggested_value, review.review_reason,
+                   review.status, review.created_at, review.resolved_at, review.resolution_note,
+                   parse.source_name, parse.photo_id, photo.original_filename,
+                   (
+                       SELECT COUNT(*)
+                       FROM card_note_item_log note
+                       WHERE note.parse_id = review.parse_id
+                   ) AS note_line_count,
+                   COALESCE((
+                       SELECT GROUP_CONCAT(note.raw_line_text, ' | ')
+                       FROM card_note_item_log note
+                       WHERE note.parse_id = review.parse_id
+                   ), '') AS evidence_preview
+            FROM review_queue review
+            LEFT JOIN parse_result parse ON parse.parse_id = review.parse_id
+            LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
+            ORDER BY review.created_at DESC
             """
         ).fetchall()
     return [dict(row) for row in rows]
@@ -2654,10 +2668,24 @@ def export_staleness(conn: Any) -> dict[str, Any]:
 def open_review_blockers(conn: Any, limit: int = 10) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
-        SELECT review_id, parse_id, severity, issue, suggested_value, review_reason, created_at
-        FROM review_queue
-        WHERE status = 'open'
-        ORDER BY severity DESC, created_at DESC
+        SELECT review.review_id, review.parse_id, review.severity, review.issue,
+               review.suggested_value, review.review_reason, review.created_at,
+               parse.source_name, parse.photo_id, photo.original_filename,
+               (
+                   SELECT COUNT(*)
+                   FROM card_note_item_log note
+                   WHERE note.parse_id = review.parse_id
+               ) AS note_line_count,
+               COALESCE((
+                   SELECT GROUP_CONCAT(note.raw_line_text, ' | ')
+                   FROM card_note_item_log note
+                   WHERE note.parse_id = review.parse_id
+               ), '') AS evidence_preview
+        FROM review_queue review
+        LEFT JOIN parse_result parse ON parse.parse_id = review.parse_id
+        LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
+        WHERE review.status = 'open'
+        ORDER BY review.severity DESC, review.created_at DESC
         LIMIT ?
         """,
         (limit,),
