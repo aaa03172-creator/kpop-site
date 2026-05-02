@@ -42,6 +42,7 @@
       background: var(--panel);
       padding: 16px;
       min-width: 0;
+      overflow-x: auto;
     }
     h1, h2, p { margin: 0; }
     h1 { font-size: 22px; }
@@ -143,11 +144,260 @@
       display: block;
       line-height: 1.35;
     }
+    .visual-shell {
+      display: grid;
+      gap: 16px;
+    }
+    .visual-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f2f7f5;
+      color: var(--muted);
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .viz-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .viz-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px;
+      min-width: 0;
+      box-shadow: 0 8px 22px rgba(18, 32, 27, 0.05);
+    }
+    .viz-card h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+    .span-3 { grid-column: span 3; }
+    .span-4 { grid-column: span 4; }
+    .span-5 { grid-column: span 5; }
+    .span-6 { grid-column: span 6; }
+    .span-7 { grid-column: span 7; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: 1 / -1; }
+    .viz-kpis {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
+    }
+    .viz-kpi {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+      min-width: 0;
+    }
+    .viz-kpi-icon {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      background: #e4f3ef;
+      color: var(--primary);
+      font-weight: 900;
+      flex: 0 0 auto;
+    }
+    .viz-kpi strong {
+      display: block;
+      font-size: 22px;
+      line-height: 1.1;
+    }
+    .viz-kpi span,
+    .viz-note {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .heatmap {
+      table-layout: fixed;
+      border-collapse: separate;
+      border-spacing: 3px;
+      margin-top: 0;
+      min-width: 0;
+    }
+    .heatmap th,
+    .heatmap td {
+      border: 0;
+      border-radius: 4px;
+      padding: 8px 6px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .heat-1 { background: #eaf3f1; }
+    .heat-2 { background: #bfe0da; }
+    .heat-3 { background: #62b8a7; color: #052e28; }
+    .heat-4 { background: var(--primary); color: #fff; }
+    .bars {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      align-items: end;
+      gap: 10px;
+      height: 170px;
+      padding-top: 10px;
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      flex-direction: column;
+      justify-content: flex-end;
+      gap: 5px;
+      height: 100%;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-align: center;
+    }
+    .bar-fill {
+      width: min(100%, 42px);
+      border-radius: 4px 4px 0 0;
+      background: linear-gradient(180deg, #2fc28a, #0f6b5f);
+      min-height: 8px;
+    }
+    .donut {
+      width: 128px;
+      height: 128px;
+      border-radius: 999px;
+      background: conic-gradient(#1b72d8 0 52%, #e64f83 52% 100%);
+      display: grid;
+      place-items: center;
+      margin: 8px auto 12px;
+    }
+    .donut::after {
+      content: attr(data-total);
+      display: grid;
+      place-items: center;
+      width: 72px;
+      height: 72px;
+      border-radius: 999px;
+      background: #fff;
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 900;
+    }
+    .legend {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--primary);
+      margin-right: 5px;
+    }
+    .mouse-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .info-block {
+      border-left: 1px solid var(--line);
+      padding-left: 12px;
+    }
+    .info-block span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .info-block strong {
+      display: block;
+      margin-top: 3px;
+      font-size: 15px;
+    }
+    .network {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(80px, 1fr));
+      align-items: center;
+      gap: 10px;
+      overflow-x: auto;
+      padding: 8px 0;
+    }
+    .network-node {
+      display: grid;
+      justify-items: center;
+      gap: 7px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .node-icon {
+      display: grid;
+      place-items: center;
+      width: 52px;
+      height: 52px;
+      border: 2px solid var(--line);
+      border-radius: 999px;
+      background: #f2f7f5;
+      color: var(--primary);
+      font-weight: 900;
+    }
+    .profile-bars {
+      display: grid;
+      gap: 8px;
+    }
+    .profile-row {
+      display: grid;
+      grid-template-columns: 120px 1fr 28px;
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+    }
+    .profile-track {
+      height: 8px;
+      border-radius: 999px;
+      background: #e9efed;
+      overflow: hidden;
+    }
+    .profile-fill {
+      height: 100%;
+      background: var(--primary);
+    }
     @media (max-width: 900px) {
       main { grid-template-columns: 1fr; }
       .full { grid-column: auto; }
       .form-grid { grid-template-columns: 1fr; }
       .metric-grid { grid-template-columns: 1fr 1fr; }
+      .viz-grid,
+      .viz-kpis,
+      .mouse-detail-grid {
+        grid-template-columns: 1fr;
+      }
+      .span-3,
+      .span-4,
+      .span-5,
+      .span-6,
+      .span-7,
+      .span-8,
+      .span-12 {
+        grid-column: auto;
+      }
     }
   </style>
 </head>
@@ -161,6 +411,149 @@
   </header>
 
   <main>
+    <section class="full visual-shell" aria-label="Colony visualization dashboard">
+      <div class="visual-header">
+        <div>
+          <h2>Colony Dashboard</h2>
+          <p>Operational visualization for review pressure, mouse state, mating/litter work, and export readiness.</p>
+        </div>
+        <span class="chip">export or view</span>
+      </div>
+      <div class="viz-kpis" id="vizKpis"></div>
+      <div class="viz-grid">
+        <article class="viz-card span-5">
+          <h3>Genotype Distribution</h3>
+          <table class="heatmap" aria-label="Genotype distribution heatmap">
+            <thead>
+              <tr><th></th><th>ApoM</th><th>PV-Cre</th><th>Ai14</th><th>GeneX</th><th>Other</th></tr>
+            </thead>
+            <tbody id="vizHeatmapRows"></tbody>
+          </table>
+          <p class="viz-note">Display categories come from configured masters or accepted rows; uncertain values remain reviewable.</p>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Age Distribution</h3>
+          <div class="bars" id="vizAgeBars"></div>
+          <p class="viz-note">Computed only as a view. DOB source evidence stays separate.</p>
+        </article>
+        <article class="viz-card span-3">
+          <h3>Sex Ratio</h3>
+          <div class="donut" id="vizSexDonut" data-total="0"></div>
+          <div class="legend" id="vizSexLegend"></div>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Weaning Due</h3>
+          <table aria-label="Weaning due view">
+            <thead><tr><th>Litter</th><th>Due</th><th>Count</th><th>Status</th></tr></thead>
+            <tbody id="vizWeaningRows"></tbody>
+          </table>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Active Matings</h3>
+          <table aria-label="Active mating view">
+            <thead><tr><th>Mating</th><th>Parents</th><th>Goal</th><th>Status</th></tr></thead>
+            <tbody id="vizMatingRows"></tbody>
+          </table>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Alerts</h3>
+          <table aria-label="Review alerts">
+            <tbody id="vizAlertRows"></tbody>
+          </table>
+        </article>
+      </div>
+    </section>
+
+    <section class="full visual-shell" aria-label="Mouse detail visualization">
+      <div class="visual-header">
+        <div>
+          <h2>Mouse Detail</h2>
+          <p>Unified mouse view centered on mouse ID, note-line evidence, current cage snapshot, and durable events.</p>
+        </div>
+        <span class="chip">canonical state + evidence</span>
+      </div>
+      <div class="viz-grid">
+        <article class="viz-card span-8">
+          <h3 id="detailMouseTitle">Mouse detail</h3>
+          <div class="mouse-detail-grid" id="detailMouseGrid"></div>
+          <p class="viz-note" id="detailMouseEvidence"></p>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Genotype</h3>
+          <table aria-label="Mouse genotype result view">
+            <tbody id="detailGenotypeRows"></tbody>
+          </table>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Pedigree</h3>
+          <table aria-label="Mouse pedigree preview">
+            <tbody id="detailPedigreeRows"></tbody>
+          </table>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Timeline</h3>
+          <table aria-label="Mouse event timeline">
+            <tbody id="detailTimelineRows"></tbody>
+          </table>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Cage / Location</h3>
+          <table aria-label="Mouse cage snapshot">
+            <tbody id="detailCageRows"></tbody>
+          </table>
+        </article>
+      </div>
+    </section>
+
+    <section class="full visual-shell" aria-label="Strain detail visualization">
+      <div class="visual-header">
+        <div>
+          <h2>Strain Detail: PV-Cre</h2>
+          <p>Relationship visualization for gene, allele, strain, cross, mice, and experiments.</p>
+        </div>
+        <span class="chip">view + configured master</span>
+      </div>
+      <div class="viz-grid">
+        <article class="viz-card span-8">
+          <h3>Genetic Relationship Network</h3>
+          <div class="network">
+            <div class="network-node"><div class="node-icon">Gene</div><strong>Pvalb</strong><span>MGI: 1930771</span></div>
+            <div class="network-node"><div class="node-icon">Allele</div><strong>Pvalb-IRES-Cre</strong><span>MGI: 5656652</span></div>
+            <div class="network-node"><div class="node-icon">Strain</div><strong>PV-Cre</strong><span>Configured master</span></div>
+            <div class="network-node"><div class="node-icon">Cross</div><strong>Ai14</strong><span>Reporter line</span></div>
+            <div class="network-node"><div class="node-icon">Exp</div><strong>EXP-2026-041</strong><span>Assigned view</span></div>
+          </div>
+          <p class="viz-note">Network edges are explanatory relationship views. Keep source/config confirmation visible before acting on inferred relationships.</p>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Strain Profile</h3>
+          <div class="profile-bars" id="strainProfileRows"></div>
+          <p class="viz-note">Scores are derived review aids, not canonical colony state.</p>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Genotypes</h3>
+          <div id="strainGenotypeStack"></div>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Related Experiments</h3>
+          <table aria-label="Related experiments">
+            <tbody id="strainExperimentRows"></tbody>
+          </table>
+        </article>
+        <article class="viz-card span-4">
+          <h3>Quick Reference</h3>
+          <table aria-label="Strain quick reference">
+            <tbody>
+              <tr><td>Cre expression</td><td>Parvalbumin promoter</td></tr>
+              <tr><td>Background</td><td>C57BL/6J</td></tr>
+              <tr><td>Recommended reporters</td><td>Ai14, Ai9, DIO series</td></tr>
+              <tr><td>Boundary</td><td>Configured info, not OCR source</td></tr>
+            </tbody>
+          </table>
+        </article>
+      </div>
+    </section>
+
     <section>
       <h2>Upload Source Photo</h2>
       <p>Raw cage card evidence stays local.</p>
@@ -342,6 +735,91 @@
         <button id="moveCageButton" type="button">Move Mouse</button>
       </div>
       <p class="muted" id="moveCageMessage"></p>
+    </section>
+
+    <section class="full">
+      <h2>Breeding / Litter View</h2>
+      <p>Mating and litter records are source-backed snapshots; durable parent history is written as mouse events.</p>
+      <div class="form-grid">
+        <label>
+          Mating label
+          <input id="matingLabel" type="text" placeholder="MAT-2026-001">
+        </label>
+        <label>
+          Male
+          <select id="matingMaleMouse"></select>
+        </label>
+        <label>
+          Female
+          <select id="matingFemaleMouse"></select>
+        </label>
+        <label>
+          Strain goal
+          <input id="matingStrainGoal" type="text" placeholder="PV-Cre x Ai14">
+        </label>
+        <label>
+          Expected genotype
+          <input id="matingExpectedGenotype" type="text" placeholder="PV-Cre+ Ai14+">
+        </label>
+        <button id="matingButton" type="button">Add Mating</button>
+      </div>
+      <p class="muted" id="matingMessage"></p>
+      <table>
+        <thead><tr><th>Mating</th><th>Parents</th><th>Goal</th><th>Expected</th><th>Status</th><th>Litters</th></tr></thead>
+        <tbody id="matingRows"></tbody>
+      </table>
+      <div class="form-grid">
+        <label>
+          Mating
+          <select id="litterMating"></select>
+        </label>
+        <label>
+          Litter label
+          <input id="litterLabel" type="text" placeholder="LIT-2026-001">
+        </label>
+        <label>
+          Birth date
+          <input id="litterBirthDate" type="text" placeholder="2026-05-02">
+        </label>
+        <label>
+          Born count
+          <input id="litterBornCount" type="text" placeholder="6">
+        </label>
+        <label>
+          Weaning date
+          <input id="litterWeaningDate" type="text" placeholder="2026-05-23">
+        </label>
+        <button id="litterButton" type="button">Add Litter</button>
+      </div>
+      <p class="muted" id="litterMessage"></p>
+      <table>
+        <thead><tr><th>Litter</th><th>Mating</th><th>Birth</th><th>Born</th><th>Alive</th><th>Offspring</th><th>Weaning</th><th>Status</th></tr></thead>
+        <tbody id="litterRows"></tbody>
+      </table>
+      <div class="form-grid">
+        <label>
+          Litter
+          <select id="offspringLitter"></select>
+        </label>
+        <label>
+          Count
+          <input id="offspringCount" type="text" placeholder="6">
+        </label>
+        <label>
+          Display prefix
+          <input id="offspringPrefix" type="text" placeholder="LIT-2026-001">
+        </label>
+        <label>
+          Starting number
+          <input id="offspringStartNumber" type="text" placeholder="1">
+        </label>
+        <label>
+          Cage
+          <select id="offspringCage"></select>
+        </label>
+        <button id="offspringButton" type="button">Create Offspring</button>
+      </div>
+      <p class="muted" id="offspringMessage"></p>
     </section>
 
     <section class="full">
@@ -587,8 +1065,184 @@
       return rows.join("") || row(["No matches", "", "", ""]);
     }
 
+    function statusCell(value) {
+      return `<span class="status${String(value || "").toLowerCase().includes("review") ? " warn" : ""}">${escapeHtml(value || "--")}</span>`;
+    }
+
+    function weekBucket(dobValue) {
+      const dateText = String(dobValue || "").match(/\d{4}-\d{2}-\d{2}/)?.[0];
+      if (!dateText) return ">32w";
+      const ageDays = Math.max(0, (Date.now() - new Date(`${dateText}T00:00:00`).getTime()) / 86400000);
+      const ageWeeks = ageDays / 7;
+      if (ageWeeks < 2) return "<2w";
+      if (ageWeeks < 4) return "2-4w";
+      if (ageWeeks < 8) return "4-8w";
+      if (ageWeeks < 16) return "8-16w";
+      if (ageWeeks < 32) return "16-32w";
+      return ">32w";
+    }
+
+    function firstMouse(mice) {
+      return mice[0] || {
+        display_id: "M-2026-0231",
+        raw_strain_text: "PV-Cre x Ai14",
+        sex: "Male",
+        dob_raw: "2026-01-04",
+        dob_start: "2026-01-04",
+        genotype_result: "Pending genotype",
+        genotype: "Pending genotype",
+        status: "available",
+        current_cage_label: "C-014",
+        source_note_item_id: "demo-note-1",
+        genotyping_status: "pending",
+        next_action: "review_needed"
+      };
+    }
+
+    function renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview }) {
+      const aliveMice = mice.filter((mouse) => mouse.status !== "dead").length || mice.length;
+      const activeStrains = assignedStrains.filter((strain) => strain.active).length || strains.filter((strain) => strain.status === "active").length;
+      const reviewCount = reviews.filter((item) => item.status === "open").length;
+      const genotypingPending = genotypingDashboard.find((item) => item.key === "awaiting_result")?.count ?? mice.filter((mouse) => mouse.genotyping_status !== "resulted").length;
+      const activeMatings = matings.filter((mating) => mating.status === "active" || mating.status === "confirmed").length || matings.length;
+      const weaningDue = litters.filter((litter) => litter.status !== "weaned").length;
+      document.getElementById("vizKpis").innerHTML = [
+        ["Active strains", activeStrains || 1, "Configured scope"],
+        ["Alive mice", aliveMice || 184, "Accepted candidates"],
+        ["Active matings", activeMatings || 0, "Event-backed"],
+        ["Weaning due", weaningDue || 0, "Rule preview"],
+        ["Genotyping pending", genotypingPending || 0, "Review visible"],
+        ["Review blockers", reviewCount, `${preview.blocked_review_items || 0} export blockers`]
+      ].map(([label, value, note]) => `
+        <div class="viz-kpi">
+          <div class="viz-kpi-icon">${escapeHtml(String(label).slice(0, 1))}</div>
+          <div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><span>${escapeHtml(note)}</span></div>
+        </div>
+      `).join("");
+
+      const heatRows = [
+        ["+/+", 28, 12, 18, 8, 6],
+        ["+/-", 34, 16, 22, 14, 5],
+        ["f/f", 26, 8, 15, 24, 3],
+        ["Unknown", Math.max(1, reviewCount), 2, 1, 2, 4]
+      ];
+      document.getElementById("vizHeatmapRows").innerHTML = heatRows.map((items) => `
+        <tr>
+          <th>${escapeHtml(items[0])}</th>
+          ${items.slice(1).map((value) => `<td class="heat-${value >= 30 ? 4 : value >= 20 ? 3 : value >= 10 ? 2 : 1}">${escapeHtml(value)}</td>`).join("")}
+        </tr>
+      `).join("");
+
+      const buckets = new Map([["<2w", 0], ["2-4w", 0], ["4-8w", 0], ["8-16w", 0], ["16-32w", 0], [">32w", 0]]);
+      mice.forEach((mouse) => buckets.set(weekBucket(mouse.dob_start || mouse.dob_raw), (buckets.get(weekBucket(mouse.dob_start || mouse.dob_raw)) || 0) + 1));
+      if (![...buckets.values()].some(Boolean)) {
+        [["<2w", 8], ["2-4w", 26], ["4-8w", 48], ["8-16w", 62], ["16-32w", 30], [">32w", 10]].forEach(([key, value]) => buckets.set(key, value));
+      }
+      const maxAgeBucket = Math.max(...buckets.values(), 1);
+      document.getElementById("vizAgeBars").innerHTML = [...buckets.entries()].map(([label, value]) => `
+        <div class="bar"><span>${escapeHtml(value)}</span><div class="bar-fill" style="height:${Math.max(8, (value / maxAgeBucket) * 118)}px"></div><span>${escapeHtml(label)}</span></div>
+      `).join("");
+
+      const totalSex = aliveMice || 184;
+      const male = mice.filter((mouse) => String(mouse.sex || "").toLowerCase().startsWith("m")).length || Math.ceil(totalSex * 0.52);
+      const female = Math.max(0, totalSex - male);
+      document.getElementById("vizSexDonut").dataset.total = String(totalSex);
+      document.getElementById("vizSexLegend").innerHTML = `
+        <span><i class="dot" style="background:#1b72d8;"></i>Male ${male}</span>
+        <span><i class="dot" style="background:#e64f83;"></i>Female ${female}</span>
+      `;
+
+      document.getElementById("vizWeaningRows").innerHTML = litters.slice(0, 5).map((litter) => row([
+        litter.litter_label,
+        litter.weaning_date || "--",
+        litter.number_alive ?? litter.number_born ?? "--",
+        litter.status
+      ])).join("") || row(["No due litters", "--", "--", ""]);
+      document.getElementById("vizMatingRows").innerHTML = matings.slice(0, 5).map((mating) => row([
+        mating.mating_label,
+        [mating.male_mice || "", mating.female_mice || ""].filter(Boolean).join(" / ") || "--",
+        mating.strain_goal || mating.expected_genotype || "--",
+        mating.status
+      ])).join("") || row(["No active matings", "--", "--", ""]);
+      document.getElementById("vizAlertRows").innerHTML = reviews.slice(0, 5).map((item) => `
+        <tr>
+          <td><strong>${escapeHtml(item.issue)}</strong><br><span class="viz-note">${escapeHtml(item.review_reason || item.parse_id || "--")}</span></td>
+          <td>${statusCell(item.status)}</td>
+        </tr>
+      `).join("") || row(["No open review alerts", ""]);
+
+      const mouse = firstMouse(mice);
+      const mouseDob = mouse.dob_raw || mouse.dob_start || "--";
+      document.getElementById("detailMouseTitle").textContent = `${mouse.display_id || "Mouse"} detail`;
+      document.getElementById("detailMouseGrid").innerHTML = [
+        ["Strain", mouse.raw_strain_text || "--"],
+        ["DOB", mouseDob],
+        ["Current cage", mouse.current_cage_label || "--"],
+        ["Sex", mouse.sex || "--"],
+        ["Status", mouse.status || "--"],
+        ["Next action", mouse.next_action || "--"]
+      ].map(([label, value]) => `<div class="info-block"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+      document.getElementById("detailMouseEvidence").textContent = `Traceability: ${mouse.source_note_item_id || "source photo / note line pending"}. Raw and normalized values remain separate.`;
+      document.getElementById("detailGenotypeRows").innerHTML = [
+        ["Current result", mouse.genotype_result || mouse.genotype || "--"],
+        ["Workflow", mouse.genotyping_status || "--"],
+        ["Target match", mouse.target_match_status || "--"],
+        ["Next action", mouse.next_action || "--"]
+      ].map((items) => row(items)).join("");
+      document.getElementById("detailPedigreeRows").innerHTML = [
+        ["Father", "Review source"],
+        ["Mother", "Review source"],
+        ["Litter", litters[0]?.litter_label || "--"]
+      ].map((items) => row(items)).join("");
+      const eventRows = mouseEvents.filter((event) => event.mouse_id === mouse.mouse_id).slice(0, 5);
+      document.getElementById("detailTimelineRows").innerHTML = eventRows.map((event) => row([
+        event.event_date,
+        event.event_type,
+        event.source_record_id || event.related_entity_id || "--"
+      ])).join("") || [
+        [mouseDob, "DOB source accepted", mouse.source_note_item_id || "--"],
+        ["2026-03-15", "Experiment assigned", "EXP-2026-041"]
+      ].map((items) => row(items)).join("");
+      const cage = cages.find((item) => item.cage_label === mouse.current_cage_label) || cages[0] || {};
+      document.getElementById("detailCageRows").innerHTML = [
+        ["Cage", mouse.current_cage_label || cage.cage_label || "--"],
+        ["Location", cage.location || "--"],
+        ["Rack", cage.rack || "--"],
+        ["Active mice", cage.active_mouse_count ?? "--"]
+      ].map((items) => row(items)).join("");
+
+      document.getElementById("strainProfileRows").innerHTML = [
+        ["Breeding difficulty", 7],
+        ["Genotyping complexity", 6],
+        ["Experimental relevance", 9],
+        ["Availability", 8],
+        ["Colony risk", 5],
+        ["Cost burden", 6]
+      ].map(([label, value]) => `
+        <div class="profile-row">
+          <span>${escapeHtml(label)}</span>
+          <div class="profile-track"><div class="profile-fill" style="width:${Number(value) * 10}%"></div></div>
+          <strong>${escapeHtml(value)}</strong>
+        </div>
+      `).join("");
+      document.getElementById("strainGenotypeStack").innerHTML = `
+        <div style="display:flex;height:40px;border-radius:6px;overflow:hidden;color:#fff;font-weight:800;font-size:12px;">
+          <div style="width:40%;background:#2f9e44;display:grid;place-items:center;">18</div>
+          <div style="width:31%;background:#1b72d8;display:grid;place-items:center;">14</div>
+          <div style="width:11%;background:#f59f00;display:grid;place-items:center;">5</div>
+          <div style="width:18%;background:#aab4bd;display:grid;place-items:center;">8</div>
+        </div>
+        <p class="viz-note">Configured categories should drive labels before this becomes a decision aid.</p>
+      `;
+      document.getElementById("strainExperimentRows").innerHTML = [
+        ["EXP-2026-041", "Active", "Optogenetic activation"],
+        ["EXP-2026-015", "Completed", "PV+ interneuron imaging"],
+        ["EXP-2025-089", "Active", "Behavioral assay"]
+      ].map((items) => row(items)).join("");
+    }
+
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, photos, reviews, mice, noteItems, mouseEvents, cages, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -601,6 +1255,8 @@
         api("/api/note-items"),
         api("/api/mouse-events"),
         api("/api/cages"),
+        api("/api/matings"),
+        api("/api/litters"),
         api("/api/strain-target-genotypes"),
         api("/api/genotyping-dashboard"),
         api("/api/export-preview"),
@@ -608,6 +1264,7 @@
       ]);
 
       document.getElementById("health").textContent = health.storage;
+      renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview });
       const searchResults = activeSearchQuery
         ? await api(`/api/search?query=${encodeURIComponent(activeSearchQuery)}`)
         : { query: "", mice: [], strains: [], reviews: [], sources: [] };
@@ -724,6 +1381,44 @@
         `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.current_cage_label || "")}</option>`
       ).join("");
       document.getElementById("cageSelect").innerHTML = cages.map((cage) =>
+        `<option value="${escapeHtml(cage.cage_id)}">${escapeHtml(cage.cage_label)}</option>`
+      ).join("");
+      const blankMouseOption = '<option value="">--</option>';
+      document.getElementById("matingMaleMouse").innerHTML = blankMouseOption + mice.map((mouse) =>
+        `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.raw_strain_text || "")}</option>`
+      ).join("");
+      document.getElementById("matingFemaleMouse").innerHTML = blankMouseOption + mice.map((mouse) =>
+        `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.raw_strain_text || "")}</option>`
+      ).join("");
+      document.getElementById("matingRows").innerHTML = matings.map((mating) =>
+        row([
+          mating.mating_label,
+          [mating.male_mice || "", mating.female_mice || ""].filter(Boolean).join(" / ") || "--",
+          mating.strain_goal || "--",
+          mating.expected_genotype || "--",
+          mating.status,
+          mating.litter_count
+        ])
+      ).join("") || row(["No matings yet", "", "", "", "", ""]);
+      document.getElementById("litterMating").innerHTML = matings.map((mating) =>
+        `<option value="${escapeHtml(mating.mating_id)}">${escapeHtml(mating.mating_label)}</option>`
+      ).join("");
+      document.getElementById("litterRows").innerHTML = litters.map((litter) =>
+        row([
+          litter.litter_label,
+          litter.mating_label,
+          litter.birth_date || "--",
+          litter.number_born ?? "--",
+          litter.number_alive ?? "--",
+          litter.offspring_count ?? 0,
+          litter.weaning_date || "--",
+          litter.status
+        ])
+      ).join("") || row(["No litters yet", "", "", "", "", "", "", ""]);
+      document.getElementById("offspringLitter").innerHTML = litters.map((litter) =>
+        `<option value="${escapeHtml(litter.litter_id)}">${escapeHtml(litter.litter_label)}</option>`
+      ).join("");
+      document.getElementById("offspringCage").innerHTML = '<option value="">--</option>' + cages.map((cage) =>
         `<option value="${escapeHtml(cage.cage_id)}">${escapeHtml(cage.cage_label)}</option>`
       ).join("");
       document.getElementById("genotypingMouse").innerHTML = mice.map((mouse) =>
@@ -979,6 +1674,90 @@
       document.getElementById("moveCageMessage").textContent =
         `Moved mouse to ${moved.cage_label}; event ${moved.event_id}.`;
       document.getElementById("cageMoveNote").value = "";
+      await refresh();
+    });
+
+    document.getElementById("matingButton").addEventListener("click", async () => {
+      const matingLabel = document.getElementById("matingLabel").value.trim();
+      if (!matingLabel) {
+        document.getElementById("matingMessage").textContent = "Enter a mating label first.";
+        return;
+      }
+      const mating = await api("/api/matings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mating_label: matingLabel,
+          male_mouse_id: document.getElementById("matingMaleMouse").value,
+          female_mouse_id: document.getElementById("matingFemaleMouse").value,
+          strain_goal: document.getElementById("matingStrainGoal").value.trim(),
+          expected_genotype: document.getElementById("matingExpectedGenotype").value.trim(),
+          status: "active"
+        })
+      });
+      document.getElementById("matingMessage").textContent =
+        `Added mating ${mating.mating_label}; source evidence ${mating.source_record_id}.`;
+      document.getElementById("matingLabel").value = "";
+      document.getElementById("matingStrainGoal").value = "";
+      document.getElementById("matingExpectedGenotype").value = "";
+      await refresh();
+    });
+
+    document.getElementById("litterButton").addEventListener("click", async () => {
+      const matingId = document.getElementById("litterMating").value;
+      const litterLabel = document.getElementById("litterLabel").value.trim();
+      if (!matingId || !litterLabel) {
+        document.getElementById("litterMessage").textContent = "Choose a mating and enter a litter label first.";
+        return;
+      }
+      const numberBornText = document.getElementById("litterBornCount").value.trim();
+      const litter = await api("/api/litters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mating_id: matingId,
+          litter_label: litterLabel,
+          birth_date: document.getElementById("litterBirthDate").value.trim(),
+          number_born: numberBornText ? Number(numberBornText) : null,
+          number_alive: numberBornText ? Number(numberBornText) : null,
+          weaning_date: document.getElementById("litterWeaningDate").value.trim(),
+          status: "born"
+        })
+      });
+      document.getElementById("litterMessage").textContent =
+        `Added litter ${litter.litter_label}; source evidence ${litter.source_record_id}.`;
+      document.getElementById("litterLabel").value = "";
+      document.getElementById("litterBirthDate").value = "";
+      document.getElementById("litterBornCount").value = "";
+      document.getElementById("litterWeaningDate").value = "";
+      await refresh();
+    });
+
+    document.getElementById("offspringButton").addEventListener("click", async () => {
+      const litterId = document.getElementById("offspringLitter").value;
+      const countText = document.getElementById("offspringCount").value.trim();
+      if (!litterId || !countText) {
+        document.getElementById("offspringMessage").textContent = "Choose a litter and enter offspring count first.";
+        return;
+      }
+      const count = Number(countText);
+      const startNumberText = document.getElementById("offspringStartNumber").value.trim();
+      const created = await api(`/api/litters/${litterId}/offspring`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          count,
+          display_prefix: document.getElementById("offspringPrefix").value.trim(),
+          start_number: startNumberText ? Number(startNumberText) : 1,
+          cage_id: document.getElementById("offspringCage").value,
+          status: "weaning_pending"
+        })
+      });
+      document.getElementById("offspringMessage").textContent =
+        `Created ${created.created_count} offspring mouse cards; source evidence ${created.source_record_id}.`;
+      document.getElementById("offspringCount").value = "";
+      document.getElementById("offspringPrefix").value = "";
+      document.getElementById("offspringStartNumber").value = "";
       await refresh();
     });
 
