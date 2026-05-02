@@ -529,6 +529,143 @@
       display: block;
       line-height: 1.35;
     }
+    .export-readiness {
+      display: grid;
+      gap: 14px;
+    }
+    .export-readiness-head {
+      display: grid;
+      grid-template-columns: minmax(260px, 0.8fr) minmax(360px, 1.2fr);
+      gap: 12px;
+      align-items: stretch;
+    }
+    .readiness-status-card,
+    .export-action-panel,
+    .export-file-panel,
+    .export-blocker-panel,
+    .export-preview-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdfc;
+      padding: 14px;
+      min-width: 0;
+    }
+    .readiness-status-card {
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+    .readiness-status-card.ready {
+      border-color: rgba(15, 107, 95, 0.38);
+      background: #f0faf6;
+    }
+    .readiness-status-card.blocked {
+      border-color: rgba(155, 47, 62, 0.34);
+      background: #fff8f7;
+    }
+    .readiness-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .readiness-title strong {
+      display: block;
+      font-size: 20px;
+      line-height: 1.15;
+    }
+    .readiness-title span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .readiness-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .readiness-metric {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      padding: 9px;
+    }
+    .readiness-metric strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.1;
+    }
+    .readiness-metric span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .export-action-panel {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      align-content: start;
+      background: #fff;
+    }
+    .export-action-panel h3,
+    .export-file-panel h3,
+    .export-blocker-panel h3,
+    .export-preview-panel h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+    .export-action-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+    }
+    .export-readiness-grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 0.8fr) minmax(420px, 1.2fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .export-file-list,
+    .export-blocker-list {
+      display: grid;
+      gap: 8px;
+    }
+    .export-file-row,
+    .export-blocker-row {
+      display: grid;
+      gap: 4px;
+      border-top: 1px solid var(--line);
+      padding-top: 8px;
+      font-size: 13px;
+    }
+    .export-file-row:first-child,
+    .export-blocker-row:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+    .export-file-row strong,
+    .export-blocker-row strong {
+      overflow-wrap: anywhere;
+    }
+    .export-file-row span,
+    .export-blocker-row span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .export-detail-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .export-table-wrap {
+      overflow-x: auto;
+    }
+    .export-table-wrap table {
+      min-width: 760px;
+    }
     .visual-shell {
       display: grid;
       gap: 16px;
@@ -794,6 +931,20 @@
       .comparison-workbench { grid-template-columns: 1fr; }
       .comparison-list-panel { overflow-x: auto; }
       .comparison-list-panel table { min-width: 720px; }
+      .export-readiness-head,
+      .export-readiness-grid,
+      .export-action-panel {
+        grid-template-columns: 1fr;
+      }
+      .export-action-buttons {
+        justify-content: stretch;
+      }
+      .export-action-buttons button {
+        width: 100%;
+      }
+      .readiness-metrics {
+        grid-template-columns: 1fr;
+      }
       .review-detail-panel { position: static; }
       .comparison-detail-panel { position: static; }
       .detail-row { grid-template-columns: 92px 1fr; }
@@ -1253,9 +1404,6 @@
         <button id="searchButton" type="button">Search</button>
         <button id="exportMouseCsvButton" type="button">Download Mouse CSV</button>
         <button id="exportGenotypingCsvButton" type="button">Download Genotyping Worklist</button>
-        <button id="exportReadyMouseCsvButton" type="button">Download Ready CSV</button>
-        <button id="exportSeparationXlsxButton" type="button">Download Separation XLSX</button>
-        <button id="exportAnimalSheetXlsxButton" type="button">Download Animal Sheet XLSX</button>
       </div>
       <p class="muted" id="exportDownloadMessage"></p>
       <p class="muted" id="searchSummary">No active search.</p>
@@ -1616,24 +1764,82 @@
 
     <section class="full" data-view="exports">
       <h2>Export Readiness</h2>
-      <p id="exportPreview"></p>
-      <p class="muted" id="exportFilenames"></p>
-      <table>
-        <thead><tr><th>Cage number</th><th>Strain</th><th>Genotype</th><th>Total</th><th>DOB</th><th>WT</th><th>Tg</th><th>Sampling point</th><th>Source note</th></tr></thead>
-        <tbody id="exportRows"></tbody>
-      </table>
-      <table>
-        <thead><tr><th>Cage No.</th><th>Strain</th><th>Sex</th><th>I.D</th><th>genotype</th><th>DOB</th><th>Mating date</th><th>Pubs</th><th>Status</th><th>Source</th></tr></thead>
-        <tbody id="animalSheetRows"></tbody>
-      </table>
-      <table>
-        <thead><tr><th>Blocker</th><th>Severity</th><th>Suggested</th><th>Reason</th></tr></thead>
-        <tbody id="exportBlockerRows"></tbody>
-      </table>
-      <table>
-        <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Rows</th><th>Blocked</th><th>Generated</th><th>Filter</th></tr></thead>
-        <tbody id="exportLogRows"></tbody>
-      </table>
+      <div class="export-readiness" aria-label="Export readiness panel">
+        <div class="export-readiness-head">
+          <article class="readiness-status-card blocked" id="exportReadinessCard">
+            <div class="readiness-title">
+              <div>
+                <strong id="exportReadinessState">Checking export readiness</strong>
+                <span>export or view</span>
+              </div>
+              <span class="status warn" id="exportReadinessBadge">checking</span>
+            </div>
+            <p id="exportPreview"></p>
+            <div class="readiness-metrics" id="exportReadinessMetrics"></div>
+          </article>
+          <article class="export-action-panel">
+            <div>
+              <h3>Final export actions</h3>
+              <p id="exportActionSummary">Resolve open review blockers before generating final lab files.</p>
+            </div>
+            <div class="export-action-buttons">
+              <button id="exportReadyMouseCsvButton" type="button">Download Ready CSV</button>
+              <button id="exportSeparationXlsxButton" type="button">Download Separation XLSX</button>
+              <button id="exportAnimalSheetXlsxButton" type="button">Download Animal Sheet XLSX</button>
+            </div>
+          </article>
+        </div>
+        <div class="export-readiness-grid">
+          <article class="export-file-panel">
+            <h3>Expected workbook files</h3>
+            <p class="muted" id="exportFilenames"></p>
+            <div class="export-file-list" id="exportExpectedFiles"></div>
+          </article>
+          <article class="export-blocker-panel">
+            <h3>Open review blockers</h3>
+            <p class="muted" id="exportBlockerSummary">Review items that can change exported mouse or workbook values stay blocking.</p>
+            <div class="export-blocker-list" id="exportBlockerList"></div>
+          </article>
+        </div>
+        <div class="export-detail-grid">
+          <article class="export-preview-panel">
+            <h3>Separation workbook preview</h3>
+            <div class="export-table-wrap">
+              <table>
+                <thead><tr><th>Cage number</th><th>Strain</th><th>Genotype</th><th>Total</th><th>DOB</th><th>WT</th><th>Tg</th><th>Sampling point</th><th>Source note</th></tr></thead>
+                <tbody id="exportRows"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="export-preview-panel">
+            <h3>Animal sheet preview</h3>
+            <div class="export-table-wrap">
+              <table>
+                <thead><tr><th>Cage No.</th><th>Strain</th><th>Sex</th><th>I.D</th><th>genotype</th><th>DOB</th><th>Mating date</th><th>Pubs</th><th>Status</th><th>Source</th></tr></thead>
+                <tbody id="animalSheetRows"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="export-preview-panel">
+            <h3>Blocker table</h3>
+            <div class="export-table-wrap">
+              <table>
+                <thead><tr><th>Blocker</th><th>Severity</th><th>Suggested</th><th>Reason</th></tr></thead>
+                <tbody id="exportBlockerRows"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="export-preview-panel">
+            <h3>Export log</h3>
+            <div class="export-table-wrap">
+              <table>
+                <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Rows</th><th>Blocked</th><th>Generated</th><th>Filter</th></tr></thead>
+                <tbody id="exportLogRows"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </div>
     </section>
       </main>
     </div>
@@ -2379,6 +2585,111 @@
       document.getElementById("strainExperimentRows").innerHTML = experimentRows.map((items) => row(items)).join("") || row(["No related experiment events", "--", "--"]);
     }
 
+    function renderExportReadiness(preview, exportLog) {
+      const blockers = preview.review_blockers || [];
+      const rowCount = preview.preview_row_count || 0;
+      const statusLabel = preview.ready ? "Ready for final export" : "Blocked by review";
+      const readinessCard = document.getElementById("exportReadinessCard");
+      readinessCard.classList.toggle("ready", Boolean(preview.ready));
+      readinessCard.classList.toggle("blocked", !preview.ready);
+      document.getElementById("exportReadinessState").textContent = statusLabel;
+      const badge = document.getElementById("exportReadinessBadge");
+      badge.textContent = preview.ready ? "ready" : `${preview.blocked_review_items || 0} blocker(s)`;
+      badge.className = preview.ready ? "status" : "status warn";
+      document.getElementById("exportPreview").textContent =
+        preview.ready
+          ? `Final exports can be generated from ${rowCount} source-backed mouse row(s).`
+          : `Resolve open review items before final exports; preview data remains visible as an export/view.`;
+      document.getElementById("exportReadinessMetrics").innerHTML = [
+        ["Photos", preview.photos || 0],
+        ["Parsed", preview.parsed_results || 0],
+        ["Preview rows", rowCount],
+        ["Separation rows", preview.separation_row_count || 0],
+        ["Animal rows", preview.animal_sheet_row_count || 0],
+        ["Open blockers", preview.blocked_review_items || 0]
+      ].map(([label, value]) => `
+        <div class="readiness-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>
+      `).join("");
+      document.getElementById("exportActionSummary").textContent = preview.ready
+        ? "Final CSV and workbook downloads are ready. Generated files will be recorded in the export log."
+        : `${preview.blocked_review_items || 0} open review item(s) can still change exported values; final endpoints remain approval-gated.`;
+      document.getElementById("exportFilenames").textContent =
+        `Last export: ${preview.latest_generated_export_at || "none"}; ` +
+        `Latest data change: ${preview.latest_data_change_at || "none"}; ` +
+        `Stale: ${preview.export_stale ? "yes" : "no"}.`;
+      document.getElementById("exportExpectedFiles").innerHTML = [
+        ["Mouse CSV", preview.expected_filename || "mouse_records_preview.csv", `${rowCount} row(s), filtered by active search when used from CSV actions`],
+        ["Separation XLSX", preview.expected_separation_filename || "--", `${preview.separation_row_count || 0} workbook row(s)`],
+        ["Animal Sheet XLSX", preview.expected_animal_sheet_filename || "--", `${preview.animal_sheet_row_count || 0} workbook row(s)`]
+      ].map(([label, filename, detail]) => `
+        <div class="export-file-row">
+          <strong>${escapeHtml(label)}: ${escapeHtml(filename)}</strong>
+          <span>${escapeHtml(detail)}</span>
+        </div>
+      `).join("");
+      document.getElementById("exportBlockerSummary").textContent = blockers.length
+        ? `${blockers.length} blocker detail(s) are shown here; resolve them from Review Queue with source evidence.`
+        : "No open review blockers are blocking final export.";
+      document.getElementById("exportBlockerList").innerHTML = blockers.slice(0, 5).map((item) => `
+        <div class="export-blocker-row">
+          <strong>${escapeHtml(item.issue || "Review blocker")}</strong>
+          <span>${escapeHtml([item.severity, item.original_filename || item.source_name || item.photo_id || item.parse_id].filter(Boolean).join(" / ") || "source pending")}</span>
+          <span>${escapeHtml(item.evidence_preview || item.review_reason || item.suggested_value || "Review source evidence before export.")}</span>
+        </div>
+      `).join("") || `
+        <div class="export-blocker-row">
+          <strong>No blockers</strong>
+          <span>Export preview is ready to become final files.</span>
+        </div>
+      `;
+      document.getElementById("exportRows").innerHTML = (preview.separation_rows || []).map((item) =>
+        row([
+          item.cage_number || "--",
+          item.strain || "--",
+          item.genotype || "--",
+          item.total || "--",
+          item.dob || "--",
+          item.wt || "--",
+          item.tg || "--",
+          item.sampling_point || "--",
+          item.source_note_item_ids || "--"
+        ])
+      ).join("") || row(["No separation preview rows yet", "", "", "", "", "", "", "", ""]);
+      document.getElementById("animalSheetRows").innerHTML = (preview.animal_sheet_rows || []).map((item) =>
+        row([
+          item.cage_no || "--",
+          item.strain || "--",
+          item.sex || "--",
+          item.mouse_id || "--",
+          item.genotype || "--",
+          item.dob || "--",
+          item.mating_date || "--",
+          item.pubs || "--",
+          item.status || "--",
+          item.source || "--"
+        ])
+      ).join("") || row(["No animal sheet preview rows yet", "", "", "", "", "", "", "", "", ""]);
+      document.getElementById("exportBlockerRows").innerHTML = blockers.map((item) =>
+        row([
+          item.issue,
+          item.severity,
+          item.suggested_value || "--",
+          item.review_reason || item.parse_id || "--"
+        ])
+      ).join("") || row(["No open review blockers", "", "", ""]);
+      document.getElementById("exportLogRows").innerHTML = exportLog.map((item) =>
+        row([
+          item.filename,
+          item.export_type,
+          item.status,
+          item.row_count,
+          item.blocked_review_count,
+          item.exported_at,
+          item.query || "--"
+        ])
+      ).join("") || row(["No exports generated yet", "", "", "", "", "", ""]);
+    }
+
     async function refresh() {
       const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
         api("/api/health"),
@@ -2783,64 +3094,7 @@
           compactDetails(event.details)
         ])
       ).join("") || row(["No mouse events yet", "", "", "", ""]);
-      document.getElementById("exportPreview").textContent =
-        `Type: ${preview.export_type}. Expected file: ${preview.expected_filename}. ` +
-        `Photos: ${preview.photos}. Parsed results: ${preview.parsed_results}. ` +
-        `Separation rows: ${preview.separation_row_count || 0}. Animal sheet rows: ${preview.animal_sheet_row_count || 0}. ` +
-        `Blocked review items: ${preview.blocked_review_items}. ` +
-        `Ready: ${preview.ready ? "yes" : "no"}.`;
-      document.getElementById("exportFilenames").textContent =
-        `Separation XLSX: ${preview.expected_separation_filename || "--"}; ` +
-        `Animal sheet XLSX: ${preview.expected_animal_sheet_filename || "--"}. ` +
-        `Last export: ${preview.latest_generated_export_at || "none"}; ` +
-        `Latest data change: ${preview.latest_data_change_at || "none"}; ` +
-        `Stale: ${preview.export_stale ? "yes" : "no"}.`;
-      document.getElementById("exportRows").innerHTML = (preview.separation_rows || []).map((item) =>
-        row([
-          item.cage_number || "--",
-          item.strain || "--",
-          item.genotype || "--",
-          item.total || "--",
-          item.dob || "--",
-          item.wt || "--",
-          item.tg || "--",
-          item.sampling_point || "--",
-          item.source_note_item_ids || "--"
-        ])
-      ).join("") || row(["No separation preview rows yet", "", "", "", "", "", "", "", ""]);
-      document.getElementById("animalSheetRows").innerHTML = (preview.animal_sheet_rows || []).map((item) =>
-        row([
-          item.cage_no || "--",
-          item.strain || "--",
-          item.sex || "--",
-          item.mouse_id || "--",
-          item.genotype || "--",
-          item.dob || "--",
-          item.mating_date || "--",
-          item.pubs || "--",
-          item.status || "--",
-          item.source || "--"
-        ])
-      ).join("") || row(["No animal sheet preview rows yet", "", "", "", "", "", "", "", "", ""]);
-      document.getElementById("exportBlockerRows").innerHTML = preview.review_blockers.map((item) =>
-        row([
-          item.issue,
-          item.severity,
-          item.suggested_value || "--",
-          item.review_reason || item.parse_id || "--"
-        ])
-      ).join("") || row(["No open review blockers", "", "", ""]);
-      document.getElementById("exportLogRows").innerHTML = exportLog.map((item) =>
-        row([
-          item.filename,
-          item.export_type,
-          item.status,
-          item.row_count,
-          item.blocked_review_count,
-          item.exported_at,
-          item.query || "--"
-        ])
-      ).join("") || row(["No exports generated yet", "", "", "", "", "", ""]);
+      renderExportReadiness(preview, exportLog);
     }
 
     document.getElementById("uploadButton").addEventListener("click", async () => {
