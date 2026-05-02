@@ -309,11 +309,78 @@
       gap: 14px;
       align-items: start;
     }
+    .comparison-workbench {
+      display: grid;
+      grid-template-columns: minmax(560px, 1.2fr) minmax(340px, 0.8fr);
+      gap: 14px;
+      align-items: start;
+    }
     .review-list-panel,
-    .review-detail-panel {
+    .review-detail-panel,
+    .comparison-list-panel,
+    .comparison-detail-panel {
       min-width: 0;
     }
-    .review-detail-panel {
+    .review-card-list {
+      display: grid;
+      gap: 10px;
+    }
+    .review-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 13px;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+    }
+    .review-card.selected-card,
+    .review-card:hover {
+      border-color: rgba(37, 99, 235, 0.45);
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.09);
+    }
+    .review-card h3 {
+      margin: 0 0 5px;
+      font-size: 14px;
+    }
+    .review-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .review-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 9px;
+    }
+    .review-meta .chip {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+    }
+    .review-evidence {
+      margin-top: 10px;
+      border-left: 3px solid #dbeafe;
+      padding-left: 10px;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .review-card .inspect-review {
+      white-space: nowrap;
+    }
+    .comparison-list-panel td,
+    .comparison-detail-panel strong {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .review-detail-panel,
+    .comparison-detail-panel {
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fbfdfc;
@@ -321,7 +388,8 @@
       position: sticky;
       top: 88px;
     }
-    .review-detail-panel h3 {
+    .review-detail-panel h3,
+    .comparison-detail-panel h3 {
       margin: 0 0 8px;
       font-size: 15px;
     }
@@ -347,6 +415,25 @@
     .review-detail-panel .review-actions {
       grid-template-columns: 1fr;
       min-width: 0;
+    }
+    .field-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .field-pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #eef7f4;
+      color: var(--primary-dark);
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .field-pill.warn {
+      background: #fff4d7;
+      color: var(--warn);
     }
     .photo-review-layout {
       display: grid;
@@ -704,7 +791,12 @@
       .form-grid { grid-template-columns: 1fr; }
       .photo-review-layout { grid-template-columns: 1fr; }
       .review-workbench { grid-template-columns: 1fr; }
+      .comparison-workbench { grid-template-columns: 1fr; }
+      .comparison-list-panel { overflow-x: auto; }
+      .comparison-list-panel table { min-width: 720px; }
       .review-detail-panel { position: static; }
+      .comparison-detail-panel { position: static; }
+      .detail-row { grid-template-columns: 92px 1fr; }
       .view-hero-panel { display: grid; }
       .hero-metrics { justify-content: flex-start; }
       .metric-grid { grid-template-columns: 1fr 1fr; }
@@ -1136,10 +1228,18 @@
       <p>Manual photo transcriptions are compared against predecessor Excel candidates as a review view only.</p>
       <button id="comparisonReviewButton" type="button">Create Comparison Reviews</button>
       <p class="muted" id="comparisonReviewMessage"></p>
-      <table>
-        <thead><tr><th>Photo transcription</th><th>Legacy candidate</th><th>Status</th><th>Review state</th><th>Detail</th></tr></thead>
-        <tbody id="evidenceComparisonRows"></tbody>
-      </table>
+      <div class="comparison-workbench">
+        <div class="comparison-list-panel">
+          <table>
+            <thead><tr><th>Photo transcription</th><th>Legacy candidate</th><th>Status</th><th>Review state</th><th>View</th></tr></thead>
+            <tbody id="evidenceComparisonRows"></tbody>
+          </table>
+        </div>
+        <aside class="comparison-detail-panel" id="comparisonDetailPanel" aria-label="Selected evidence comparison detail">
+          <h3>No comparison selected</h3>
+          <p class="muted">Select a comparison row to inspect matched fields, mismatches, and source references.</p>
+        </aside>
+      </div>
     </section>
 
     <section class="full" data-view="exports">
@@ -1204,10 +1304,7 @@
       </div>
       <div class="review-workbench">
         <div class="review-list-panel">
-          <table>
-            <thead><tr><th>Issue</th><th>Severity</th><th>Evidence</th><th>Source</th><th>Status</th><th>Inspect</th></tr></thead>
-            <tbody id="reviewRows"></tbody>
-          </table>
+          <div class="review-card-list" id="reviewRows" aria-label="Review items"></div>
         </div>
         <aside class="review-detail-panel" id="reviewDetailPanel" aria-label="Selected review detail">
           <h3>No review selected</h3>
@@ -1699,6 +1796,66 @@
       ]);
     }
 
+    function comparisonKey(item) {
+      const legacy = item.legacy_candidate || {};
+      return `${item.manual_parse_id || item.photo_id || "manual"}::${legacy.legacy_row_id || "no_legacy_candidate"}`;
+    }
+
+    function comparisonReviewState(item) {
+      return item.review_required
+        ? `${item.review_status || "not_created"}${item.review_severity ? ` (${item.review_severity})` : ""}`
+        : "not_required";
+    }
+
+    function comparisonFieldPills(fields, kind) {
+      const values = Array.isArray(fields) ? fields : [];
+      return values.length
+        ? values.map((field) => `<span class="field-pill ${kind === "warn" ? "warn" : ""}">${escapeHtml(field)}</span>`).join("")
+        : '<span class="muted">none</span>';
+    }
+
+    function renderComparisonDetail(item) {
+      const panel = document.getElementById("comparisonDetailPanel");
+      if (!item) {
+        panel.innerHTML = `
+          <h3>No comparison selected</h3>
+          <p class="muted">Select a comparison row to inspect matched fields, mismatches, and source references.</p>
+        `;
+        return;
+      }
+      const manual = item.manual_summary || {};
+      const legacy = item.legacy_candidate || {};
+      const legacySummary = legacy.summary || {};
+      const legacySource = [
+        legacy.source_file_name,
+        legacy.source_sheet ? `${legacy.source_sheet}:${legacy.source_row_number || "--"}` : ""
+      ].filter(Boolean).join(" / ");
+      panel.innerHTML = `
+        <h3>${escapeHtml(item.status || "comparison")}</h3>
+        <p class="muted">${escapeHtml(item.detail || "Manual transcription and predecessor Excel are compared as an export/view only.")}</p>
+        <div class="detail-stack">
+          <div class="detail-row"><span>Boundary</span><strong>${escapeHtml(item.source_layer || "export or view")}</strong></div>
+          <div class="detail-row"><span>Photo</span><strong>${escapeHtml(item.photo_filename || item.photo_id || "--")}</strong></div>
+          <div class="detail-row"><span>Manual</span><strong>${escapeHtml(comparisonSummaryText(manual))}</strong></div>
+          <div class="detail-row"><span>Legacy</span><strong>${escapeHtml(legacySource || "No predecessor candidate")}</strong></div>
+          <div class="detail-row"><span>Legacy values</span><strong>${escapeHtml(comparisonSummaryText(legacySummary))}</strong></div>
+          <div class="detail-row"><span>Review</span><strong>${escapeHtml(comparisonReviewState(item))}</strong></div>
+          <div class="detail-row"><span>Review ID</span><strong>${escapeHtml(item.review_id || "--")}</strong></div>
+        </div>
+        <div class="detail-stack">
+          <div>
+            <strong>Matched fields</strong>
+            <div class="field-pills">${comparisonFieldPills(item.matched_fields, "ok")}</div>
+          </div>
+          <div>
+            <strong>Mismatched fields</strong>
+            <div class="field-pills">${comparisonFieldPills(item.mismatched_fields, "warn")}</div>
+          </div>
+          <p class="muted">This inspector does not write canonical mouse state. Use review resolution and candidate apply when a human-reviewed decision is ready.</p>
+        </div>
+      `;
+    }
+
     function compactDetails(details) {
       if (!details || Object.keys(details).length === 0) return "--";
       return Object.entries(details).slice(0, 3).map(([key, value]) =>
@@ -1710,6 +1867,7 @@
     let activeView = "photo";
     let selectedAuditMouseId = "";
     let selectedReviewId = "";
+    let selectedComparisonKey = "";
     let reviewStatusFilter = "open";
     let reviewSeverityFilter = "all";
     let reviewEvidenceFilter = "all";
@@ -2292,23 +2450,37 @@
       document.getElementById("evidenceReconciliationSummary").textContent =
         `${evidenceReconciliation.next_action || "No reconciliation status yet"} ` +
         `Priority: ${(evidenceReconciliation.source_priority || []).join(" > ") || "raw source photo > reviewed note line > predecessor Excel view"}.`;
-      document.getElementById("evidenceComparisonRows").innerHTML = (evidenceComparison.comparisons || []).map((item) => {
+      const comparisonRows = evidenceComparison.comparisons || [];
+      if (!selectedComparisonKey || !comparisonRows.some((item) => comparisonKey(item) === selectedComparisonKey)) {
+        selectedComparisonKey = comparisonKey(comparisonRows[0] || {});
+      }
+      const selectedComparison = comparisonRows.find((item) => comparisonKey(item) === selectedComparisonKey);
+      document.getElementById("evidenceComparisonRows").innerHTML = comparisonRows.map((item) => {
         const manual = item.manual_summary || {};
         const legacy = item.legacy_candidate || {};
         const legacySummary = legacy.summary || {};
-        const reviewState = item.review_required
-          ? `${item.review_status || "not_created"}${item.review_severity ? ` (${item.review_severity})` : ""}`
-          : "not_required";
-        return row([
-          `${item.photo_filename || item.manual_parse_id || "--"} / ${manual.strain || "--"} / ${manual.dob || "--"} / ${manual.count_raw || manual.count || "--"}`,
-          legacy.legacy_row_id
-            ? `${legacy.source_file_name || "--"} row ${legacy.source_row_number || "--"} / ${legacySummary.strain || "--"} / ${legacySummary.dob || "--"} / ${legacySummary.count_raw || legacySummary.count || "--"}`
-            : "No matching predecessor row",
-          item.status,
-          reviewState,
-          item.detail || "--"
-        ]);
+        const key = comparisonKey(item);
+        return `
+          <tr class="${key === selectedComparisonKey ? "selected-row" : ""}">
+            <td><strong>${escapeHtml(item.photo_filename || item.manual_parse_id || "--")}</strong><br><span class="muted">${escapeHtml(comparisonSummaryText(manual))}</span></td>
+            <td>${legacy.legacy_row_id
+              ? `<strong>${escapeHtml(legacy.source_file_name || "--")} row ${escapeHtml(legacy.source_row_number || "--")}</strong><br><span class="muted">${escapeHtml(comparisonSummaryText(legacySummary))}</span>`
+              : "No matching predecessor row"}</td>
+            <td>${escapeHtml(item.status)}</td>
+            <td>${escapeHtml(comparisonReviewState(item))}</td>
+            <td><button class="inspect-comparison" type="button" data-comparison-key="${escapeHtml(key)}">View</button></td>
+          </tr>
+        `;
       }).join("") || row(["No manual photo transcriptions to compare", "", "", "", ""]);
+      renderComparisonDetail(selectedComparison);
+      document.querySelectorAll(".inspect-comparison").forEach((button) => {
+        button.addEventListener("click", () => {
+          selectedComparisonKey = button.dataset.comparisonKey;
+          renderComparisonDetail(comparisonRows.find((item) => comparisonKey(item) === selectedComparisonKey));
+          document.querySelectorAll("#evidenceComparisonRows tr").forEach((rowElement) => rowElement.classList.remove("selected-row"));
+          button.closest("tr").classList.add("selected-row");
+        });
+      });
       document.querySelectorAll(".add-distribution-scope").forEach((button) => {
         button.addEventListener("click", async () => {
           const canonical = button.dataset.canonical;
@@ -2372,22 +2544,28 @@
       }
       const selectedReview = visibleReviews.find((item) => item.review_id === selectedReviewId);
       document.getElementById("reviewRows").innerHTML = visibleReviews.map((item) => `
-        <tr class="${item.review_id === selectedReviewId ? "selected-row" : ""}">
-          <td><strong>${escapeHtml(item.issue)}</strong><br><span class="muted">${escapeHtml(item.review_reason || item.parse_id || "--")}</span></td>
-          <td>${escapeHtml(item.severity)}</td>
-          <td>${escapeHtml(item.evidence_preview || item.suggested_value || "--")}<br><span class="muted">${escapeHtml(item.note_line_count ? `${item.note_line_count} note lines` : "No note lines")}</span></td>
-          <td>${escapeHtml(item.original_filename || item.source_name || item.photo_id || "--")}</td>
-          <td>${escapeHtml(item.status)}</td>
-          <td><button class="inspect-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Inspect</button></td>
-        </tr>
-      `).join("") || row(["No review items", "", "", "", "", ""]);
+        <article class="review-card ${item.review_id === selectedReviewId ? "selected-card" : ""}">
+          <div>
+            <h3>${escapeHtml(item.issue)}</h3>
+            <p>${escapeHtml(item.review_reason || item.parse_id || "--")}</p>
+            <div class="review-meta">
+              <span class="chip">${escapeHtml(item.severity)}</span>
+              <span class="chip">${escapeHtml(item.status)}</span>
+              <span class="chip">${escapeHtml(item.original_filename || item.source_name || item.photo_id || "source pending")}</span>
+              <span class="chip">${escapeHtml(item.note_line_count ? `${item.note_line_count} note lines` : "no note lines")}</span>
+            </div>
+            <div class="review-evidence">${escapeHtml(item.evidence_preview || item.suggested_value || "No evidence preview")}</div>
+          </div>
+          <button class="inspect-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Inspect</button>
+        </article>
+      `).join("") || '<p class="muted">No review items match the current filters.</p>';
       renderReviewDetail(selectedReview);
       document.querySelectorAll(".inspect-review").forEach((button) => {
         button.addEventListener("click", () => {
           selectedReviewId = button.dataset.reviewId;
           renderReviewDetail(visibleReviews.find((item) => item.review_id === selectedReviewId));
-          document.querySelectorAll("#reviewRows tr").forEach((rowElement) => rowElement.classList.remove("selected-row"));
-          button.closest("tr").classList.add("selected-row");
+          document.querySelectorAll("#reviewRows .review-card").forEach((card) => card.classList.remove("selected-card"));
+          button.closest(".review-card").classList.add("selected-card");
         });
       });
       document.querySelectorAll(".resolve-review").forEach((button) => {

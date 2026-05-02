@@ -553,6 +553,8 @@ def main() -> None:
                 assert_true("Evidence Reconciliation" in index_html, "Local UI should expose photo/workbook reconciliation.")
                 assert_true("Evidence Comparison" in index_html, "Local UI should expose photo/workbook comparison.")
                 assert_true("evidenceComparisonRows" in index_html, "Local UI should render evidence comparison rows.")
+                assert_true("comparisonDetailPanel" in index_html and "inspect-comparison" in index_html, "Evidence Comparison should expose a decision table with a detail inspector.")
+                assert_true("Matched fields" in index_html and "Mismatched fields" in index_html, "Evidence Comparison inspector should show matched and mismatched field context.")
                 assert_true("comparisonReviewButton" in index_html, "Local UI should create comparison review candidates explicitly.")
                 assert_true("Review state" in index_html, "Local UI should show whether comparison reviews are open, resolved, or not created.")
                 assert_true("Canonical Candidate Drafts" in index_html, "Local UI should expose canonical candidate drafts.")
