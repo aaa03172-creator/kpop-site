@@ -314,16 +314,15 @@ Current verification command:
 
 ## Suggested Next Build Task
 
-Implement fixture-backed photo intake and review behavior before real OCR.
+The fixture-backed photo intake, manual transcription, comparison, review blocker, canonical candidate, and batch photo workbench path now covers the original vertical-slice intent.
 
-First build target:
+Next build target:
 
-1. Load a local fixture photo record.
-2. Load fixture OCR/field parse JSON.
-3. Render it in Photo Inbox.
-4. Create review item for one low-confidence field.
-5. Apply correction.
-6. Append action log entry.
-7. Update export preview blocked count.
+1. Add an app shell with persistent sidebar and top utility bar.
+2. Make Photo Review Workbench the first visible workflow.
+3. Convert the current long page into focused view containers without changing API behavior.
+4. Keep raw photo preview, manual transcription, evidence comparison, review queue, candidate apply/audit/void, and export readiness reachable from the shell.
+5. Preserve the rule that raw photo, manual transcription, and comparison views do not create canonical state.
+6. Run the existing local verification after the restructuring.
 
-This keeps the first implementation small while exercising the full evidence-to-review-to-export loop.
+This keeps the next implementation focused on workflow clarity and product polish while preserving the evidence-to-review-to-export loop.
