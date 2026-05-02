@@ -24,6 +24,19 @@ def run_cli(tmp_path: Path, *args: str) -> object:
     return json.loads(result.stdout)
 
 
+def run_cli_result(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["MOUSEDB_PATH"] = str(tmp_path / "mousedb.sqlite")
+    return subprocess.run(
+        [sys.executable, "-m", "mousedb", *args],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 def test_demo_workflow_json_contract(tmp_path: Path) -> None:
     reset = run_cli(tmp_path, "reset", "--yes", "--json")
     assert reset["reset"] is True
@@ -190,8 +203,22 @@ def test_mating_litter_and_archive_commands(tmp_path: Path) -> None:
     )
     assert litter["litter_id"] == "LIT-2026-001"
 
+    offspring = run_cli(tmp_path, "litter", "create-mice", litter["litter_id"], "--count", "2", "--strain", "STR-0001", "--json")
+    assert len(offspring) == 2
+    assert {mouse["current_status"] for mouse in offspring} == {"weaning_pending"}
+
     weaned = run_cli(tmp_path, "litter", "wean", litter["litter_id"], "--date", "2026-03-22", "--json")
     assert weaned["status"] == "weaned"
+    assert weaned["number_weaned"] == 2
+    assert weaned["weaned_mouse_count"] == 2
+
+    weaned_mouse = run_cli(tmp_path, "mouse", "show", offspring[0]["mouse_id"], "--json")
+    assert weaned_mouse["current_status"] == "alive"
+    offspring_timeline = run_cli(tmp_path, "mouse", "timeline", offspring[0]["mouse_id"], "--json")
+    assert "weaned" in [event["event_type"] for event in offspring_timeline]
+
+    duplicate_wean = run_cli_result(tmp_path, "litter", "wean", litter["litter_id"], "--date", "2026-03-23", "--json")
+    assert duplicate_wean.returncode != 0
 
     archived = run_cli(tmp_path, "strain", "archive", "STR-0001", "--json")
     assert archived["status"] == "archived"
