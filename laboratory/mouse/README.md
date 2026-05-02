@@ -140,6 +140,8 @@ npm run parse:legacy -- "path\to\animal sheet.xlsx" --kind animal
 
 The inspection helper lists workbook sheet shapes, compact sample rows, photo dimensions, and local file timestamps before any parse/import decision. The parser treats predecessor Excel files as `export or view` snapshots, keeps raw values and source-cell references, and does not write canonical mouse state. Parsed rows are `candidate` review inputs only; newer photo-backed cage-card records, accepted note lines, and correction history remain the stronger continuity evidence.
 
+In the local browser prototype, legacy workbook imports create Review Queue items for each parsed row. Uploaded cage-card photos also create manual review candidates, and manual photo transcriptions stay `parsed or intermediate result` until reviewed. The Evidence Reconciliation view keeps raw photos ahead of predecessor Excel views when deciding what needs human review.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.

@@ -36,6 +36,7 @@ ANIMAL_HEADERS = {
     "genotype": "genotype",
     "dob": "dob",
     "mating date": "mating_date",
+    "pup": "pubs",
     "pubs": "pubs",
     "pups": "pubs",
 }
@@ -43,6 +44,7 @@ ANIMAL_HEADERS = {
 SEPARATION_HEADERS = {
     "strain": "strain",
     "genotype": "genotype",
+    "sex": "total",
     "total": "total",
     "dob": "dob",
     "wt": "wt",
@@ -123,9 +125,26 @@ def cell_ref(ws: Worksheet, row: int, columns: dict[str, int], name: str) -> str
     return ws.cell(row, column).coordinate if column else ""
 
 
+def looks_like_strain_value(value: str) -> bool:
+    text = normalize_cell(value)
+    if not text:
+        return False
+    return not bool(re.match(r"^(c[- ]?)?\d+$", text, re.IGNORECASE))
+
+
+def infer_animal_columns(ws: Worksheet, header_row: int, columns: dict[str, int]) -> dict[str, int]:
+    inferred = dict(columns)
+    display_column = inferred.get("display_id")
+    dob_column = inferred.get("dob")
+    if "genotype" not in inferred and display_column and dob_column and display_column + 1 < dob_column:
+        inferred["genotype"] = display_column + 1
+    return inferred
+
+
 def parse_animal_sheet(ws: Worksheet, source_file: Path) -> dict[str, Any]:
     header_row, columns = detect_header(ws, ANIMAL_HEADERS)
-    required = {"cage_no", "strain", "sex", "display_id", "genotype", "dob"}
+    columns = infer_animal_columns(ws, header_row, columns)
+    required = {"cage_no", "sex", "display_id", "dob"}
     if not required.issubset(columns):
         raise ValueError(f"Animal sheet headers not found in {ws.title!r}. Found: {sorted(columns)}")
 
@@ -135,10 +154,15 @@ def parse_animal_sheet(ws: Worksheet, source_file: Path) -> dict[str, Any]:
     for row_number in range(header_row + 1, ws.max_row + 1):
         cage = cell_value(ws, row_number, columns, "cage_no")
         strain = cell_value(ws, row_number, columns, "strain")
+        if "strain" not in columns and looks_like_strain_value(cage):
+            strain = cage
+            cage = ""
         if cage:
             carried_cage = cage
         if strain:
             carried_strain = strain
+        elif not carried_strain:
+            carried_strain = ws.title
 
         sex = cell_value(ws, row_number, columns, "sex")
         display_id = cell_value(ws, row_number, columns, "display_id")
@@ -244,13 +268,14 @@ def parse_separation_sheet(ws: Worksheet, source_file: Path) -> dict[str, Any]:
 
 
 def base_payload(source_file: Path, ws: Worksheet, workbook_kind: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    sheet_names = sorted({str(row.get("source_sheet") or ws.title) for row in rows}) or [ws.title]
     return {
         "layer": "parsed or intermediate result",
         "source_layer": "export or view",
         "workbook_kind": workbook_kind,
         "source_file_name": source_file.name,
         "source_file_path": str(source_file),
-        "sheet_name": ws.title,
+        "sheet_name": sheet_names[0] if len(sheet_names) == 1 else ", ".join(sheet_names),
         "parsed_at": datetime.now().isoformat(timespec="seconds"),
         "rows": rows,
         "notes": [
@@ -260,9 +285,62 @@ def base_payload(source_file: Path, ws: Worksheet, workbook_kind: str, rows: lis
     }
 
 
+def merge_payloads(source_file: Path, workbook_kind: str, payloads: list[dict[str, Any]]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for payload in payloads:
+        rows.extend(payload.get("rows") or [])
+    sheet_names = sorted({str(row.get("source_sheet") or "") for row in rows if row.get("source_sheet")})
+    return {
+        "layer": "parsed or intermediate result",
+        "source_layer": "export or view",
+        "workbook_kind": workbook_kind,
+        "source_file_name": source_file.name,
+        "source_file_path": str(source_file),
+        "sheet_name": ", ".join(sheet_names),
+        "parsed_at": datetime.now().isoformat(timespec="seconds"),
+        "rows": rows,
+        "notes": [
+            "Predecessor Excel rows are snapshots/views and must not overwrite newer cage-card photo evidence.",
+            "Rows require review before becoming canonical cage, mouse, mating, litter, or genotype state.",
+            "Multiple workbook sheets were parsed into one reviewable import when their shapes matched the selected kind.",
+        ],
+    }
+
+
 def parse_workbook(path: Path, kind: str = "auto", sheet_name: str | None = None) -> dict[str, Any]:
     wb = load_workbook(path, read_only=False, data_only=True)
-    ws = wb[sheet_name] if sheet_name else wb[wb.sheetnames[0]]
+    if sheet_name:
+        ws = wb[sheet_name]
+        if kind == "animal":
+            return parse_animal_sheet(ws, path)
+        if kind == "separation":
+            return parse_separation_sheet(ws, path)
+        animal_header, animal_columns = detect_header(ws, ANIMAL_HEADERS)
+        separation_header, separation_columns = detect_header(ws, SEPARATION_HEADERS)
+        if animal_header and len(animal_columns) >= len(separation_columns):
+            return parse_animal_sheet(ws, path)
+        if separation_header:
+            return parse_separation_sheet(ws, path)
+        raise ValueError(f"Could not detect supported legacy workbook shape for {path.name} sheet {sheet_name!r}.")
+
+    if kind in {"animal", "separation"}:
+        parser = parse_animal_sheet if kind == "animal" else parse_separation_sheet
+        workbook_kind = "legacy_animal_sheet" if kind == "animal" else "legacy_separation_status"
+        payloads: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for ws in wb.worksheets:
+            try:
+                payload = parser(ws, path)
+            except ValueError as error:
+                errors.append(str(error))
+                continue
+            if payload.get("rows"):
+                payloads.append(payload)
+        if payloads:
+            return merge_payloads(path, workbook_kind, payloads)
+        raise ValueError("; ".join(errors) or f"No supported {kind} sheets found in {path.name}.")
+
+    ws = wb[wb.sheetnames[0]]
     if kind == "animal":
         return parse_animal_sheet(ws, path)
     if kind == "separation":
