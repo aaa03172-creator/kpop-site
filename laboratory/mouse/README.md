@@ -129,6 +129,16 @@ Both endpoints default to `require_ready=true`. Open review blockers return `409
 
 The browser UI has matching buttons: `Download Separation XLSX` and `Download Animal Sheet XLSX`.
 
+Legacy workbook rows can be parsed into reviewable JSON with:
+
+```powershell
+python scripts/parse_legacy_workbooks.py "path\to\animal sheet.xlsx" --kind animal --out fixtures\legacy_animal.json
+python scripts/parse_legacy_workbooks.py "path\to\separation.xlsx" --kind separation --out fixtures\legacy_separation.json
+npm run parse:legacy -- "path\to\animal sheet.xlsx" --kind animal
+```
+
+The parser treats predecessor Excel files as `export or view` snapshots, keeps raw values and source-cell references, and does not write canonical mouse state. Parsed rows are `candidate` review inputs only; photo-backed cage-card records, accepted note lines, and correction history remain the stronger continuity evidence.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
