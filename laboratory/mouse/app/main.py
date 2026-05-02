@@ -688,6 +688,79 @@ def json_object(value: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {"value": parsed}
 
 
+def compact_compare_value(value: Any) -> str:
+    return re.sub(r"[^a-z0-9가-힣]+", "", str(value or "").lower())
+
+
+def date_tokens(value: Any) -> set[str]:
+    text = str(value or "")
+    tokens = set(re.findall(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{2}[-./]\d{1,2}[-./]\d{1,2}", text))
+    return {token.replace("/", ".").replace("-", ".") for token in tokens}
+
+
+def first_count(value: Any) -> int | None:
+    match = re.search(r"\d+", str(value or ""))
+    return int(match.group(0)) if match else None
+
+
+def manual_transcription_summary(record: dict[str, Any]) -> dict[str, Any]:
+    notes = record.get("notes") if isinstance(record.get("notes"), list) else []
+    return {
+        "strain": record.get("matchedStrain") or record.get("rawStrain") or "",
+        "dob": record.get("dobRaw") or record.get("dobNormalized") or "",
+        "count": first_count(record.get("mouseCount")) or len(notes) or None,
+        "count_raw": record.get("mouseCount") or "",
+        "card_type": record.get("type") or "",
+        "note_count": len(notes),
+    }
+
+
+def legacy_candidate_summary(row: dict[str, Any]) -> dict[str, Any]:
+    row_type = str(row.get("row_type") or "")
+    return {
+        "strain": row.get("strain_raw") or row.get("group_name_raw") or row.get("male_raw") or "",
+        "dob": row.get("dob_raw") or "",
+        "count": row.get("count_candidate") or first_count(row.get("total_raw") or row.get("display_id_raw")),
+        "count_raw": row.get("total_raw") or row.get("display_id_raw") or row.get("pubs_raw") or "",
+        "row_type": row_type,
+    }
+
+
+def comparison_score(manual: dict[str, Any], legacy: dict[str, Any]) -> tuple[int, list[str], list[str]]:
+    matched: list[str] = []
+    mismatched: list[str] = []
+    score = 0
+
+    manual_strain = compact_compare_value(manual.get("strain"))
+    legacy_strain = compact_compare_value(legacy.get("strain"))
+    if manual_strain and legacy_strain:
+        if manual_strain == legacy_strain or manual_strain in legacy_strain or legacy_strain in manual_strain:
+            score += 3
+            matched.append("strain")
+        else:
+            mismatched.append("strain")
+
+    manual_dates = date_tokens(manual.get("dob"))
+    legacy_dates = date_tokens(legacy.get("dob"))
+    if manual_dates and legacy_dates:
+        if manual_dates & legacy_dates:
+            score += 2
+            matched.append("dob")
+        else:
+            mismatched.append("dob")
+
+    manual_count = manual.get("count")
+    legacy_count = legacy.get("count")
+    if manual_count is not None and legacy_count is not None:
+        if manual_count == legacy_count:
+            score += 1
+            matched.append("count")
+        else:
+            mismatched.append("count")
+
+    return score, matched, mismatched
+
+
 def split_dob_range(raw: Any, normalized: Any) -> tuple[str, str | None, str | None]:
     dob_raw = str(raw or "")
     normalized_text = str(normalized or "")
@@ -3876,6 +3949,97 @@ def evidence_reconciliation() -> dict[str, Any]:
             if open_reviews
             else "Comparison view is clear of open review blockers."
         ),
+    }
+
+
+@app.get("/api/evidence-comparison")
+def evidence_comparison() -> dict[str, Any]:
+    with connection() as conn:
+        manual_rows = conn.execute(
+            """
+            SELECT parse.parse_id, parse.photo_id, parse.raw_payload, parse.parsed_at,
+                   photo.original_filename
+            FROM parse_result parse
+            LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
+            WHERE parse.source_name = 'manual_photo_transcription'
+            ORDER BY parse.parsed_at DESC
+            LIMIT 50
+            """
+        ).fetchall()
+        legacy_rows = conn.execute(
+            """
+            SELECT row.legacy_row_id, row.review_id, row.row_type, row.source_sheet,
+                   row.source_row_number, row.raw_row_json,
+                   legacy.source_file_name
+            FROM legacy_workbook_row row
+            LEFT JOIN legacy_workbook_import legacy ON legacy.legacy_import_id = row.legacy_import_id
+            ORDER BY legacy.imported_at DESC, row.source_row_number
+            LIMIT 300
+            """
+        ).fetchall()
+
+    legacy_candidates = []
+    for row in legacy_rows:
+        raw_row = json_object(row["raw_row_json"])
+        summary = legacy_candidate_summary(raw_row)
+        legacy_candidates.append(
+            {
+                "legacy_row_id": row["legacy_row_id"],
+                "review_id": row["review_id"],
+                "source_file_name": row["source_file_name"] or "",
+                "source_sheet": row["source_sheet"] or "",
+                "source_row_number": row["source_row_number"],
+                "raw_row": raw_row,
+                "summary": summary,
+            }
+        )
+
+    comparisons = []
+    for manual in manual_rows:
+        record = json_object(manual["raw_payload"])
+        manual_summary = manual_transcription_summary(record)
+        ranked = []
+        for legacy in legacy_candidates:
+            score, matched, mismatched = comparison_score(manual_summary, legacy["summary"])
+            if score > 0:
+                ranked.append((score, matched, mismatched, legacy))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        best = ranked[0] if ranked else None
+        if best is None:
+            status = "no_legacy_candidate"
+            matched_fields: list[str] = []
+            mismatched_fields: list[str] = []
+            legacy_payload: dict[str, Any] | None = None
+            detail = "No predecessor Excel candidate matched strain, DOB, or count."
+        else:
+            score, matched_fields, mismatched_fields, legacy_payload = best
+            status = "exact_match" if score >= 6 and not mismatched_fields else "value_mismatch"
+            detail = (
+                f"Matched {', '.join(matched_fields) or 'none'}"
+                + (f"; differs on {', '.join(mismatched_fields)}" if mismatched_fields else "")
+            )
+        comparisons.append(
+            {
+                "source_layer": "export or view",
+                "manual_parse_id": manual["parse_id"],
+                "photo_id": manual["photo_id"],
+                "photo_filename": manual["original_filename"] or "",
+                "manual_summary": manual_summary,
+                "legacy_candidate": legacy_payload,
+                "status": status,
+                "matched_fields": matched_fields,
+                "mismatched_fields": mismatched_fields,
+                "detail": detail,
+            }
+        )
+
+    return {
+        "boundary": "export or view",
+        "source_priority": ["raw source photo", "manual transcription", "predecessor Excel view"],
+        "manual_transcription_count": len(manual_rows),
+        "legacy_candidate_count": len(legacy_candidates),
+        "comparison_count": len(comparisons),
+        "comparisons": comparisons,
     }
 
 
