@@ -94,6 +94,12 @@ class MouseEventCreate(BaseModel):
 class ReviewResolutionCreate(BaseModel):
     resolution_note: str = Field(min_length=1)
     resolved_value: str = ""
+    correction_entity_type: str = ""
+    correction_entity_id: str = ""
+    correction_field_name: str = ""
+    correction_before_value: str = ""
+    correction_after_value: str = ""
+    correction_source_record_id: str | None = None
 
 
 class GenotypingUpdate(BaseModel):
@@ -357,46 +363,51 @@ def list_corrections() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -> str:
+    correction_id = new_id("correction")
+    conn.execute(
+        """
+        INSERT INTO correction_log
+            (correction_id, entity_type, entity_id, field_name,
+             before_value, after_value, reason, source_record_id,
+             review_id, corrected_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            correction_id,
+            payload.entity_type,
+            payload.entity_id,
+            payload.field_name,
+            payload.before_value,
+            payload.after_value,
+            payload.reason,
+            payload.source_record_id,
+            payload.review_id,
+            corrected_at,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id("action"),
+            "correction_applied",
+            payload.entity_id,
+            payload.before_value,
+            payload.after_value,
+            corrected_at,
+        ),
+    )
+    return correction_id
+
+
 @app.post("/api/corrections")
 def create_correction(payload: CorrectionCreate) -> dict[str, Any]:
-    correction_id = new_id("correction")
     corrected_at = utc_now()
     with connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO correction_log
-                (correction_id, entity_type, entity_id, field_name,
-                 before_value, after_value, reason, source_record_id,
-                 review_id, corrected_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                correction_id,
-                payload.entity_type,
-                payload.entity_id,
-                payload.field_name,
-                payload.before_value,
-                payload.after_value,
-                payload.reason,
-                payload.source_record_id,
-                payload.review_id,
-                corrected_at,
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                new_id("action"),
-                "correction_applied",
-                payload.entity_id,
-                payload.before_value,
-                payload.after_value,
-                corrected_at,
-            ),
-        )
+        correction_id = record_correction(conn, payload, corrected_at)
 
     return {"correction_id": correction_id, "corrected_at": corrected_at}
 
@@ -1203,12 +1214,41 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
                 resolved_at,
             ),
         )
+        correction_id = None
+        correction_fields = [
+            payload.correction_entity_type.strip(),
+            payload.correction_entity_id.strip(),
+            payload.correction_field_name.strip(),
+            payload.correction_before_value,
+            payload.correction_after_value or payload.resolved_value,
+        ]
+        if any(correction_fields) and not all(correction_fields[:3]):
+            raise HTTPException(
+                status_code=400,
+                detail="Correction entity type, entity id, and field name are required when recording a review correction.",
+            )
+        if all(correction_fields[:3]):
+            correction_id = record_correction(
+                conn,
+                CorrectionCreate(
+                    entity_type=payload.correction_entity_type,
+                    entity_id=payload.correction_entity_id,
+                    field_name=payload.correction_field_name,
+                    before_value=payload.correction_before_value,
+                    after_value=payload.correction_after_value or payload.resolved_value,
+                    reason=payload.resolution_note,
+                    source_record_id=payload.correction_source_record_id,
+                    review_id=review_id,
+                ),
+                resolved_at,
+            )
     return {
         "review_id": review_id,
         "status": "resolved",
         "resolved_at": resolved_at,
         "resolution_note": payload.resolution_note,
         "resolved_value": payload.resolved_value,
+        "correction_id": correction_id,
     }
 
 

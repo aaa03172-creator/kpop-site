@@ -1498,7 +1498,10 @@
           <td>${escapeHtml(item.status)}</td>
           <td>${
             item.status === "open"
-              ? `<button class="resolve-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Resolve</button>`
+              ? `<button class="resolve-review" type="button"
+                   data-review-id="${escapeHtml(item.review_id)}"
+                   data-current-value="${escapeHtml(item.current_value || "")}"
+                   data-suggested-value="${escapeHtml(item.suggested_value || "")}">Resolve</button>`
               : escapeHtml(item.resolution_note || "Resolved")
           }</td>
         </tr>
@@ -1510,7 +1513,15 @@
           await api(`/api/review-items/${button.dataset.reviewId}/resolve`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ resolution_note: note.trim() })
+            body: JSON.stringify({
+              resolution_note: note.trim(),
+              resolved_value: button.dataset.suggestedValue || "",
+              correction_entity_type: "review_item",
+              correction_entity_id: button.dataset.reviewId,
+              correction_field_name: "reviewed_value",
+              correction_before_value: button.dataset.currentValue || "",
+              correction_after_value: button.dataset.suggestedValue || ""
+            })
           });
           await refresh();
         });

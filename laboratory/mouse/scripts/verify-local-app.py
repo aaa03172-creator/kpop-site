@@ -593,6 +593,14 @@ def main() -> None:
                     any(item["source_name"] or item["photo_id"] or item["original_filename"] for item in review_items),
                     "Review items should expose source record or photo context.",
                 )
+                partial_correction = client.post(
+                    f"/api/review-items/{review_items[0]['review_id']}/resolve",
+                    json={
+                        "resolution_note": "Incomplete correction payload should not be accepted.",
+                        "correction_entity_type": "review_item",
+                    },
+                )
+                assert_true(partial_correction.status_code == 400, "Partial review correction payload should be rejected.")
                 assert_true(
                     not any(item["issue"] == "Outside assigned strain scope" for item in review_items),
                     "Assigned ApoM scope should clear stale outside-scope review items for now-accepted rows.",
@@ -612,9 +620,19 @@ def main() -> None:
                 count_review = next(item for item in review_items if item["parse_id"] == "FIXTURE-COUNT-MISMATCH")
                 resolved = client.post(
                     f"/api/review-items/{count_review['review_id']}/resolve",
-                    json={"resolution_note": "Reviewed count mismatch in source note lines."},
+                    json={
+                        "resolution_note": "Reviewed count mismatch in source note lines.",
+                        "resolved_value": count_review["suggested_value"],
+                        "correction_entity_type": "review_item",
+                        "correction_entity_id": count_review["review_id"],
+                        "correction_field_name": "mouse_count",
+                        "correction_before_value": count_review["current_value"],
+                        "correction_after_value": count_review["suggested_value"],
+                    },
                 )
                 assert_true(resolved.status_code == 200, "Could not resolve review item.")
+                resolved_payload = resolved.json()
+                assert_true(resolved_payload["correction_id"], "Review resolution with correction values should create a correction log entry.")
                 resolved_items = client.get("/api/review-items").json()
                 resolved_count_review = next(item for item in resolved_items if item["review_id"] == count_review["review_id"])
                 assert_true(resolved_count_review["status"] == "resolved", "Resolved review item stayed open.")
@@ -627,7 +645,33 @@ def main() -> None:
                         """,
                         (count_review["review_id"],),
                     ).fetchone()["count"]
+                    correction_row = conn.execute(
+                        """
+                        SELECT correction_id, entity_type, entity_id, field_name,
+                               before_value, after_value, reason, review_id
+                        FROM correction_log
+                        WHERE correction_id = ?
+                        """,
+                        (resolved_payload["correction_id"],),
+                    ).fetchone()
+                    correction_action_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM action_log
+                        WHERE action_type = 'correction_applied'
+                          AND target_id = ?
+                        """,
+                        (count_review["review_id"],),
+                    ).fetchone()["count"]
                 assert_true(review_action_count == 1, "Review resolution should create an action log entry.")
+                assert_true(
+                    correction_row is not None
+                    and correction_row["before_value"] == count_review["current_value"]
+                    and correction_row["after_value"] == count_review["suggested_value"]
+                    and correction_row["review_id"] == count_review["review_id"],
+                    "Review resolution correction should preserve before/after values and review linkage.",
+                )
+                assert_true(correction_action_count == 1, "Review resolution correction should create a correction action log entry.")
                 note_items = client.get("/api/note-items").json()
                 mice = client.get("/api/mice").json()
                 assert_true(
