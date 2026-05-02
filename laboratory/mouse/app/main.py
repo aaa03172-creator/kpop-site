@@ -29,6 +29,7 @@ from scripts.parse_legacy_workbooks import parse_workbook
 
 STATIC_DIR = ROOT / "static"
 FIXTURE_PATH = ROOT / "fixtures" / "sample_parse_results.json"
+RUNTIME_OPENAI_API_KEY = ""
 
 
 @asynccontextmanager
@@ -127,6 +128,10 @@ class PhotoAiDraftCreate(BaseModel):
     detail: str = "low"
 
 
+class AiDraftSettingsUpdate(BaseModel):
+    api_key: str = ""
+
+
 class GenotypingUpdate(BaseModel):
     mouse_id: str = Field(min_length=1)
     sample_id: str = ""
@@ -213,17 +218,38 @@ def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+def current_openai_api_key() -> str:
+    return RUNTIME_OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY", "")
+
+
+def ai_draft_status() -> dict[str, Any]:
+    key_source = "session" if RUNTIME_OPENAI_API_KEY else ("environment" if os.environ.get("OPENAI_API_KEY") else "missing")
+    return {
+        "available": bool(current_openai_api_key()),
+        "key_source": key_source,
+        "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-4.1-mini"),
+        "approval_required": True,
+        "payload_minimization": "selected photo plus active assigned strain names only",
+    }
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "storage": "local-only",
-        "ai_draft": {
-            "available": bool(os.environ.get("OPENAI_API_KEY")),
-            "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-4.1-mini"),
-            "approval_required": True,
-            "payload_minimization": "selected photo plus active assigned strain names only",
-        },
+        "ai_draft": ai_draft_status(),
+    }
+
+
+@app.post("/api/ai-draft-settings")
+def update_ai_draft_settings(payload: AiDraftSettingsUpdate) -> dict[str, Any]:
+    global RUNTIME_OPENAI_API_KEY
+    RUNTIME_OPENAI_API_KEY = payload.api_key.strip()
+    return {
+        "status": "updated",
+        "stored": "server_session_only" if RUNTIME_OPENAI_API_KEY else "cleared",
+        "ai_draft": ai_draft_status(),
     }
 
 
@@ -405,7 +431,7 @@ def create_photo_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCrea
             status_code=403,
             detail="External AI draft transcription requires explicit per-request approval.",
         )
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = current_openai_api_key()
     if not api_key:
         raise HTTPException(
             status_code=503,
