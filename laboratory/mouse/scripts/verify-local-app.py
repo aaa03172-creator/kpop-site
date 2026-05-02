@@ -593,6 +593,14 @@ def main() -> None:
                     any(item["source_name"] or item["photo_id"] or item["original_filename"] for item in review_items),
                     "Review items should expose source record or photo context.",
                 )
+                partial_correction = client.post(
+                    f"/api/review-items/{review_items[0]['review_id']}/resolve",
+                    json={
+                        "resolution_note": "Incomplete correction payload should not be accepted.",
+                        "correction_entity_type": "review_item",
+                    },
+                )
+                assert_true(partial_correction.status_code == 400, "Partial review correction payload should be rejected.")
                 assert_true(
                     not any(item["issue"] == "Outside assigned strain scope" for item in review_items),
                     "Assigned ApoM scope should clear stale outside-scope review items for now-accepted rows.",
@@ -612,9 +620,19 @@ def main() -> None:
                 count_review = next(item for item in review_items if item["parse_id"] == "FIXTURE-COUNT-MISMATCH")
                 resolved = client.post(
                     f"/api/review-items/{count_review['review_id']}/resolve",
-                    json={"resolution_note": "Reviewed count mismatch in source note lines."},
+                    json={
+                        "resolution_note": "Reviewed count mismatch in source note lines.",
+                        "resolved_value": count_review["suggested_value"],
+                        "correction_entity_type": "review_item",
+                        "correction_entity_id": count_review["review_id"],
+                        "correction_field_name": "mouse_count",
+                        "correction_before_value": count_review["current_value"],
+                        "correction_after_value": count_review["suggested_value"],
+                    },
                 )
                 assert_true(resolved.status_code == 200, "Could not resolve review item.")
+                resolved_payload = resolved.json()
+                assert_true(resolved_payload["correction_id"], "Review resolution with correction values should create a correction log entry.")
                 resolved_items = client.get("/api/review-items").json()
                 resolved_count_review = next(item for item in resolved_items if item["review_id"] == count_review["review_id"])
                 assert_true(resolved_count_review["status"] == "resolved", "Resolved review item stayed open.")
@@ -627,7 +645,56 @@ def main() -> None:
                         """,
                         (count_review["review_id"],),
                     ).fetchone()["count"]
+                    correction_row = conn.execute(
+                        """
+                        SELECT correction_id, entity_type, entity_id, field_name,
+                               before_value, after_value, reason, review_id
+                        FROM correction_log
+                        WHERE correction_id = ?
+                        """,
+                        (resolved_payload["correction_id"],),
+                    ).fetchone()
+                    correction_action_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM action_log
+                        WHERE action_type = 'correction_applied'
+                          AND target_id = ?
+                        """,
+                        (count_review["review_id"],),
+                    ).fetchone()["count"]
                 assert_true(review_action_count == 1, "Review resolution should create an action log entry.")
+                assert_true(
+                    correction_row is not None
+                    and correction_row["before_value"] == count_review["current_value"]
+                    and correction_row["after_value"] == count_review["suggested_value"]
+                    and correction_row["review_id"] == count_review["review_id"],
+                    "Review resolution correction should preserve before/after values and review linkage.",
+                )
+                assert_true(correction_action_count == 1, "Review resolution correction should create a correction action log entry.")
+                duplicate_resolve = client.post(
+                    f"/api/review-items/{count_review['review_id']}/resolve",
+                    json={"resolution_note": "Duplicate review resolution should be blocked."},
+                )
+                assert_true(duplicate_resolve.status_code == 409, "Resolved review items should not be resolved again.")
+                duplicate_active_review = next(item for item in resolved_items if item["parse_id"] == "FIXTURE-DUPLICATE-ACTIVE")
+                partial_correction = client.post(
+                    f"/api/review-items/{duplicate_active_review['review_id']}/resolve",
+                    json={
+                        "resolution_note": "Incomplete correction metadata should be rejected.",
+                        "correction_entity_type": "review_item",
+                    },
+                )
+                assert_true(partial_correction.status_code == 400, "Partial correction metadata should not resolve a review item.")
+                still_open_reviews = client.get("/api/review-items").json()
+                assert_true(
+                    any(
+                        item["review_id"] == duplicate_active_review["review_id"]
+                        and item["status"] == "open"
+                        for item in still_open_reviews
+                    ),
+                    "Rejected partial correction should leave the review item open.",
+                )
                 note_items = client.get("/api/note-items").json()
                 mice = client.get("/api/mice").json()
                 assert_true(
@@ -1336,7 +1403,10 @@ def main() -> None:
                             "resolved_value": item.get("suggested_value") or item.get("current_value") or "",
                         },
                     )
-                    assert_true(release_review.status_code == 200, "Could not resolve remaining review blocker.")
+                    assert_true(
+                        release_review.status_code == 200,
+                        f"Could not resolve remaining review blocker: {release_review.status_code} {release_review.text}",
+                    )
                 ready_preview = client.get("/api/export-preview").json()
                 assert_true(ready_preview["ready"] is True, "Resolved review blockers should make export preview ready.")
                 assert_true(ready_preview["blocked_review_items"] == 0, "Ready export preview should have no blockers.")
@@ -1358,12 +1428,22 @@ def main() -> None:
                 )
                 with zipfile.ZipFile(io.BytesIO(ready_separation_xlsx.content)) as workbook_zip:
                     assert_true(
-                        "xl/workbook.xml" in workbook_zip.namelist() and "xl/worksheets/sheet1.xml" in workbook_zip.namelist(),
+                        "xl/workbook.xml" in workbook_zip.namelist()
+                        and "xl/styles.xml" in workbook_zip.namelist()
+                        and "xl/worksheets/sheet1.xml" in workbook_zip.namelist()
+                        and "xl/worksheets/sheet2.xml" in workbook_zip.namelist(),
                         "Separation XLSX should contain the required workbook parts.",
                     )
+                    separation_workbook_xml = workbook_zip.read("xl/workbook.xml").decode("utf-8")
                     separation_sheet_xml = workbook_zip.read("xl/worksheets/sheet1.xml").decode("utf-8")
+                    separation_trace_xml = workbook_zip.read("xl/worksheets/sheet2.xml").decode("utf-8")
+                    separation_styles_xml = workbook_zip.read("xl/styles.xml").decode("utf-8")
+                assert_true("분리 현황표" in separation_workbook_xml, "Separation XLSX should use the lab workbook sheet name.")
                 assert_true("Sampling point" in separation_sheet_xml, "Separation XLSX should include the template header.")
                 assert_true("ApoM Tg/Tg" in separation_sheet_xml, "Separation XLSX should include accepted strain rows.")
+                assert_true("<cols>" in separation_sheet_xml and 's="1"' in separation_sheet_xml, "Separation XLSX should include column widths and styled headers.")
+                assert_true("Export_Trace" in separation_workbook_xml and "Source note" in separation_trace_xml, "Separation XLSX should include traceability sheet.")
+                assert_true("<b/>" in separation_styles_xml, "Separation XLSX should include bold header style.")
                 ready_animal_xlsx = client.get("/api/exports/animal-sheet.xlsx")
                 assert_true(ready_animal_xlsx.status_code == 200, "Ready animal sheet XLSX export should succeed after review resolution.")
                 assert_true(
@@ -1377,13 +1457,21 @@ def main() -> None:
                 )
                 with zipfile.ZipFile(io.BytesIO(ready_animal_xlsx.content)) as workbook_zip:
                     assert_true(
-                        "xl/workbook.xml" in workbook_zip.namelist() and "xl/worksheets/sheet1.xml" in workbook_zip.namelist(),
+                        "xl/workbook.xml" in workbook_zip.namelist()
+                        and "xl/styles.xml" in workbook_zip.namelist()
+                        and "xl/worksheets/sheet1.xml" in workbook_zip.namelist()
+                        and "xl/worksheets/sheet2.xml" in workbook_zip.namelist(),
                         "Animal sheet XLSX should contain the required workbook parts.",
                     )
+                    animal_workbook_xml = workbook_zip.read("xl/workbook.xml").decode("utf-8")
                     animal_sheet_xml = workbook_zip.read("xl/worksheets/sheet1.xml").decode("utf-8")
+                    animal_trace_xml = workbook_zip.read("xl/worksheets/sheet2.xml").decode("utf-8")
                 assert_true("Cage No." in animal_sheet_xml, "Animal sheet XLSX should include the template header.")
                 assert_true("MT321" in animal_sheet_xml and "MT322" in animal_sheet_xml, "Animal sheet XLSX should include parent IDs.")
                 assert_true("2026-05-02 10p" in animal_sheet_xml, "Animal sheet XLSX should include litter pup evidence.")
+                assert_true("animal sheet" in animal_workbook_xml and "Export_Trace" in animal_workbook_xml, "Animal sheet XLSX should name workbook sheets clearly.")
+                assert_true("<cols>" in animal_sheet_xml and 's="1"' in animal_sheet_xml, "Animal sheet XLSX should include column widths and styled headers.")
+                assert_true("Source record" in animal_trace_xml, "Animal sheet XLSX should include traceability sheet.")
                 ready_logs = client.get("/api/export-log").json()
                 assert_true(
                     any(item["export_type"] == "separation_xlsx" and item["status"] == "generated" for item in ready_logs),

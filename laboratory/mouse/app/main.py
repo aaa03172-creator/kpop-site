@@ -94,6 +94,12 @@ class MouseEventCreate(BaseModel):
 class ReviewResolutionCreate(BaseModel):
     resolution_note: str = Field(min_length=1)
     resolved_value: str = ""
+    correction_entity_type: str = ""
+    correction_entity_id: str = ""
+    correction_field_name: str = ""
+    correction_before_value: str = ""
+    correction_after_value: str = ""
+    correction_source_record_id: str | None = None
 
 
 class GenotypingUpdate(BaseModel):
@@ -357,46 +363,51 @@ def list_corrections() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -> str:
+    correction_id = new_id("correction")
+    conn.execute(
+        """
+        INSERT INTO correction_log
+            (correction_id, entity_type, entity_id, field_name,
+             before_value, after_value, reason, source_record_id,
+             review_id, corrected_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            correction_id,
+            payload.entity_type,
+            payload.entity_id,
+            payload.field_name,
+            payload.before_value,
+            payload.after_value,
+            payload.reason,
+            payload.source_record_id,
+            payload.review_id,
+            corrected_at,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id("action"),
+            "correction_applied",
+            payload.entity_id,
+            payload.before_value,
+            payload.after_value,
+            corrected_at,
+        ),
+    )
+    return correction_id
+
+
 @app.post("/api/corrections")
 def create_correction(payload: CorrectionCreate) -> dict[str, Any]:
-    correction_id = new_id("correction")
     corrected_at = utc_now()
     with connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO correction_log
-                (correction_id, entity_type, entity_id, field_name,
-                 before_value, after_value, reason, source_record_id,
-                 review_id, corrected_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                correction_id,
-                payload.entity_type,
-                payload.entity_id,
-                payload.field_name,
-                payload.before_value,
-                payload.after_value,
-                payload.reason,
-                payload.source_record_id,
-                payload.review_id,
-                corrected_at,
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                new_id("action"),
-                "correction_applied",
-                payload.entity_id,
-                payload.before_value,
-                payload.after_value,
-                corrected_at,
-            ),
-        )
+        correction_id = record_correction(conn, payload, corrected_at)
 
     return {"correction_id": correction_id, "corrected_at": corrected_at}
 
@@ -1173,6 +1184,25 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         ).fetchone()
         if existing is None:
             raise HTTPException(status_code=404, detail="Review item not found.")
+        if existing["status"] == "resolved":
+            raise HTTPException(status_code=409, detail="Review item is already resolved.")
+        correction_id = None
+        correction_identity_fields = [
+            payload.correction_entity_type.strip(),
+            payload.correction_entity_id.strip(),
+            payload.correction_field_name.strip(),
+        ]
+        correction_fields = [
+            *correction_identity_fields,
+            payload.correction_before_value,
+            payload.correction_after_value,
+            payload.correction_source_record_id or "",
+        ]
+        if any(correction_fields) and not all(correction_identity_fields):
+            raise HTTPException(
+                status_code=400,
+                detail="Correction entity type, entity id, and field name are required when recording a review correction.",
+            )
         before = dict(existing)
         after = {
             "status": "resolved",
@@ -1203,12 +1233,28 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
                 resolved_at,
             ),
         )
+        if all(correction_identity_fields):
+            correction_id = record_correction(
+                conn,
+                CorrectionCreate(
+                    entity_type=payload.correction_entity_type,
+                    entity_id=payload.correction_entity_id,
+                    field_name=payload.correction_field_name,
+                    before_value=payload.correction_before_value,
+                    after_value=payload.correction_after_value or payload.resolved_value,
+                    reason=payload.resolution_note,
+                    source_record_id=payload.correction_source_record_id,
+                    review_id=review_id,
+                ),
+                resolved_at,
+            )
     return {
         "review_id": review_id,
         "status": "resolved",
         "resolved_at": resolved_at,
         "resolution_note": payload.resolution_note,
         "resolved_value": payload.resolved_value,
+        "correction_id": correction_id,
     }
 
 
@@ -2524,45 +2570,102 @@ def xlsx_column_name(index: int) -> str:
     return name
 
 
-def xlsx_cell_xml(row_number: int, column_number: int, value: Any) -> str:
+def xlsx_cell_xml(row_number: int, column_number: int, value: Any, style_id: int = 0) -> str:
     ref = f"{xlsx_column_name(column_number)}{row_number}"
     text = html.escape("" if value is None else str(value), quote=False)
-    return f'<c r="{ref}" t="inlineStr"><is><t>{text}</t></is></c>'
+    style_attr = f' s="{style_id}"' if style_id else ""
+    return f'<c r="{ref}"{style_attr} t="inlineStr"><is><t>{text}</t></is></c>'
 
 
-def build_xlsx(sheet_name: str, headers: list[str], rows: list[list[Any]]) -> bytes:
-    safe_sheet_name = html.escape(sheet_name[:31] or "Sheet1", quote=True)
+def xlsx_sheet_xml(headers: list[str], rows: list[list[Any]], column_widths: list[int] | None = None) -> str:
     matrix = [headers, *rows]
     row_xml = []
     for row_index, values in enumerate(matrix, start=1):
-        cells = "".join(xlsx_cell_xml(row_index, column_index, value) for column_index, value in enumerate(values, start=1))
+        style_id = 1 if row_index == 1 else 0
+        cells = "".join(
+            xlsx_cell_xml(row_index, column_index, value, style_id)
+            for column_index, value in enumerate(values, start=1)
+        )
         row_xml.append(f'<row r="{row_index}">{cells}</row>')
     last_col = xlsx_column_name(max(len(headers), 1))
     last_row = max(len(matrix), 1)
-    sheet_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    widths = column_widths or [max(12, min(35, len(str(header)) + 4)) for header in headers]
+    cols_xml = "".join(
+        f'<col min="{index}" max="{index}" width="{width}" customWidth="1"/>'
+        for index, width in enumerate(widths, start=1)
+    )
+    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <dimension ref="A1:{last_col}{last_row}"/>
   <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <cols>{cols_xml}</cols>
   <sheetData>{''.join(row_xml)}</sheetData>
 </worksheet>"""
+
+
+def build_xlsx(
+    sheet_name: str,
+    headers: list[str],
+    rows: list[list[Any]],
+    trace_rows: list[list[Any]] | None = None,
+    column_widths: list[int] | None = None,
+) -> bytes:
+    sheets = [
+        {
+            "name": sheet_name[:31] or "Sheet1",
+            "xml": xlsx_sheet_xml(headers, rows, column_widths),
+            "target": "worksheets/sheet1.xml",
+        }
+    ]
+    if trace_rows:
+        trace_headers = ["Row", "Source note", "Source record", "Boundary", "Export note"]
+        sheets.append(
+            {
+                "name": "Export_Trace",
+                "xml": xlsx_sheet_xml(trace_headers, trace_rows, [10, 28, 28, 24, 40]),
+                "target": "worksheets/sheet2.xml",
+            }
+        )
+    sheet_entries = "".join(
+        f'<sheet name="{html.escape(sheet["name"], quote=True)}" sheetId="{index}" r:id="rId{index}"/>'
+        for index, sheet in enumerate(sheets, start=1)
+    )
     workbook_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets><sheet name="{safe_sheet_name}" sheetId="1" r:id="rId1"/></sheets>
+  <sheets>{sheet_entries}</sheets>
 </workbook>"""
-    workbook_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    rel_entries = "".join(
+        f'<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="{sheet["target"]}"/>'
+        for index, sheet in enumerate(sheets, start=1)
+    )
+    rel_entries += f'<Relationship Id="rId{len(sheets) + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+    workbook_rels = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  {rel_entries}
 </Relationships>"""
+    styles_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+  <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
+</styleSheet>"""
     root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
 </Relationships>"""
-    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    sheet_overrides = "".join(
+        f'<Override PartName="/xl/{sheet["target"]}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        for sheet in sheets
+    )
+    content_types = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  {sheet_overrides}
 </Types>"""
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as workbook:
@@ -2570,7 +2673,9 @@ def build_xlsx(sheet_name: str, headers: list[str], rows: list[list[Any]]) -> by
         workbook.writestr("_rels/.rels", root_rels)
         workbook.writestr("xl/workbook.xml", workbook_xml)
         workbook.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
-        workbook.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        workbook.writestr("xl/styles.xml", styles_xml)
+        for sheet in sheets:
+            workbook.writestr(f"xl/{sheet['target']}", sheet["xml"])
     return output.getvalue()
 
 
@@ -2586,6 +2691,14 @@ def export_filename(export_kind: str, preview: dict[str, Any], query: str = "") 
     date_label = utc_now()[:10].replace("-", "")
     suffix = "animal sheet" if export_kind == "animal" else "분리 현황표"
     return f"{date_label} {safe_strain} {suffix}.xlsx"
+
+
+def trace_rows_from_export_rows(rows: list[dict[str, Any]], source_key: str) -> list[list[Any]]:
+    trace_rows = []
+    for index, row in enumerate(rows, start=2):
+        source_value = row.get(source_key) or row.get("source") or ""
+        trace_rows.append([index, source_value, row.get("source_record_id", ""), "export or view", "Generated from accepted structured state."])
+    return trace_rows
 
 
 def workbook_content_disposition(filename: str, fallback: str) -> str:
@@ -3248,6 +3361,11 @@ def list_export_log() -> list[dict[str, Any]]:
 @app.get("/api/exports/separation.xlsx")
 def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Response:
     preview = export_preview()
+    filtered_rows = [
+        row
+        for row in preview["separation_rows"]
+        if not query.strip() or query.strip().lower() in row["strain"].lower()
+    ]
     rows = [
         [
             row["cage_number"],
@@ -3260,8 +3378,7 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
             row["sampling_point"],
             row["source_note_item_ids"],
         ]
-        for row in preview["separation_rows"]
-        if not query.strip() or query.strip().lower() in row["strain"].lower()
+        for row in filtered_rows
     ]
     filename = export_filename("separation", preview, query)
     blocked_count = preview["blocked_review_items"]
@@ -3277,7 +3394,13 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
                 "source_layer": "export or view",
             },
         )
-    payload = build_xlsx("Separation", preview["separation_columns"], rows)
+    payload = build_xlsx(
+        "분리 현황표",
+        preview["separation_columns"],
+        rows,
+        trace_rows_from_export_rows(filtered_rows, "source_note_item_ids"),
+        [14, 22, 22, 12, 18, 10, 10, 22, 32],
+    )
     log_workbook_export("separation_xlsx", filename, query, len(rows), blocked_count, "generated")
     return Response(
         content=payload,
@@ -3289,6 +3412,11 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
 @app.get("/api/exports/animal-sheet.xlsx")
 def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Response:
     preview = export_preview()
+    filtered_rows = [
+        row
+        for row in preview["animal_sheet_rows"]
+        if not query.strip() or not row["strain"] or query.strip().lower() in row["strain"].lower()
+    ]
     rows = [
         [
             row["cage_no"],
@@ -3302,8 +3430,7 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
             row["status"],
             row["source"],
         ]
-        for row in preview["animal_sheet_rows"]
-        if not query.strip() or not row["strain"] or query.strip().lower() in row["strain"].lower()
+        for row in filtered_rows
     ]
     filename = export_filename("animal", preview, query)
     blocked_count = preview["blocked_review_items"]
@@ -3319,7 +3446,13 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
                 "source_layer": "export or view",
             },
         )
-    payload = build_xlsx("Animal sheet", preview["animal_sheet_columns"], rows)
+    payload = build_xlsx(
+        "animal sheet",
+        preview["animal_sheet_columns"],
+        rows,
+        trace_rows_from_export_rows(filtered_rows, "source"),
+        [10, 22, 10, 18, 16, 16, 16, 18, 16, 32],
+    )
     log_workbook_export("animal_sheet_xlsx", filename, query, len(rows), blocked_count, "generated")
     return Response(
         content=payload,
