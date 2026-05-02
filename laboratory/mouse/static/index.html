@@ -350,14 +350,45 @@
     }
     .photo-review-layout {
       display: grid;
-      grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 1.1fr);
+      grid-template-columns: minmax(220px, 0.65fr) minmax(360px, 1.35fr) minmax(320px, 0.9fr);
       gap: 14px;
       align-items: start;
+    }
+    .photo-worklist {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+    .photo-worklist-card {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfdfc;
+      color: var(--ink);
+      padding: 9px;
+      text-align: left;
+      font-size: 12px;
+    }
+    .photo-worklist-card.active {
+      border-color: var(--primary);
+      background: #eef7f4;
+    }
+    .photo-worklist-card strong,
+    .photo-worklist-card span {
+      display: block;
+    }
+    .photo-worklist-card span {
+      color: var(--muted);
+      margin-top: 3px;
+      line-height: 1.35;
     }
     .photo-preview-pane {
       display: grid;
       gap: 8px;
       min-width: 0;
+    }
+    .transcription-form {
+      grid-template-columns: 1fr;
     }
     .photo-queue-bar {
       display: flex;
@@ -937,7 +968,16 @@
         <span class="muted" id="photoQueueSummary">No photo queue loaded.</span>
       </div>
       <div class="photo-review-layout">
-        <div class="form-grid">
+        <aside class="photo-worklist" aria-label="Photo worklist">
+          <strong>Photo Inbox</strong>
+          <p class="muted">Raw source photos remain preserved evidence.</p>
+          <div class="photo-worklist" id="workbenchPhotoCards"></div>
+        </aside>
+        <div class="photo-preview-pane">
+          <img id="transcriptionPhotoPreview" class="photo-preview-image" alt="Selected cage card photo preview">
+          <p class="muted" id="transcriptionPhotoPreviewCaption">Select a source photo to review the raw cage-card evidence.</p>
+        </div>
+        <div class="form-grid transcription-form">
         <label>
           Source photo
           <select id="transcriptionPhotoId"></select>
@@ -967,10 +1007,6 @@
           <textarea id="transcriptionNotes" rows="3" placeholder="MT318 R'&#10;MT322 L'&#10;26.04.13 - 10p"></textarea>
         </label>
         <button id="transcriptionButton" type="button">Save Manual Transcription</button>
-        </div>
-        <div class="photo-preview-pane">
-          <img id="transcriptionPhotoPreview" class="photo-preview-image" alt="Selected cage card photo preview">
-          <p class="muted" id="transcriptionPhotoPreviewCaption">Select a source photo to review the raw cage-card evidence.</p>
         </div>
       </div>
       <p class="muted" id="transcriptionMessage"></p>
@@ -1944,6 +1980,9 @@
       const position = index >= 0 ? `${index + 1}/${queue.length}` : "not pending";
       document.getElementById("photoQueueSummary").textContent =
         `${position} - ${selected?.original_filename || photoId} - ${selected?.next_action || "ready"}`;
+      document.querySelectorAll(".photo-worklist-card").forEach((button) => {
+        button.classList.toggle("active", button.dataset.photoId === photoId);
+      });
     }
 
     function fillTranscriptionDraft(draft) {
@@ -2279,6 +2318,13 @@
         });
       });
       latestPhotos = photoWorkbench.rows || [];
+      document.getElementById("workbenchPhotoCards").innerHTML = latestPhotos.slice(0, 8).map((photo) => `
+        <button class="photo-worklist-card select-photo-review ${photo.photo_id === selectedTranscriptionPhotoId ? "active" : ""}" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">
+          <strong>${escapeHtml(photo.original_filename)}</strong>
+          <span>${escapeHtml(photo.next_action || photo.status || "--")}</span>
+          <span>${escapeHtml(`${photo.note_line_count || 0} note lines / ${photo.open_review_count || 0} open review(s)`)}</span>
+        </button>
+      `).join("") || '<p class="muted">Upload photos to start review.</p>';
       document.getElementById("photoRows").innerHTML = latestPhotos.map((photo) => `
         <tr>
           <td>${escapeHtml(photo.photo_id)}</td>
@@ -2301,6 +2347,9 @@
         document.getElementById("photoQueueSummary").textContent = "No photo queue loaded.";
       }
       document.querySelectorAll(".select-photo-review").forEach((button) => {
+        button.addEventListener("click", () => setTranscriptionPhoto(button.dataset.photoId));
+      });
+      document.querySelectorAll(".photo-worklist-card").forEach((button) => {
         button.addEventListener("click", () => setTranscriptionPhoto(button.dataset.photoId));
       });
       document.getElementById("reviewStatusFilter").value = reviewStatusFilter;
