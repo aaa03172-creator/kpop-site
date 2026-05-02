@@ -399,6 +399,7 @@ def main() -> None:
                 assert_true("Cage View" in index_html, "Local UI should expose cage management.")
                 assert_true("Breeding / Litter View" in index_html, "Local UI should expose mating and litter management.")
                 assert_true("Create Offspring" in index_html, "Local UI should expose litter offspring generation.")
+                assert_true("Complete Weaning" in index_html, "Local UI should expose litter weaning completion.")
                 assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
                 assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
                 assert_true("exportRows" in index_html, "Local UI should expose export preview rows.")
@@ -847,6 +848,45 @@ def main() -> None:
                     any(row["litter_id"] == litter_payload["litter_id"] and row["offspring_count"] == 2 for row in litter_rows_after_offspring),
                     "Litter list should expose generated offspring count.",
                 )
+                over_weaned = client.post(
+                    f"/api/litters/{litter_payload['litter_id']}/wean",
+                    json={"weaning_date": "2026-05-23", "number_weaned": 3},
+                )
+                assert_true(over_weaned.status_code == 409, "Weaning should reject counts above generated offspring records.")
+                weaned = client.post(
+                    f"/api/litters/{litter_payload['litter_id']}/wean",
+                    json={
+                        "weaning_date": "2026-05-23",
+                        "number_weaned": 2,
+                        "note": "Verified weaning from reviewed litter card.",
+                    },
+                )
+                assert_true(weaned.status_code == 200, "Could not complete litter weaning.")
+                weaned_payload = weaned.json()
+                assert_true(weaned_payload["status"] == "weaned", "Weaning should mark litter status as weaned.")
+                assert_true(weaned_payload["number_weaned"] == 2, "Weaning should preserve reviewed weaned count.")
+                assert_true(weaned_payload["source_record_id"], "Weaning should preserve source evidence.")
+                duplicate_wean = client.post(
+                    f"/api/litters/{litter_payload['litter_id']}/wean",
+                    json={"weaning_date": "2026-05-24", "number_weaned": 2},
+                )
+                assert_true(duplicate_wean.status_code == 409, "Already-weaned litters should not be silently overwritten.")
+                weaned_offspring_rows = client.get("/api/mice", params={"query": "MT321-L1"}).json()
+                assert_true(
+                    all(row["status"] == "active" and row["next_action"] == "sample_needed" for row in weaned_offspring_rows),
+                    "Weaned offspring should move from weaning pending to active sample-needed workflow.",
+                )
+                litter_rows_after_weaning = client.get("/api/litters").json()
+                assert_true(
+                    any(
+                        row["litter_id"] == litter_payload["litter_id"]
+                        and row["status"] == "weaned"
+                        and row["number_weaned"] == 2
+                        and row["weaning_date"] == "2026-05-23"
+                        for row in litter_rows_after_weaning
+                    ),
+                    "Litter list should expose completed weaning state.",
+                )
                 genotyping_update = client.post(
                     "/api/genotyping/update",
                     json={
@@ -1017,6 +1057,21 @@ def main() -> None:
                         """,
                         (litter_payload["litter_id"],),
                     ).fetchone()["count"]
+                    weaned_event_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM mouse_event
+                        WHERE event_type = 'weaned' AND related_entity_type = 'litter'
+                        """
+                    ).fetchone()["count"]
+                    weaned_action_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM action_log
+                        WHERE action_type = 'litter_weaned' AND target_id = ?
+                        """,
+                        (litter_payload["litter_id"],),
+                    ).fetchone()["count"]
                 assert_true(note_count >= 10, "Persisted note item evidence count is too low.")
                 assert_true(mouse_count >= 5, "Persisted mouse candidate count is too low.")
                 assert_true(moved_count >= 1, "Single-struck mouse note should create a moved candidate.")
@@ -1032,6 +1087,8 @@ def main() -> None:
                 assert_true(litter_event_count >= 2, "Litter creation should create parent litter events.")
                 assert_true(offspring_born_event_count == 2, "Offspring creation should create one birth event per mouse.")
                 assert_true(offspring_action_count == 1, "Offspring creation should create an action log entry.")
+                assert_true(weaned_event_count == 2, "Weaning should create one event per weaned offspring.")
+                assert_true(weaned_action_count == 1, "Weaning should create an action log entry.")
                 correction = client.post(
                     "/api/corrections",
                     json={

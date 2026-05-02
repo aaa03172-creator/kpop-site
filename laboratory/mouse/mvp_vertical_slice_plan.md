@@ -189,6 +189,7 @@ Minimum behavior:
 - Store line-level note evidence in `card_note_item_log` before writing mouse-level state.
 - Store current individual state in `mouse_master`, while preserving movement/death/genotype changes as action/event history.
 - Apply state changes and related event/action log writes in a single transaction.
+- Record litter weaning as a reviewed canonical state change on `litter_registry`, with one `weaned` mouse event per affected offspring and a before/after `litter_weaned` action log entry.
 
 Acceptance checks:
 
@@ -196,6 +197,7 @@ Acceptance checks:
 - Note line raw text, strike status, parsed mouse ID, parsed ear label, confidence, and review flag are preserved.
 - Mouse display ID is not globally unique by itself; duplicate display IDs remain candidate matches until strain/DOB/ear-label/source context resolves them.
 - Movement, death, mating, litter, and genotype updates are represented as events.
+- Weaning completion does not silently overwrite an already-weaned litter and preserves source evidence, reviewed weaned count, and weaning date.
 - Internal IDs stay hidden from ordinary user-facing UI.
 - Partial writes cannot leave current mouse state updated without the corresponding event/action log, or vice versa.
 - Event/action log entries preserve source evidence and before/after values when correcting or inferring high-risk state changes.
