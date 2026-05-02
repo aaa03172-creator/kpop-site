@@ -899,6 +899,49 @@ def main() -> None:
                     client.get("/api/mice").json() == mice_before_comparison,
                     "Mapping a comparison review should not write canonical mouse state.",
                 )
+                apply_candidate = client.post(f"/api/canonical-candidates/{mapped_payload['canonical_candidate_id']}/apply")
+                assert_true(apply_candidate.status_code == 200, f"Could not apply canonical candidate draft: {apply_candidate.text}")
+                apply_payload = apply_candidate.json()
+                assert_true(
+                    apply_payload["boundary"] == "canonical structured state",
+                    "Applying a draft should be explicitly classified as canonical structured state.",
+                )
+                assert_true(
+                    apply_payload["created_mice"] == 2 and apply_payload["created_events"] == 2,
+                    "Applying the comparison draft should create mouse records and events from parsed note lines.",
+                )
+                applied_candidates = client.get("/api/canonical-candidates").json()
+                applied_candidate = next(
+                    item for item in applied_candidates
+                    if item["candidate_id"] == mapped_payload["canonical_candidate_id"]
+                )
+                assert_true(applied_candidate["status"] == "applied", "Applied canonical candidate should expose applied status.")
+                applied_mice = client.get("/api/mice").json()
+                applied_mt321 = next((mouse for mouse in applied_mice if mouse["display_id"] == "MT321"), None)
+                applied_mt322 = next((mouse for mouse in applied_mice if mouse["display_id"] == "MT322"), None)
+                assert_true(
+                    applied_mt321 is not None and applied_mt322 is not None,
+                    "Applied canonical candidate should create reviewed mouse records from note lines.",
+                )
+                assert_true(
+                    applied_mt321["source_note_item_id"] and applied_mt322["source_note_item_id"],
+                    "Applied canonical mouse records should retain source note-line anchors.",
+                )
+                applied_events = [
+                    item
+                    for item in client.get("/api/mouse-events").json()
+                    if item["related_entity_id"] == mapped_payload["canonical_candidate_id"]
+                    and item["event_type"] == "canonical_candidate_applied"
+                ]
+                assert_true(
+                    len(applied_events) == 2,
+                    "Applying a canonical candidate should create source-backed mouse events.",
+                )
+                idempotent_apply = client.post(f"/api/canonical-candidates/{mapped_payload['canonical_candidate_id']}/apply")
+                assert_true(
+                    idempotent_apply.status_code == 409,
+                    "Re-applying an applied canonical candidate should be blocked instead of silently rewriting state.",
+                )
                 created = client.post(
                     "/api/assigned-strains",
                     json={

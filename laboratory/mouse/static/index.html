@@ -1083,9 +1083,9 @@
 
     <section class="full">
       <h2>Canonical Candidate Drafts</h2>
-      <p>Resolved comparison reviews can create draft acceptance candidates without writing canonical mouse state.</p>
+      <p>Resolved comparison reviews create drafts first; applying a draft writes canonical mouse state with note-line traceability.</p>
       <table>
-        <thead><tr><th>Candidate</th><th>Mouse ID</th><th>Strain</th><th>DOB</th><th>Count</th><th>Status</th><th>Review</th></tr></thead>
+        <thead><tr><th>Candidate</th><th>Mouse ID</th><th>Strain</th><th>DOB</th><th>Count</th><th>Status</th><th>Review</th><th>Action</th></tr></thead>
         <tbody id="canonicalCandidateRows"></tbody>
       </table>
     </section>
@@ -1786,17 +1786,30 @@
       document.getElementById("sourceRows").innerHTML = sourceRecords.map((source) =>
         row([source.source_type, source.source_label || "--", source.source_uri || "--", source.imported_at, source.note || "--"])
       ).join("") || row(["No source evidence yet", "", "", "", ""]);
-      document.getElementById("canonicalCandidateRows").innerHTML = canonicalCandidates.map((candidate) =>
-        row([
-          candidate.candidate_id,
-          candidate.proposed_mouse_display_id || "--",
-          candidate.proposed_strain || "--",
-          candidate.proposed_dob || "--",
-          candidate.proposed_count || "--",
-          candidate.status,
-          candidate.review_id
-        ])
-      ).join("") || row(["No canonical candidate drafts yet", "", "", "", "", "", ""]);
+      document.getElementById("canonicalCandidateRows").innerHTML = canonicalCandidates.map((candidate) => `
+        <tr>
+          <td>${escapeHtml(candidate.candidate_id)}</td>
+          <td>${escapeHtml(candidate.proposed_mouse_display_id || "--")}</td>
+          <td>${escapeHtml(candidate.proposed_strain || "--")}</td>
+          <td>${escapeHtml(candidate.proposed_dob || "--")}</td>
+          <td>${escapeHtml(candidate.proposed_count || "--")}</td>
+          <td>${escapeHtml(candidate.status)}</td>
+          <td>${escapeHtml(candidate.review_id)}</td>
+          <td>${
+            candidate.status === "draft"
+              ? `<button class="apply-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Apply</button>`
+              : escapeHtml(candidate.status)
+          }</td>
+        </tr>
+      `).join("") || row(["No canonical candidate drafts yet", "", "", "", "", "", "", ""]);
+      document.querySelectorAll(".apply-canonical-candidate").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply`, { method: "POST" });
+          document.getElementById("comparisonReviewMessage").textContent =
+            `Applied ${result.created_mice} mouse record(s) from ${result.candidate_id}; ${result.existing_mice} already existed.`;
+          await refresh();
+        });
+      });
       document.getElementById("correctionRows").innerHTML = corrections.map((correction) =>
         row([
           `${correction.entity_type}:${correction.entity_id}`,

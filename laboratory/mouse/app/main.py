@@ -644,6 +644,203 @@ def list_canonical_candidates() -> list[dict[str, Any]]:
     return result
 
 
+@app.post("/api/canonical-candidates/{candidate_id}/apply")
+def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
+    applied_at = utc_now()
+    created_mice = 0
+    existing_mice = 0
+    created_events = 0
+    mouse_ids: list[str] = []
+    with connection() as conn:
+        candidate = conn.execute(
+            """
+            SELECT candidate.candidate_id, candidate.review_id, candidate.parse_id,
+                   candidate.legacy_row_id, candidate.proposed_strain,
+                   candidate.proposed_dob, candidate.candidate_payload,
+                   candidate.status, review.status AS review_status
+            FROM canonical_candidate candidate
+            JOIN review_queue review ON review.review_id = candidate.review_id
+            WHERE candidate.candidate_id = ?
+            """,
+            (candidate_id,),
+        ).fetchone()
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="Canonical candidate draft not found.")
+        if candidate["status"] != "draft":
+            raise HTTPException(status_code=409, detail="Only draft canonical candidates can be applied.")
+        if candidate["review_status"] != "resolved":
+            raise HTTPException(status_code=409, detail="Candidate review must be resolved before canonical apply.")
+
+        payload = json_object(candidate["candidate_payload"])
+        raw_strain_text = str(candidate["proposed_strain"] or payload.get("strain") or "")
+        dob_raw = str(candidate["proposed_dob"] or payload.get("dob") or "")
+        dob_raw, dob_start, dob_end = split_dob_range(dob_raw, dob_raw)
+        note_rows = conn.execute(
+            """
+            SELECT note_item_id, photo_id, line_number, raw_line_text, interpreted_status,
+                   parsed_mouse_display_id, parsed_ear_label_raw, parsed_ear_label_code,
+                   parsed_ear_label_confidence, parsed_ear_label_review_status
+            FROM card_note_item_log
+            WHERE parse_id = ?
+              AND parsed_type = 'mouse_item'
+              AND parsed_mouse_display_id IS NOT NULL
+              AND parsed_mouse_display_id != ''
+            ORDER BY line_number
+            """,
+            (candidate["parse_id"],),
+        ).fetchall()
+        if not note_rows:
+            raise HTTPException(status_code=400, detail="Candidate has no parsed mouse note lines to apply.")
+
+        for note in note_rows:
+            display_id = str(note["parsed_mouse_display_id"])
+            mouse_id = f"mouse_{display_id}_{candidate['parse_id']}".replace(" ", "_")
+            existing = conn.execute(
+                "SELECT mouse_id FROM mouse_master WHERE mouse_id = ?",
+                (mouse_id,),
+            ).fetchone()
+            duplicate = conn.execute(
+                """
+                SELECT mouse_id, source_note_item_id
+                FROM mouse_master
+                WHERE display_id = ?
+                  AND mouse_id != ?
+                  AND status IN ('active', 'mating', 'pre_weaning', 'weaning_pending')
+                LIMIT 1
+                """,
+                (display_id, mouse_id),
+            ).fetchone()
+            if duplicate is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "Active mouse with this display ID already exists. Resolve duplicate evidence before applying.",
+                        "display_id": display_id,
+                        "existing_mouse_id": duplicate["mouse_id"],
+                        "existing_source_note_item_id": duplicate["source_note_item_id"],
+                        "candidate_id": candidate_id,
+                        "source_note_item_id": note["note_item_id"],
+                    },
+                )
+            reviewed_ear_code = (
+                note["parsed_ear_label_code"]
+                if note["parsed_ear_label_review_status"] in {"auto_filled", "verified", "user_corrected"}
+                else None
+            )
+            if existing is None:
+                conn.execute(
+                    """
+                    INSERT INTO mouse_master
+                        (mouse_id, display_id, id_prefix, raw_strain_text, dob_raw, dob_start, dob_end,
+                         ear_label_raw, ear_label_code, ear_label_confidence, ear_label_review_status,
+                         source_note_item_id, status, source_photo_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        mouse_id,
+                        display_id,
+                        mouse_id_prefix(display_id),
+                        raw_strain_text,
+                        dob_raw,
+                        dob_start,
+                        dob_end,
+                        note["parsed_ear_label_raw"],
+                        reviewed_ear_code,
+                        note["parsed_ear_label_confidence"],
+                        note["parsed_ear_label_review_status"],
+                        note["note_item_id"],
+                        note["interpreted_status"] or "active",
+                        note["photo_id"],
+                        applied_at,
+                    ),
+                )
+                created_mice += 1
+            else:
+                existing_mice += 1
+            mouse_ids.append(mouse_id)
+
+            event_id = f"event_apply_{candidate_id}_{note['note_item_id']}".replace(" ", "_")
+            existing_event = conn.execute(
+                "SELECT event_id FROM mouse_event WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if existing_event is None:
+                conn.execute(
+                    """
+                    INSERT INTO mouse_event
+                        (event_id, mouse_id, event_type, event_date, related_entity_type,
+                         related_entity_id, details, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        mouse_id,
+                        "canonical_candidate_applied",
+                        applied_at[:10],
+                        "canonical_candidate",
+                        candidate_id,
+                        json.dumps(
+                            {
+                                "review_id": candidate["review_id"],
+                                "parse_id": candidate["parse_id"],
+                                "legacy_row_id": candidate["legacy_row_id"],
+                                "note_item_id": note["note_item_id"],
+                                "raw_line_text": note["raw_line_text"],
+                                "boundary": "canonical structured state",
+                            },
+                            ensure_ascii=False,
+                        ),
+                        applied_at,
+                    ),
+                )
+                created_events += 1
+
+        before_status = candidate["status"]
+        conn.execute(
+            """
+            UPDATE canonical_candidate
+            SET status = 'applied',
+                updated_at = ?
+            WHERE candidate_id = ?
+            """,
+            (applied_at, candidate_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "canonical_candidate_applied",
+                candidate_id,
+                json.dumps({"status": before_status}, ensure_ascii=False),
+                json.dumps(
+                    {
+                        "status": "applied",
+                        "created_mice": created_mice,
+                        "existing_mice": existing_mice,
+                        "created_events": created_events,
+                        "mouse_ids": mouse_ids,
+                    },
+                    ensure_ascii=False,
+                ),
+                applied_at,
+            ),
+        )
+
+    return {
+        "candidate_id": candidate_id,
+        "status": "applied",
+        "applied_at": applied_at,
+        "created_mice": created_mice,
+        "existing_mice": existing_mice,
+        "created_events": created_events,
+        "mouse_ids": mouse_ids,
+        "boundary": "canonical structured state",
+    }
+
+
 @app.get("/api/mouse-events")
 def list_mouse_events() -> list[dict[str, Any]]:
     with connection() as conn:
