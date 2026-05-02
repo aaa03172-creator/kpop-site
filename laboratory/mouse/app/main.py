@@ -7,6 +7,7 @@ import csv
 import io
 import html
 import zipfile
+import mimetypes
 from urllib.parse import quote
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -231,6 +232,33 @@ def list_photos() -> list[dict[str, Any]]:
             """
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+@app.get("/api/photos/{photo_id}/image")
+def get_photo_image(photo_id: str) -> FileResponse:
+    with connection() as conn:
+        photo = conn.execute(
+            """
+            SELECT original_filename, stored_path
+            FROM photo_log
+            WHERE photo_id = ?
+            """,
+            (photo_id,),
+        ).fetchone()
+    if photo is None:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+
+    stored_path = str(photo["stored_path"] or "")
+    image_path = (ROOT / stored_path).resolve()
+    photo_root = (ROOT / "data" / "photos").resolve()
+    if photo_root != image_path and photo_root not in image_path.parents:
+        raise HTTPException(status_code=400, detail="Stored photo path is outside the photo evidence directory.")
+    if not image_path.exists() or not image_path.is_file():
+        raise HTTPException(status_code=404, detail="Stored photo file is missing.")
+
+    filename = photo["original_filename"] or image_path.name
+    media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return FileResponse(image_path, media_type=media_type, filename=filename)
 
 
 def stable_checksum(value: str) -> str:
@@ -644,6 +672,124 @@ def list_canonical_candidates() -> list[dict[str, Any]]:
     return result
 
 
+def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str, Any]:
+    candidate = conn.execute(
+        """
+        SELECT candidate.candidate_id, candidate.review_id, candidate.parse_id,
+               candidate.legacy_row_id, candidate.proposed_strain,
+               candidate.proposed_dob, candidate.candidate_payload,
+               candidate.status, review.status AS review_status
+        FROM canonical_candidate candidate
+        JOIN review_queue review ON review.review_id = candidate.review_id
+        WHERE candidate.candidate_id = ?
+        """,
+        (candidate_id,),
+    ).fetchone()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Canonical candidate draft not found.")
+
+    payload = json_object(candidate["candidate_payload"])
+    raw_strain_text = str(candidate["proposed_strain"] or payload.get("strain") or "")
+    dob_raw = str(candidate["proposed_dob"] or payload.get("dob") or "")
+    dob_raw, dob_start, dob_end = split_dob_range(dob_raw, dob_raw)
+    note_rows = conn.execute(
+        """
+        SELECT note_item_id, photo_id, line_number, raw_line_text, interpreted_status,
+               parsed_mouse_display_id, parsed_ear_label_raw, parsed_ear_label_code,
+               parsed_ear_label_confidence, parsed_ear_label_review_status
+        FROM card_note_item_log
+        WHERE parse_id = ?
+          AND parsed_type = 'mouse_item'
+          AND parsed_mouse_display_id IS NOT NULL
+          AND parsed_mouse_display_id != ''
+        ORDER BY line_number
+        """,
+        (candidate["parse_id"],),
+    ).fetchall()
+    proposed_mice = []
+    duplicate_risks = []
+    for note in note_rows:
+        display_id = str(note["parsed_mouse_display_id"])
+        mouse_id = f"mouse_{display_id}_{candidate['parse_id']}".replace(" ", "_")
+        existing = conn.execute(
+            "SELECT mouse_id FROM mouse_master WHERE mouse_id = ?",
+            (mouse_id,),
+        ).fetchone()
+        duplicate = conn.execute(
+            """
+            SELECT mouse_id, source_note_item_id
+            FROM mouse_master
+            WHERE display_id = ?
+              AND mouse_id != ?
+              AND status IN ('active', 'mating', 'pre_weaning', 'weaning_pending')
+            LIMIT 1
+            """,
+            (display_id, mouse_id),
+        ).fetchone()
+        if duplicate is not None:
+            duplicate_risks.append(
+                {
+                    "display_id": display_id,
+                    "candidate_mouse_id": mouse_id,
+                    "existing_mouse_id": duplicate["mouse_id"],
+                    "existing_source_note_item_id": duplicate["source_note_item_id"],
+                    "source_note_item_id": note["note_item_id"],
+                }
+            )
+        proposed_mice.append(
+            {
+                "mouse_id": mouse_id,
+                "display_id": display_id,
+                "raw_strain_text": raw_strain_text,
+                "dob_raw": dob_raw,
+                "dob_start": dob_start,
+                "dob_end": dob_end,
+                "status": note["interpreted_status"] or "active",
+                "source_note_item_id": note["note_item_id"],
+                "source_photo_id": note["photo_id"],
+                "raw_line_text": note["raw_line_text"],
+                "will_create_mouse": existing is None,
+                "existing_mouse_id": existing["mouse_id"] if existing is not None else "",
+                "will_create_event": True,
+            }
+        )
+    blockers = []
+    if candidate["status"] != "draft":
+        blockers.append(f"Candidate status is {candidate['status']}, not draft.")
+    if candidate["review_status"] != "resolved":
+        blockers.append("Candidate review is not resolved.")
+    if not note_rows:
+        blockers.append("Candidate has no parsed mouse note lines to apply.")
+    if duplicate_risks:
+        blockers.append("Active duplicate display IDs must be resolved before applying.")
+    return {
+        "boundary": "export or view",
+        "candidate_id": candidate_id,
+        "candidate_status": candidate["status"],
+        "review_id": candidate["review_id"],
+        "review_status": candidate["review_status"],
+        "parse_id": candidate["parse_id"],
+        "legacy_row_id": candidate["legacy_row_id"],
+        "proposed_mice": proposed_mice,
+        "duplicate_risks": duplicate_risks,
+        "blocked": bool(blockers),
+        "blockers": blockers,
+        "summary": {
+            "mouse_rows": len(proposed_mice),
+            "new_mouse_rows": sum(1 for item in proposed_mice if item["will_create_mouse"]),
+            "existing_mouse_rows": sum(1 for item in proposed_mice if not item["will_create_mouse"]),
+            "events": len(proposed_mice),
+            "duplicate_risks": len(duplicate_risks),
+        },
+    }
+
+
+@app.get("/api/canonical-candidates/{candidate_id}/apply-preview")
+def preview_canonical_candidate_apply(candidate_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        return canonical_candidate_apply_preview(conn, candidate_id)
+
+
 @app.post("/api/canonical-candidates/{candidate_id}/apply")
 def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
     applied_at = utc_now()
@@ -652,6 +798,9 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
     created_events = 0
     mouse_ids: list[str] = []
     with connection() as conn:
+        preview = canonical_candidate_apply_preview(conn, candidate_id)
+        if preview["blockers"]:
+            raise HTTPException(status_code=409, detail=preview)
         candidate = conn.execute(
             """
             SELECT candidate.candidate_id, candidate.review_id, candidate.parse_id,
