@@ -541,6 +541,7 @@ def main() -> None:
                 assert_true("exportBlockerRows" in index_html, "Local UI should expose export blockers.")
                 assert_true("exportLogRows" in index_html, "Local UI should expose export history.")
                 assert_true("Review Queue" in index_html and "Evidence" in index_html, "Local UI should show review evidence context.")
+                assert_true("Extract & Save Review" in index_html, "Local UI should expose AI photo extraction as a saved review workflow.")
                 assert_true("reviewStatusFilter" in index_html, "Local UI should expose review status filtering.")
                 assert_true("reviewSeverityFilter" in index_html, "Local UI should expose review severity filtering.")
                 assert_true("reviewEvidenceFilter" in index_html, "Local UI should expose review evidence filtering.")
@@ -827,6 +828,89 @@ def main() -> None:
                 assert_true(
                     unavailable_ai_draft.status_code == 503,
                     "AI draft transcription should stay unavailable without an explicit API key.",
+                )
+                ai_photo_upload = client.post(
+                    "/api/photos",
+                    files={"file": ("ai_card.jpg", io.BytesIO(b"fake ai image bytes"), "image/jpeg")},
+                )
+                assert_true(ai_photo_upload.status_code == 200, f"Could not upload AI extraction photo: {ai_photo_upload.text}")
+                ai_photo_payload = ai_photo_upload.json()
+
+                class FakeOpenAIResponse:
+                    def raise_for_status(self) -> None:
+                        return None
+
+                    def json(self) -> dict[str, str]:
+                        draft = {
+                            "card_type": "Separated",
+                            "raw_strain": "ApoM Tg/Tg",
+                            "matched_strain": "ApoM Tg/Tg",
+                            "sex_raw": "\u2640",
+                            "id_raw": "MT",
+                            "dob_raw": "25.10.20-28",
+                            "dob_normalized": "",
+                            "mating_date_raw": "",
+                            "mating_date_normalized": "",
+                            "lmo_raw": "",
+                            "mouse_count": "2 total",
+                            "notes": [
+                                {"raw": "MT401 R'", "meaning": "mouse", "strike": "none", "confidence": 91},
+                                {"raw": "MT402 L'", "meaning": "mouse", "strike": "none", "confidence": 90},
+                            ],
+                            "confidence": 88,
+                            "uncertain_fields": ["dob_normalized"],
+                            "reviewer_note": "Drafted from image.",
+                        }
+                        return {"output_text": json.dumps(draft)}
+
+                class FakeOpenAIClient:
+                    def __init__(self, *args, **kwargs) -> None:
+                        self.request_json = None
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *args) -> None:
+                        return None
+
+                    def post(self, url, headers=None, json=None):
+                        self.request_json = json
+                        assert_true(url.endswith("/v1/responses"), "AI extraction should call the Responses API.")
+                        payload_text = json["input"][0]["content"][0]["text"]
+                        assert_true(
+                            "Assigned strain scope" in payload_text,
+                            "AI extraction prompt should include only bounded assigned strain context.",
+                        )
+                        return FakeOpenAIResponse()
+
+                with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-ai-extract"}, clear=False):
+                    with patch("app.main.httpx.Client", FakeOpenAIClient):
+                        ai_extraction = client.post(
+                            f"/api/photos/{ai_photo_payload['photo_id']}/ai-extract-transcription",
+                            json={"approved_external_inference": True, "detail": "low"},
+                        )
+                assert_true(ai_extraction.status_code == 200, f"Could not save AI extraction: {ai_extraction.text}")
+                ai_extraction_payload = ai_extraction.json()
+                assert_true(
+                    ai_extraction_payload["source_name"] == "ai_photo_extraction"
+                    and ai_extraction_payload["created_note_items"] == 2
+                    and ai_extraction_payload["created_mouse_candidates"] == 0,
+                    "AI extraction should save parsed note evidence for review without canonical mouse writes.",
+                )
+                ai_reviews = [
+                    item for item in client.get("/api/review-items").json()
+                    if item["parse_id"] == ai_extraction_payload["parse_id"]
+                ]
+                assert_true(
+                    any(item["issue"] == "AI-extracted photo transcription needs review" for item in ai_reviews),
+                    "AI extraction should create a review item distinct from manual transcription.",
+                )
+                ai_workbench = client.get("/api/photo-review-workbench").json()
+                ai_workbench_row = next(item for item in ai_workbench["rows"] if item["photo_id"] == ai_photo_payload["photo_id"])
+                assert_true(
+                    ai_workbench_row["manual_parse_id"] == ai_extraction_payload["parse_id"]
+                    and ai_workbench_row["note_line_count"] == 2,
+                    "Photo workbench should treat saved AI extraction as reviewable transcription progress.",
                 )
                 photos = client.get("/api/photos").json()
                 assert_true(
@@ -1566,6 +1650,25 @@ def main() -> None:
                     any(row["display_id"] == "MT321" and row["source_note_item_id"] for row in export_preview["preview_rows"]),
                     "Export preview rows should preserve source note traceability.",
                 )
+                mt321_export_row = next(row for row in export_preview["preview_rows"] if row["display_id"] == "MT321")
+                assert_true(
+                    mt321_export_row["raw_note_line"] == "MT321 R'"
+                    and (mt321_export_row["source_photo_id"] or mt321_export_row["card_snapshot_id"]),
+                    "Export preview rows should expose raw note and photo/snapshot evidence.",
+                )
+                assert_true(
+                    any(
+                        row["display_id"] == "MT399"
+                        and row["ear_label_review_status"] == "check"
+                        and "Ear label R0: check" in row["uncertainty"]
+                        for row in export_preview["preview_rows"]
+                    ),
+                    "Export preview should surface uncertain ear labels without accepting their normalized code.",
+                )
+                assert_true(
+                    any(row["raw_note_lines"] and (row["source_photo_ids"] or row["card_snapshot_ids"]) for row in export_preview["separation_rows"]),
+                    "Separation preview rows should keep raw note and photo/snapshot evidence for traceability.",
+                )
                 assert_true(
                     export_preview["blocked_review_items"] >= len(export_preview["review_blockers"]),
                     "Export preview should expose review blocker details up to its display limit.",
@@ -2176,6 +2279,12 @@ def main() -> None:
                     and separation_trace_sheet.cell(1, 4).value == "Boundary",
                     "openpyxl should read separation trace headers.",
                 )
+                assert_true(
+                    separation_trace_sheet.cell(1, 6).value == "Source photo"
+                    and separation_trace_sheet.cell(1, 8).value == "Raw note line"
+                    and separation_trace_sheet.cell(1, 9).value == "Uncertainty",
+                    "Separation trace sheet should include photo, raw note, and uncertainty columns.",
+                )
                 ready_animal_xlsx = client.get("/api/exports/animal-sheet.xlsx")
                 assert_true(ready_animal_xlsx.status_code == 200, "Ready animal sheet XLSX export should succeed after review resolution.")
                 assert_true(
@@ -2228,6 +2337,12 @@ def main() -> None:
                     animal_trace_sheet.cell(1, 3).value == "Source record"
                     and animal_trace_sheet.cell(1, 4).value == "Boundary",
                     "openpyxl should read animal trace headers.",
+                )
+                assert_true(
+                    animal_trace_sheet.cell(1, 6).value == "Source photo"
+                    and animal_trace_sheet.cell(1, 8).value == "Raw note line"
+                    and animal_trace_sheet.cell(1, 9).value == "Uncertainty",
+                    "Animal trace sheet should include photo, raw note, and uncertainty columns.",
                 )
                 ready_logs = client.get("/api/export-log").json()
                 assert_true(

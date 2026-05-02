@@ -17,8 +17,8 @@ Layer classification: implementation verification / non-canonical project note.
 | ID | 영역 | Acceptance Criterion | 현재 상태 | 자동 검증 근거 |
 | --- | --- | --- | --- | --- |
 | A01 | Source Photo | 사진 업로드는 raw source로 저장되고 원본 bytes/image endpoint로 재조회된다. | Done | `scripts/verify-local-app.py` photo upload/image assertions |
-| A02 | Photo Review | 업로드된 사진은 manual transcription review candidate를 생성한다. | Done | `Photo review candidate should be visible in Review Queue` |
-| A03 | Manual Transcription | manual transcription은 parsed/intermediate이며 canonical mouse를 직접 만들지 않는다. | Done | `created_mouse_candidates == 0` assertion |
+| A02 | Photo Review | 업로드된 사진은 transcription review candidate를 생성하고, 승인 기반 AI extraction은 draft를 reviewable parsed evidence로 저장한다. | Done | `Photo review candidate should be visible in Review Queue`, `AI extraction should save parsed note evidence` |
+| A03 | Photo Transcription Boundary | manual/AI photo transcription은 parsed/intermediate이며 canonical mouse를 직접 만들지 않는다. | Done | `created_mouse_candidates == 0` assertion |
 | A04 | Card Snapshot | manual transcription은 `card_snapshot`을 만들고 photo/parse/note summary trace를 가진다. | Done | `/api/card-snapshots` assertions |
 | A05 | Note Evidence | note line은 raw text, parsed type, interpreted status, normalized ear label을 분리 보존한다. | Done | `/api/note-items` assertions |
 | A06 | Review Evidence | Review detail은 note item, card snapshot, raw photo evidence를 보여준다. | Done | `Review Note Evidence`, `review_note_summary`, `image_url` assertions |
@@ -41,7 +41,7 @@ Layer classification: implementation verification / non-canonical project note.
 
 | Gap ID | 내용 | 권장 다음 작업 |
 | --- | --- | --- |
-| G01 | 실제 브라우저에서 fixture가 아닌 사용자가 수동으로 사진 업로드, 입력, resolve하는 full E2E 자동화가 아직 약하다. | Playwright 또는 in-app browser 기반 manual transcription E2E 추가 |
+| G01 | 실제 브라우저에서 fixture가 아닌 사용자가 사진 업로드, AI extraction 저장, review resolve, apply/export까지 수행하는 full E2E 자동화가 아직 약하다. | Playwright 또는 in-app browser 기반 photo extraction E2E 추가 |
 | G02 | Review detail은 evidence를 보여주지만 crop/ROI 수준의 이미지 근거는 아직 없다. | note line crop 또는 photo annotation 후보 검토 |
 | G03 | Configurable masters 일부는 구현됐지만 status/event/genotype category 전체가 master화된 것은 아니다. | controlled vocabulary registry 추가 |
 | G04 | Experiment traceability는 장기 설계에는 있으나 MVP 자동 흐름에는 아직 약하다. | experiment-mouse link MVP 추가 |

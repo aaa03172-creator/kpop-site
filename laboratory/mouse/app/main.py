@@ -131,6 +131,7 @@ class PhotoManualTranscriptionCreate(BaseModel):
     confidence: float = Field(default=75, ge=0, le=100)
     notes: list[dict[str, Any]] = Field(default_factory=list)
     reviewer_note: str = ""
+    extraction_method: str = "manual_entry"
 
 
 class PhotoAiDraftCreate(BaseModel):
@@ -324,7 +325,7 @@ def assigned_strain_scope_for_prompt() -> list[dict[str, Any]]:
     with connection() as conn:
         rows = conn.execute(
             """
-            SELECT display_name, aliases
+            SELECT display_name, aliases_json
             FROM my_assigned_strain
             WHERE active = 1
             ORDER BY display_name COLLATE NOCASE
@@ -334,7 +335,7 @@ def assigned_strain_scope_for_prompt() -> list[dict[str, Any]]:
     return [
         {
             "display_name": row["display_name"],
-            "aliases": json.loads(row["aliases"] or "[]"),
+            "aliases": json.loads(row["aliases_json"] or "[]"),
         }
         for row in rows
     ]
@@ -449,8 +450,7 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
     }
 
 
-@app.post("/api/photos/{photo_id}/ai-transcription-draft")
-def create_photo_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -> dict[str, Any]:
+def request_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -> dict[str, Any]:
     if not payload.approved_external_inference:
         raise HTTPException(
             status_code=403,
@@ -560,6 +560,48 @@ def create_photo_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCrea
     }
 
 
+@app.post("/api/photos/{photo_id}/ai-transcription-draft")
+def create_photo_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -> dict[str, Any]:
+    return request_ai_transcription_draft(photo_id, payload)
+
+
+@app.post("/api/photos/{photo_id}/ai-extract-transcription")
+def create_photo_ai_extracted_transcription(photo_id: str, payload: PhotoAiDraftCreate) -> dict[str, Any]:
+    extraction = request_ai_transcription_draft(photo_id, payload)
+    draft = extraction["draft"]
+    transcription = create_photo_manual_transcription(
+        photo_id,
+        PhotoManualTranscriptionCreate(
+            card_type=draft["card_type"],
+            raw_strain=draft["raw_strain"],
+            matched_strain=draft["matched_strain"],
+            sex_raw=draft["sex_raw"],
+            id_raw=draft["id_raw"],
+            dob_raw=draft["dob_raw"],
+            dob_normalized=draft["dob_normalized"],
+            mating_date_raw=draft["mating_date_raw"],
+            mating_date_normalized=draft["mating_date_normalized"],
+            lmo_raw=draft["lmo_raw"],
+            mouse_count=draft["mouse_count"],
+            confidence=draft["confidence"],
+            notes=draft["notes"],
+            reviewer_note=(
+                "AI-extracted cage-card draft. Reviewer must compare against the raw photo before canonical writes. "
+                f"Uncertain fields: {', '.join(draft['uncertain_fields']) or 'none listed'}."
+            ),
+            extraction_method="ai_photo_extraction",
+        ),
+    )
+    return {
+        **transcription,
+        "extraction_method": "ai_photo_extraction",
+        "external_inference_used": True,
+        "payload_minimization": extraction["payload_minimization"],
+        "draft_confidence": draft["confidence"],
+        "uncertain_fields": draft["uncertain_fields"],
+    }
+
+
 @app.get("/api/photo-review-workbench")
 def photo_review_workbench() -> dict[str, Any]:
     with connection() as conn:
@@ -576,7 +618,8 @@ def photo_review_workbench() -> dict[str, Any]:
                 """
                 SELECT parse_id, parsed_at, status
                 FROM parse_result
-                WHERE photo_id = ? AND source_name = 'manual_photo_transcription'
+                WHERE photo_id = ?
+                  AND source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
                 ORDER BY parsed_at DESC
                 LIMIT 1
                 """,
@@ -2030,7 +2073,7 @@ def build_evidence_comparison_payload(conn: Any) -> dict[str, Any]:
                photo.original_filename
         FROM parse_result parse
         LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
-        WHERE parse.source_name = 'manual_photo_transcription'
+        WHERE parse.source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
         ORDER BY parse.parsed_at DESC
         LIMIT 50
         """
@@ -3244,6 +3287,14 @@ def create_missing_photo_review_candidates() -> dict[str, Any]:
 @app.post("/api/photos/{photo_id}/manual-transcription")
 def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscriptionCreate) -> dict[str, Any]:
     now = utc_now()
+    source_name = "ai_photo_extraction" if payload.extraction_method == "ai_photo_extraction" else "manual_photo_transcription"
+    issue = "AI-extracted photo transcription needs review" if source_name == "ai_photo_extraction" else "Manual photo transcription needs review"
+    review_reason = "Photo transcription is parsed/intermediate evidence. Review it before writing canonical mouse or cage state."
+    action_note = (
+        "Review AI-extracted fields against the raw cage-card photo before canonical writes."
+        if source_name == "ai_photo_extraction"
+        else "Keep manual transcription reviewable."
+    )
     with connection() as conn:
         photo = conn.execute(
             """
@@ -3282,21 +3333,22 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             "mouseCount": payload.mouse_count,
             "confidence": payload.confidence,
             "status": "review",
-            "issue": "Manual photo transcription needs review",
+            "issue": issue,
             "severity": "Medium",
             "reviewField": "manualTranscription",
             "currentValue": payload.mouse_count or payload.raw_strain or photo["original_filename"],
             "suggestedValue": "Compare against latest cage-card photo and predecessor Excel candidate rows.",
-            "reviewReason": "Manual transcription is parsed/intermediate evidence. Review it before writing canonical mouse or cage state.",
+            "reviewReason": review_reason,
             "notes": notes,
             "actions": [
                 "Preserve latest photo as raw source evidence.",
-                "Keep manual transcription reviewable.",
+                action_note,
                 "Compare against predecessor Excel rows before accepting changes.",
             ],
             "sourcePhotoId": photo_id,
             "sourceLayer": "parsed or intermediate result",
             "reviewerNote": payload.reviewer_note,
+            "extractionMethod": payload.extraction_method,
         }
         conn.execute(
             """
@@ -3307,7 +3359,7 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             (
                 parse_id,
                 photo_id,
-                "manual_photo_transcription",
+                source_name,
                 json.dumps(record, ensure_ascii=False),
                 now,
                 "review",
@@ -3340,10 +3392,10 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                 review_id,
                 parse_id,
                 "Medium",
-                "Manual photo transcription needs review",
+                issue,
                 payload.mouse_count or payload.raw_strain or photo["original_filename"],
                 "Compare with raw photo and predecessor Excel before accepting.",
-                "Latest cage-card photo should drive updates, but the manual transcription itself must be reviewed before canonical writes.",
+                "Latest cage-card photo should drive updates, but the parsed transcription itself must be reviewed before canonical writes.",
                 "open",
                 now,
             ),
@@ -3389,13 +3441,14 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                 json.dumps({"resolved_photo_review_ids": resolved_photo_review_ids}, ensure_ascii=False),
                 json.dumps(
                     {
-                        "parse_id": parse_id,
-                        "card_snapshot_id": card_snapshot_id,
-                        "review_id": review_id,
-                        "note_count": note_count,
-                        "resolved_photo_review_items": len(resolved_photo_review_ids),
-                    },
-                    ensure_ascii=False,
+                    "parse_id": parse_id,
+                    "card_snapshot_id": card_snapshot_id,
+                    "review_id": review_id,
+                    "note_count": note_count,
+                    "source_name": source_name,
+                    "resolved_photo_review_items": len(resolved_photo_review_ids),
+                },
+                ensure_ascii=False,
                 ),
                 now,
             ),
@@ -3411,6 +3464,7 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
         "created_ear_review_items": ear_review_count,
         "resolved_photo_review_items": len(resolved_photo_review_ids),
         "boundary": "parsed or intermediate result",
+        "source_name": source_name,
     }
 
 
@@ -5039,11 +5093,21 @@ def build_xlsx(
         }
     ]
     if trace_rows:
-        trace_headers = ["Row", "Source note", "Source record", "Boundary", "Export note"]
+        trace_headers = [
+            "Row",
+            "Source note",
+            "Source record",
+            "Boundary",
+            "Export note",
+            "Source photo",
+            "Card snapshot",
+            "Raw note line",
+            "Uncertainty",
+        ]
         sheets.append(
             {
                 "name": "Export_Trace",
-                "xml": xlsx_sheet_xml(trace_headers, trace_rows, [10, 28, 28, 24, 40]),
+                "xml": xlsx_sheet_xml(trace_headers, trace_rows, [10, 28, 28, 24, 40, 26, 28, 42, 36]),
                 "target": "worksheets/sheet2.xml",
             }
         )
@@ -5121,7 +5185,19 @@ def trace_rows_from_export_rows(rows: list[dict[str, Any]], source_key: str) -> 
     trace_rows = []
     for index, row in enumerate(rows, start=2):
         source_value = row.get(source_key) or row.get("source") or ""
-        trace_rows.append([index, source_value, row.get("source_record_id", ""), "export or view", "Generated from accepted structured state."])
+        trace_rows.append(
+            [
+                index,
+                source_value,
+                row.get("source_record_id", ""),
+                "export or view",
+                row.get("export_note", "Generated from accepted structured state."),
+                row.get("source_photo_ids", "") or row.get("source_photo_id", ""),
+                row.get("card_snapshot_ids", "") or row.get("card_snapshot_id", ""),
+                row.get("raw_note_lines", "") or row.get("raw_note_line", ""),
+                row.get("uncertainty", ""),
+            ]
+        )
     return trace_rows
 
 
@@ -5626,7 +5702,7 @@ def evidence_reconciliation() -> dict[str, Any]:
                    SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_manual_transcription_reviews
             FROM parse_result parse
             LEFT JOIN review_queue review ON review.parse_id = parse.parse_id
-            WHERE parse.source_name = 'manual_photo_transcription'
+            WHERE parse.source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
             """
         ).fetchone()
         legacy_summary = conn.execute(
@@ -6098,6 +6174,46 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
     )
 
 
+def compact_export_values(values: list[Any], limit: int = 3) -> str:
+    seen: list[str] = []
+    for value in values:
+        text_value = str(value or "").strip()
+        if text_value and text_value not in seen:
+            seen.append(text_value)
+    if len(seen) > limit:
+        return f"{', '.join(seen[:limit])}, +{len(seen) - limit}"
+    return ", ".join(seen)
+
+
+def export_uncertainty_label(row: Any) -> str:
+    status = str(row["ear_label_review_status"] or "").strip()
+    if not status or status in {"auto_filled", "verified", "user_corrected"}:
+        return ""
+    raw_label = row["ear_label_raw"] or row["ear_label_code"] or "ear label"
+    confidence = row["ear_label_confidence"]
+    confidence_text = f"; confidence {confidence:.2f}" if isinstance(confidence, (int, float)) else ""
+    return f"Ear label {raw_label}: {status}{confidence_text}"
+
+
+def load_export_note_evidence(conn: Any, note_item_ids: list[str]) -> dict[str, dict[str, Any]]:
+    note_item_ids = [note_id for note_id in dict.fromkeys(note_item_ids) if note_id]
+    if not note_item_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in note_item_ids)
+    rows = conn.execute(
+        f"""
+        SELECT note.note_item_id, note.photo_id, photo.original_filename,
+               note.card_snapshot_id, note.raw_line_text,
+               note.parsed_ear_label_review_status, note.confidence
+        FROM card_note_item_log note
+        LEFT JOIN photo_log photo ON photo.photo_id = note.photo_id
+        WHERE note.note_item_id IN ({placeholders})
+        """,
+        note_item_ids,
+    ).fetchall()
+    return {row["note_item_id"]: dict(row) for row in rows}
+
+
 @app.get("/api/export-preview")
 def export_preview() -> dict[str, Any]:
     with connection() as conn:
@@ -6120,8 +6236,10 @@ def export_preview() -> dict[str, Any]:
             SELECT m.mating_id, m.mating_label, m.strain_goal, m.expected_genotype,
                    m.start_date, m.status AS mating_status,
                    mm.role, mouse.display_id, mouse.sex, mouse.ear_label_raw,
-                   mouse.genotype, mouse.genotype_result, mouse.dob_raw, mouse.dob_start,
-                   mouse.source_note_item_id, mouse.source_record_id
+                   mouse.ear_label_code, mouse.ear_label_confidence,
+                   mouse.ear_label_review_status, mouse.genotype, mouse.genotype_result,
+                   mouse.dob_raw, mouse.dob_start, mouse.source_note_item_id,
+                   mouse.current_card_snapshot_id, mouse.source_photo_id, mouse.source_record_id
             FROM mating_registry m
             LEFT JOIN mating_mouse mm ON mm.mating_id = m.mating_id AND mm.removed_date IS NULL
             LEFT JOIN mouse_master mouse ON mouse.mouse_id = mm.mouse_id
@@ -6131,6 +6249,12 @@ def export_preview() -> dict[str, Any]:
             LIMIT 120
             """
         ).fetchall()
+        note_item_ids = [
+            str(row["source_note_item_id"])
+            for row in list(mice) + list(mating_rows)
+            if row["source_note_item_id"]
+        ]
+        note_evidence = load_export_note_evidence(conn, note_item_ids)
         litter_rows = conn.execute(
             """
             SELECT l.litter_id, l.litter_label, l.mating_id, l.birth_date,
@@ -6164,8 +6288,17 @@ def export_preview() -> dict[str, Any]:
                 "sampling_point": "",
                 "source_note_item_ids": [],
                 "source_record_ids": [],
+                "source_photo_ids": [],
+                "card_snapshot_ids": [],
+                "raw_note_lines": [],
+                "uncertainties": [],
             }
         group = separation_groups[group_key]
+        note_source = note_evidence.get(mouse["source_note_item_id"] or "", {})
+        source_photo_id = mouse["source_photo_id"] or note_source.get("photo_id") or ""
+        card_snapshot_id = mouse["current_card_snapshot_id"] or note_source.get("card_snapshot_id") or ""
+        raw_note_line = note_source.get("raw_line_text") or ""
+        uncertainty = export_uncertainty_label(mouse)
         group["count"] += 1
         if "wt" in genotype.lower():
             group["wt"] = str(int(group["wt"] or "0") + 1)
@@ -6179,6 +6312,14 @@ def export_preview() -> dict[str, Any]:
             group["source_note_item_ids"].append(mouse["source_note_item_id"])
         if mouse["source_record_id"]:
             group["source_record_ids"].append(mouse["source_record_id"])
+        if source_photo_id:
+            group["source_photo_ids"].append(source_photo_id)
+        if card_snapshot_id:
+            group["card_snapshot_ids"].append(card_snapshot_id)
+        if raw_note_line:
+            group["raw_note_lines"].append(raw_note_line)
+        if uncertainty:
+            group["uncertainties"].append(uncertainty)
         rows.append(
             {
                 "mouse_id": mouse["mouse_id"],
@@ -6187,10 +6328,26 @@ def export_preview() -> dict[str, Any]:
                 "genotype": mouse["genotype_result"] or mouse["genotype"] or "",
                 "dob": mouse["dob_raw"] or mouse["dob_start"] or "",
                 "ear_label": mouse["ear_label_raw"] or mouse["ear_label_code"] or "",
+                "ear_label_code": mouse["ear_label_code"] or "",
+                "ear_label_confidence": mouse["ear_label_confidence"],
+                "ear_label_review_status": mouse["ear_label_review_status"] or "",
                 "status": mouse["status"],
                 "current_cage": mouse["current_cage_label"] or "",
                 "next_action": mouse["next_action"],
                 "source_note_item_id": mouse["source_note_item_id"] or "",
+                "source_photo_id": source_photo_id,
+                "source_photo_filename": note_source.get("original_filename") or "",
+                "card_snapshot_id": card_snapshot_id,
+                "raw_note_line": raw_note_line,
+                "uncertainty": uncertainty,
+                "source_evidence": compact_export_values(
+                    [
+                        mouse["source_note_item_id"] and f"note {mouse['source_note_item_id']}",
+                        source_photo_id and f"photo {source_photo_id}",
+                        card_snapshot_id and f"snapshot {card_snapshot_id}",
+                    ],
+                    limit=4,
+                ),
             }
         )
     separation_rows = []
@@ -6209,6 +6366,12 @@ def export_preview() -> dict[str, Any]:
                 "tg": group["tg"],
                 "sampling_point": group["sampling_point"],
                 "source_note_item_ids": source_notes,
+                "source_record_id": compact_export_values(group["source_record_ids"]),
+                "source_photo_ids": compact_export_values(group["source_photo_ids"]),
+                "card_snapshot_ids": compact_export_values(group["card_snapshot_ids"]),
+                "raw_note_lines": compact_export_values(group["raw_note_lines"], limit=2),
+                "uncertainty": compact_export_values(group["uncertainties"], limit=2),
+                "export_note": "Grouped from source-backed mouse records; raw note/photo evidence is on this trace sheet.",
             }
         )
     litter_by_mating: dict[str, list[Any]] = {}
@@ -6229,6 +6392,9 @@ def export_preview() -> dict[str, Any]:
                 (parent["sex"] or "").lower(), parent["sex"] or parent["role"] or ""
             )
             mouse_label = " ".join([parent["display_id"] or "", parent["ear_label_raw"] or ""]).strip()
+            note_source = note_evidence.get(parent["source_note_item_id"] or "", {})
+            parent_photo_id = parent["source_photo_id"] or note_source.get("photo_id") or ""
+            parent_snapshot_id = parent["current_card_snapshot_id"] or note_source.get("card_snapshot_id") or ""
             animal_rows.append(
                 {
                     "cage_no": str(cage_no) if index == 0 else "",
@@ -6241,6 +6407,13 @@ def export_preview() -> dict[str, Any]:
                     "pubs": "",
                     "status": mating["mating_status"] or "",
                     "source": parent["source_note_item_id"] or parent["source_record_id"] or "",
+                    "source_note_item_ids": parent["source_note_item_id"] or "",
+                    "source_record_id": parent["source_record_id"] or "",
+                    "source_photo_ids": parent_photo_id,
+                    "card_snapshot_ids": parent_snapshot_id,
+                    "raw_note_lines": note_source.get("raw_line_text") or "",
+                    "uncertainty": export_uncertainty_label(parent),
+                    "export_note": "Parent row generated from accepted mating state; source note/photo evidence is on this trace sheet.",
                 }
             )
         for litter_index, litter in enumerate(litter_by_mating.get(mating["mating_id"], []), start=1):
@@ -6257,6 +6430,13 @@ def export_preview() -> dict[str, Any]:
                     "pubs": f"{litter['birth_date']} {litter['number_born']}p".strip() if litter["number_born"] else "",
                     "status": litter["status"] or "",
                     "source": litter["source_record_id"] or "",
+                    "source_record_id": litter["source_record_id"] or "",
+                    "source_note_item_ids": "",
+                    "source_photo_ids": "",
+                    "card_snapshot_ids": "",
+                    "raw_note_lines": "",
+                    "uncertainty": "",
+                    "export_note": "Litter row generated from accepted litter state.",
                 }
             )
     return {
