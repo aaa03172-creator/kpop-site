@@ -572,6 +572,8 @@ def main() -> None:
                 assert_true("ai-transcription-draft" in index_html, "Local UI should call the AI draft endpoint only from the review form.")
                 assert_true("openAiApiKeyInput" in index_html, "Local UI should allow a temporary session API key for AI drafts.")
                 assert_true("ai-draft-settings" in index_html, "Local UI should update AI draft settings without storing the key in app records.")
+                assert_true("transcriptionSexRaw" in index_html and "transcriptionIdRaw" in index_html, "Manual transcription should capture raw Sex and I.D card fields.")
+                assert_true("unlabeled" in index_html or "1 2 3 4 5" in index_html, "Manual transcription should make numeric-only temporary labels visible in note entry.")
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -819,11 +821,14 @@ def main() -> None:
                     json={
                         "card_type": "Separated",
                         "raw_strain": "ApoM Tg/Tg",
+                        "sex_raw": "♀",
+                        "id_raw": "MT",
                         "dob_raw": "25.10.20-28",
                         "mouse_count": "2 total",
                         "notes": [
                             {"raw": "MT321 R'", "strike": "none"},
                             {"raw": "MT322 L'", "strike": "none"},
+                            {"raw": "1 2 3", "strike": "none", "meaning": "unlabeled_numeric_note"},
                         ],
                     },
                 )
@@ -834,9 +839,21 @@ def main() -> None:
                     "Manual photo transcription should stay parsed/intermediate.",
                 )
                 assert_true(
-                    transcription_payload["created_note_items"] == 2
+                    transcription_payload["created_note_items"] == 3
                     and transcription_payload["created_mouse_candidates"] == 0,
-                    "Manual photo transcription should create note evidence without canonical mouse candidates.",
+                    "Manual photo transcription should create note evidence without canonical mouse candidates, including numeric-only labels.",
+                )
+                manual_review_items = [
+                    item for item in client.get("/api/review-items").json()
+                    if item["parse_id"] == transcription_payload["parse_id"]
+                ]
+                assert_true(
+                    any(
+                        item["issue"] == "Unlabeled numeric note needs review"
+                        and item["current_value"] == "1 2 3"
+                        for item in manual_review_items
+                    ),
+                    "Numeric-only manual note lines should open a review item instead of becoming mouse IDs.",
                 )
                 assert_true(
                     transcription_payload["resolved_photo_review_items"] >= 1,
@@ -846,7 +863,7 @@ def main() -> None:
                 transcribed_row = next(item for item in transcribed_workbench["rows"] if item["photo_id"] == photo_payload["photo_id"])
                 assert_true(
                     transcribed_row["manual_parse_id"] == transcription_payload["parse_id"]
-                    and transcribed_row["note_line_count"] == 2
+                    and transcribed_row["note_line_count"] == 3
                     and transcribed_row["next_action"] == "resolve_photo_reviews",
                     "Photo review workbench should expose manual transcription progress and remaining review work.",
                 )
@@ -886,6 +903,11 @@ def main() -> None:
                 assert_true(
                     {"source_layer", "manual_summary", "status", "detail", "review_required", "review_status"}.issubset(first_comparison),
                     "Evidence comparison rows should expose review-view context.",
+                )
+                assert_true(
+                    first_comparison["manual_summary"].get("sex") == "♀"
+                    and first_comparison["manual_summary"].get("id") == "MT",
+                    "Evidence comparison should preserve raw Sex and I.D fields from manual transcription.",
                 )
                 assert_true(
                     first_comparison["review_status"] in {"not_created", "not_required", "open", "resolved"},
@@ -1270,6 +1292,15 @@ def main() -> None:
                 assert_true(
                     any(item["raw_line_text"] == "MT321 R'" and item["parsed_ear_label_code"] == "R_PRIME" for item in note_items),
                     "Note item API should expose parsed ear label evidence.",
+                )
+                assert_true(
+                    any(
+                        item["raw_line_text"] == "1 2 3"
+                        and item["parsed_type"] == "unlabeled_numeric_note"
+                        and item["needs_review"] == 1
+                        for item in note_items
+                    ),
+                    "Numeric-only post-separation note lines should stay reviewable and should not become mouse IDs.",
                 )
                 assert_true(
                     any(
