@@ -486,7 +486,17 @@ def main() -> None:
             assert_true(count == 1, "Assigned strain scope table did not accept a row.")
         else:
             with TestClient(app) as client:
+                health = client.get("/api/health").json()
+                assert_true(health["storage"] == "local-only", "Health endpoint should report local-only storage.")
+                assert_true(
+                    health["ai_draft"]["approval_required"] is True
+                    and "selected photo" in health["ai_draft"]["payload_minimization"],
+                    "Health endpoint should expose approval-gated AI draft status and payload minimization.",
+                )
                 index_html = client.get("/").text
+                assert_true("app-shell" in index_html and "Primary navigation" in index_html, "Local UI should use a persistent app shell with primary navigation.")
+                assert_true('data-view-target="photo"' in index_html and "Photo Review Workbench" in index_html, "Photo Review Workbench should be the default operational view.")
+                assert_true("reviewDetailPanel" in index_html and "inspect-review" in index_html, "Review Queue should expose a split list/detail workflow.")
                 assert_true("Colony Records" in index_html, "Local UI should expose mouse records.")
                 assert_true("Parsed Note Evidence" in index_html, "Local UI should expose parsed note evidence.")
                 assert_true("Strain Registry" in index_html, "Local UI should expose strain registry.")
@@ -553,7 +563,7 @@ def main() -> None:
                 assert_true("demo-note-1" not in index_html, "Mouse detail visualization should not use demo source evidence.")
                 assert_true("selectedStrainMice.length || aliveMice" not in index_html, "Strain detail active mice should not fall back to colony-wide counts.")
                 assert_true("EXP-2026-041" not in index_html, "Strain visualization should not hard-code experiment IDs.")
-                assert_true("/[^a-z0-9가-힣]/g" in index_html, "Local UI strain matching key should preserve Korean strain text.")
+                assert_true(r"\p{L}\p{N}" in index_html, "Local UI strain matching key should preserve Korean and other letter/number strain text.")
                 assert_true(client.get("/api/assigned-strains").json() == [], "Assigned strain scope should start empty.")
                 assert_true(client.get("/api/source-records").json() == [], "Source evidence should start empty.")
                 assert_true(client.get("/api/strains").json() == [], "Strain registry should start empty.")
