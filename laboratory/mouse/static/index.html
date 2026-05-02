@@ -459,6 +459,13 @@
             <tbody id="vizAlertRows"></tbody>
           </table>
         </article>
+        <article class="viz-card span-12">
+          <h3>Data Quality / Evidence Coverage</h3>
+          <table aria-label="Visualization data quality">
+            <thead><tr><th>Signal</th><th>Value</th><th>Boundary</th><th>Action</th></tr></thead>
+            <tbody id="vizQualityRows"></tbody>
+          </table>
+        </article>
       </div>
     </section>
 
@@ -946,8 +953,25 @@
     </section>
 
     <section class="full">
+      <h2>Mouse Audit Trace</h2>
+      <p>Source-backed trace for one mouse across note lines, reviews, corrections, events, and genotyping records.</p>
+      <div class="form-grid">
+        <label>
+          Mouse
+          <select id="auditMouseSelect"></select>
+        </label>
+      </div>
+      <p class="muted" id="auditTraceSummary">Import mouse candidates to inspect trace evidence.</p>
+      <table>
+        <thead><tr><th>Layer</th><th>When</th><th>What</th><th>Evidence</th><th>Details</th></tr></thead>
+        <tbody id="auditTraceRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
       <h2>Export Readiness</h2>
       <p id="exportPreview"></p>
+      <p class="muted" id="exportFilenames"></p>
       <table>
         <thead><tr><th>Cage number</th><th>Strain</th><th>Genotype</th><th>Total</th><th>DOB</th><th>WT</th><th>Tg</th><th>Sampling point</th><th>Source note</th></tr></thead>
         <tbody id="exportRows"></tbody>
@@ -1078,10 +1102,13 @@
 
     function compactDetails(details) {
       if (!details || Object.keys(details).length === 0) return "--";
-      return Object.entries(details).slice(0, 3).map(([key, value]) => `${key}: ${value}`).join("; ");
+      return Object.entries(details).slice(0, 3).map(([key, value]) =>
+        `${key}: ${typeof value === "object" && value !== null ? JSON.stringify(value) : value}`
+      ).join("; ");
     }
 
     let activeSearchQuery = "";
+    let selectedAuditMouseId = "";
 
     function searchResultRows(results) {
       if (!results || !results.query) return row(["No search yet", "", "", ""]);
@@ -1099,6 +1126,40 @@
         rows.push(row(["source", source.source_record_id, source.source_label || source.source_type, source.note || source.source_uri || "--"]));
       });
       return rows.join("") || row(["No matches", "", "", ""]);
+    }
+
+    async function renderAuditTrace(mice) {
+      const select = document.getElementById("auditMouseSelect");
+      const previous = selectedAuditMouseId || select.value;
+      select.innerHTML = mice.map((mouse) =>
+        `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.raw_strain_text || "")}</option>`
+      ).join("");
+      if (!mice.length) {
+        selectedAuditMouseId = "";
+        document.getElementById("auditTraceSummary").textContent = "Import mouse candidates to inspect trace evidence.";
+        document.getElementById("auditTraceRows").innerHTML = row(["No mouse selected", "", "", "", ""]);
+        return;
+      }
+      if (previous && mice.some((mouse) => mouse.mouse_id === previous)) {
+        select.value = previous;
+      }
+      selectedAuditMouseId = select.value || mice[0].mouse_id;
+      select.value = selectedAuditMouseId;
+      const trace = await api(`/api/mice/${encodeURIComponent(selectedAuditMouseId)}/audit-trail`);
+      document.getElementById("auditTraceSummary").textContent =
+        `${trace.mouse.display_id}: ${trace.timeline.length} trace items, ` +
+        `${trace.source_records.length} source records, ${trace.review_items.length} review items, ` +
+        `${trace.corrections.length} corrections, ${trace.events.length} events, ` +
+        `${trace.cage_assignments.length} cage assignments, ${trace.actions.length} actions.`;
+      document.getElementById("auditTraceRows").innerHTML = trace.timeline.map((item) =>
+        row([
+          item.category,
+          item.at || "--",
+          item.title || "--",
+          [item.evidence_id, item.source_record_id].filter(Boolean).join(" / ") || "--",
+          compactDetails(item.details || {})
+        ])
+      ).join("") || row(["No trace items yet", "", "", "", ""]);
     }
 
     function statusCell(value) {
@@ -1344,6 +1405,7 @@
 
       document.getElementById("health").textContent = health.storage;
       renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview });
+      await renderAuditTrace(mice);
       const searchResults = activeSearchQuery
         ? await api(`/api/search?query=${encodeURIComponent(activeSearchQuery)}`)
         : { query: "", mice: [], strains: [], reviews: [], sources: [] };
@@ -1563,6 +1625,9 @@
         `Separation rows: ${preview.separation_row_count || 0}. Animal sheet rows: ${preview.animal_sheet_row_count || 0}. ` +
         `Blocked review items: ${preview.blocked_review_items}. ` +
         `Ready: ${preview.ready ? "yes" : "no"}.`;
+      document.getElementById("exportFilenames").textContent =
+        `Separation XLSX: ${preview.expected_separation_filename || "--"}; ` +
+        `Animal sheet XLSX: ${preview.expected_animal_sheet_filename || "--"}.`;
       document.getElementById("exportRows").innerHTML = (preview.separation_rows || []).map((item) =>
         row([
           item.cage_number || "--",
@@ -1983,6 +2048,11 @@
         `Added target ${target.target_genotype} for ${target.strain_text}.`;
       document.getElementById("targetStrainText").value = "";
       document.getElementById("targetGenotypeText").value = "";
+      await refresh();
+    });
+
+    document.getElementById("auditMouseSelect").addEventListener("change", async (event) => {
+      selectedAuditMouseId = event.target.value;
       await refresh();
     });
 

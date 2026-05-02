@@ -395,6 +395,8 @@ def main() -> None:
                 assert_true("Source Evidence" in index_html, "Local UI should expose source evidence.")
                 assert_true("Mouse Events" in index_html, "Local UI should expose mouse events.")
                 assert_true("Correction Log" in index_html, "Local UI should expose correction history.")
+                assert_true("Mouse Audit Trace" in index_html, "Local UI should expose per-mouse audit trace.")
+                assert_true("audit-trail" in index_html, "Local UI should call the per-mouse audit trail API.")
                 assert_true("Search & CSV Export" in index_html, "Local UI should expose search and CSV export.")
                 assert_true("Download Genotyping Worklist" in index_html, "Local UI should expose genotyping worklist export.")
                 assert_true("Download Ready CSV" in index_html, "Local UI should expose gated final CSV export.")
@@ -406,12 +408,17 @@ def main() -> None:
                 assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
                 assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
                 assert_true("exportRows" in index_html, "Local UI should expose export preview rows.")
+                assert_true("exportFilenames" in index_html, "Local UI should expose expected workbook filenames.")
                 assert_true("exportBlockerRows" in index_html, "Local UI should expose export blockers.")
                 assert_true("exportLogRows" in index_html, "Local UI should expose export history.")
+                assert_true("Mouse Audit Trace" in index_html, "Local UI should expose mouse audit trace view.")
+                assert_true("auditTraceRows" in index_html, "Local UI should render audit trace rows.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
                 assert_true("Distribution Assignment Import" in index_html, "Local UI should expose distribution import.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
                 assert_true("Mouse Detail" in index_html, "Local UI should expose the mouse detail visualization.")
+                assert_true("Mouse Audit Trace" in index_html, "Local UI should expose mouse audit trace.")
+                assert_true("auditTraceRows" in index_html, "Local UI should render audit trace rows.")
                 assert_true("Strain Detail" in index_html, "Local UI should expose the strain detail visualization.")
                 assert_true("renderVisualizations" in index_html, "Local UI should render visualizations from API data.")
                 assert_true("vizHeatmapHead" in index_html, "Genotype heatmap should be driven by rendered data labels.")
@@ -670,6 +677,17 @@ def main() -> None:
                     any(event["event_type"] == "moved" and event["related_entity_id"] == cage_payload["cage_id"] for event in cage_events),
                     "Cage movement should be present in mouse event history.",
                 )
+                audit_trace = client.get(f"/api/mice/{moved_mouse['mouse_id']}/audit-trace")
+                assert_true(audit_trace.status_code == 200, "Could not load mouse audit trace.")
+                audit_payload = audit_trace.json()
+                assert_true(audit_payload["source_layer"] == "export or view", "Audit trace should stay in the export/view layer.")
+                assert_true(audit_payload["mouse"]["display_id"] == "MT321", "Audit trace should return the requested mouse.")
+                audit_categories = {item["category"] for item in audit_payload["timeline"]}
+                assert_true({"note_line", "mouse_event"}.issubset(audit_categories), "Audit trace should include source note lines and mouse events.")
+                assert_true(
+                    any(event["event_type"] == "moved" for event in audit_payload["events"]),
+                    "Audit trace should include cage movement events.",
+                )
                 filtered_mice = client.get("/api/mice", params={"query": "MT321"}).json()
                 assert_true(
                     filtered_mice and all("MT321" in mouse["display_id"] for mouse in filtered_mice),
@@ -721,6 +739,14 @@ def main() -> None:
                 assert_true(export_preview["export_type"] == "separation_preview", "Export preview should identify its workbook-like shape.")
                 assert_true(export_preview["preview_row_count"] >= 3, "Export preview should include mouse candidate rows.")
                 assert_true(
+                    export_preview["expected_separation_filename"].endswith("분리 현황표.xlsx"),
+                    "Export preview should expose the expected separation workbook filename.",
+                )
+                assert_true(
+                    export_preview["expected_animal_sheet_filename"].endswith("animal sheet.xlsx"),
+                    "Export preview should expose the expected animal sheet workbook filename.",
+                )
+                assert_true(
                     export_preview["separation_columns"][:5] == ["Cage number", "Strain", "Genotype", "total", "DOB"],
                     "Separation preview should expose senior-workbook-style column labels.",
                 )
@@ -745,6 +771,18 @@ def main() -> None:
                     "Genotyping dashboard should count newly separated mice that need sampling.",
                 )
                 genotyping_target = next(mouse for mouse in mice if mouse["display_id"] == "MT321")
+                audit_trace = client.get(f"/api/mice/{genotyping_target['mouse_id']}/audit-trace")
+                assert_true(audit_trace.status_code == 200, "Mouse audit trace endpoint failed.")
+                audit_payload = audit_trace.json()
+                assert_true(
+                    audit_payload["source_layer"] == "export or view"
+                    and audit_payload["mouse"]["mouse_id"] == genotyping_target["mouse_id"],
+                    "Mouse audit trace should identify the selected mouse and boundary.",
+                )
+                assert_true(
+                    any(item["category"] in {"note_line", "mouse_event", "review"} for item in audit_payload["timeline"]),
+                    "Mouse audit trace should combine note, event, or review evidence in one timeline.",
+                )
                 target_rule = client.post(
                     "/api/strain-target-genotypes",
                     json={
@@ -967,6 +1005,24 @@ def main() -> None:
                     json={"mouse_id": genotyping_target["mouse_id"], "sample_id": "already-resulted"},
                 )
                 assert_true(duplicate_resulted_request.status_code == 409, "Resulted mice should not accept a new genotyping request silently.")
+                parent_trace = client.get(f"/api/mice/{genotyping_target['mouse_id']}/audit-trace")
+                assert_true(parent_trace.status_code == 200, "Mouse audit trace endpoint should return parent mouse evidence.")
+                parent_trace_payload = parent_trace.json()
+                parent_categories = {item["category"] for item in parent_trace_payload["timeline"]}
+                assert_true(parent_trace_payload["source_layer"] == "export or view", "Mouse audit trace should stay a review/export view.")
+                assert_true(parent_trace_payload["note_items"], "Mouse audit trace should include parsed note-line evidence.")
+                assert_true("note_line" in parent_categories, "Mouse audit trace timeline should include note-line evidence.")
+                assert_true("genotyping" in parent_categories, "Mouse audit trace timeline should include genotyping records.")
+                offspring_trace = client.get(f"/api/mice/{weaned_offspring_rows[0]['mouse_id']}/audit-trace")
+                assert_true(offspring_trace.status_code == 200, "Mouse audit trace endpoint should return offspring evidence.")
+                offspring_trace_payload = offspring_trace.json()
+                offspring_categories = {item["category"] for item in offspring_trace_payload["timeline"]}
+                assert_true("mouse_event" in offspring_categories, "Offspring audit trace should include born/weaned/request events.")
+                assert_true("genotyping" in offspring_categories, "Offspring audit trace should include pending genotyping request.")
+                assert_true(
+                    offspring_trace_payload["source_records"],
+                    "Offspring audit trace should preserve source records linked through mouse events.",
+                )
                 dashboard_after = {card["key"]: card["count"] for card in client.get("/api/genotyping-dashboard").json()}
                 assert_true(
                     dashboard_after.get("target_confirmed", 0) >= 1,
@@ -980,6 +1036,32 @@ def main() -> None:
                 assert_true(
                     any(record["sample_id"] == "TAIL-MT321-L1-01" and record["result_status"] == "pending" for record in genotyping_records),
                     "Genotyping request should create a pending genotyping record.",
+                )
+                missing_audit = client.get("/api/mice/mouse-does-not-exist/audit-trail")
+                assert_true(missing_audit.status_code == 404, "Missing mouse audit trail should return 404.")
+                audit_trace = client.get(f"/api/mice/{genotyping_target['mouse_id']}/audit-trail")
+                assert_true(audit_trace.status_code == 200, "Mouse audit trail endpoint failed.")
+                audit_payload = audit_trace.json()
+                assert_true(audit_payload["source_layer"] == "export or view", "Audit trail should be a read-only export/view layer.")
+                assert_true(audit_payload["mouse"]["display_id"] == "MT321", "Audit trail should include the selected mouse.")
+                audit_categories = {item["category"] for item in audit_payload["timeline"]}
+                assert_true(
+                    {"note_line", "mouse_event", "genotyping", "cage_assignment", "action_log"}.issubset(audit_categories),
+                    "Audit trail should combine source notes, events, genotyping, cage history, and action logs.",
+                )
+                assert_true(
+                    any(action["action_type"] == "genotyping_resulted" for action in audit_payload["actions"]),
+                    "Audit trail should expose direct action log records for the mouse.",
+                )
+                assert_true(
+                    any(assignment["cage_label"] == "C-014" for assignment in audit_payload["cage_assignments"]),
+                    "Audit trail should expose cage assignment history.",
+                )
+                offspring_audit = client.get(f"/api/mice/{requested_payload['mouse_id']}/audit-trail").json()
+                assert_true(
+                    offspring_audit["lineage"]["litter"]["litter_id"] == litter_payload["litter_id"]
+                    and offspring_audit["lineage"]["father"]["mouse_id"] == genotyping_target["mouse_id"],
+                    "Offspring audit trail should expose litter and parent lineage.",
                 )
                 genotyping_export = client.get("/api/exports/genotyping-worklist.csv", params={"query": "MT321"})
                 assert_true(genotyping_export.status_code == 200, "Genotyping worklist CSV export endpoint failed.")
