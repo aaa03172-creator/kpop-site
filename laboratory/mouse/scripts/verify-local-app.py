@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -13,6 +14,8 @@ except (ModuleNotFoundError, RuntimeError):
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CLI_MAIN = ROOT / "mousedb" / "__main__.py"
+CLI_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 
 
 def assert_true(condition: bool, message: str) -> None:
@@ -20,11 +23,28 @@ def assert_true(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+def run_cli(data_dir: Path, *args: str, expect_code: int = 0) -> subprocess.CompletedProcess[str]:
+    python_executable = str(CLI_PYTHON) if CLI_PYTHON.exists() else sys.executable
+    result = subprocess.run(
+        [python_executable, "-m", "mousedb", "--db", str(data_dir / "mousedb.sqlite"), *args],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert_true(
+        result.returncode == expect_code,
+        f"CLI {' '.join(args)} returned {result.returncode}: stdout={result.stdout!r} stderr={result.stderr!r}",
+    )
+    return result
+
+
 def main() -> None:
     for path in [
         ROOT / "app" / "main.py",
         ROOT / "app" / "db.py",
         ROOT / "app" / "storage.py",
+        CLI_MAIN,
         ROOT / "static" / "index.html",
         ROOT / "requirements.txt",
         ROOT / "start.bat",
@@ -99,6 +119,124 @@ def main() -> None:
             "Existing genotyping_record tables should migrate to the result tracking schema.",
         )
 
+    if CLI_PYTHON.exists():
+        with tempfile.TemporaryDirectory() as cli_dir:
+            cli_data_dir = Path(cli_dir)
+            initialized = json.loads(run_cli(cli_data_dir, "init", "--json").stdout)
+            assert_true(initialized["initialized"] is True, "MouseDB CLI init should initialize the local database.")
+            strain = json.loads(
+                run_cli(
+                    cli_data_dir,
+                    "strain",
+                    "add",
+                    "--name",
+                    "ApoM Tg/Tg",
+                    "--source",
+                    "manual",
+                    "--json",
+                ).stdout
+            )
+            assert_true(strain["strain_id"].startswith("STR-"), "MouseDB CLI strain add should create an external strain ID.")
+            cage = json.loads(
+                run_cli(
+                    cli_data_dir,
+                    "cage",
+                    "add",
+                    "--label",
+                    "C-014",
+                    "--type",
+                    "holding",
+                    "--json",
+                ).stdout
+            )
+            assert_true(cage["cage_id"] == "C-014", "MouseDB CLI cage add should normalize cage IDs.")
+            mouse = json.loads(
+                run_cli(
+                    cli_data_dir,
+                    "mouse",
+                    "add",
+                    "--display-id",
+                    "MT321",
+                    "--strain",
+                    strain["strain_id"],
+                    "--sex",
+                    "F",
+                    "--dob",
+                    "2025-10-20",
+                    "--cage",
+                    cage["cage_id"],
+                    "--json",
+                ).stdout
+            )
+            assert_true(mouse["display_id"] == "MT321", "MouseDB CLI mouse add should preserve display ID.")
+            mate = json.loads(
+                run_cli(
+                    cli_data_dir,
+                    "mouse",
+                    "add",
+                    "--display-id",
+                    "MT322",
+                    "--strain",
+                    strain["strain_id"],
+                    "--sex",
+                    "M",
+                    "--dob",
+                    "2025-10-20",
+                    "--cage",
+                    cage["cage_id"],
+                    "--json",
+                ).stdout
+            )
+            assert_true(mate["mouse_id"] != mouse["mouse_id"], "MouseDB CLI should create distinct mouse IDs.")
+            genotype = json.loads(
+                run_cli(
+                    cli_data_dir,
+                    "genotype",
+                    "record",
+                    "--mouse",
+                    mouse["mouse_id"],
+                    "--result",
+                    "Tg/Tg",
+                    "--sample-id",
+                    "S-MT321",
+                    "--json",
+                ).stdout
+            )
+            assert_true(genotype["result"] == "Tg/Tg", "MouseDB CLI genotype record should preserve result text.")
+            mating = json.loads(
+                run_cli(
+                    cli_data_dir,
+                    "mating",
+                    "create",
+                    "--male",
+                    mate["mouse_id"],
+                    "--female",
+                    mouse["mouse_id"],
+                    "--goal",
+                    strain["strain_name"],
+                    "--expected-genotype",
+                    "Tg/Tg",
+                    "--json",
+                ).stdout
+            )
+            assert_true(mating["status"] == "active", "MouseDB CLI mating create should create an active mating.")
+            litter = json.loads(
+                run_cli(
+                    cli_data_dir,
+                    "litter",
+                    "create",
+                    "--mating",
+                    mating["mating_id"],
+                    "--number-born",
+                    "6",
+                    "--json",
+                ).stdout
+            )
+            assert_true(litter["number_born"] == 6, "MouseDB CLI litter create should preserve litter counts.")
+            summary = json.loads(run_cli(cli_data_dir, "colony", "summary", "--json").stdout)
+            assert_true(summary["total_alive_mice"] >= 2, "MouseDB CLI colony summary should include live mouse totals.")
+            assert_true(summary["active_matings"] == 1, "MouseDB CLI colony summary should include active mating counts.")
+
     with tempfile.TemporaryDirectory() as temp_dir:
         db.DATA_DIR = Path(temp_dir)
         db.DB_PATH = Path(temp_dir) / "mouse_lims.sqlite"
@@ -126,6 +264,9 @@ def main() -> None:
                 "strain_target_genotype",
                 "cage_registry",
                 "mouse_cage_assignment",
+                "mating_registry",
+                "mating_mouse",
+                "litter_registry",
                 "my_assigned_strain",
                 "distribution_import",
                 "distribution_assignment_row",
@@ -247,6 +388,7 @@ def main() -> None:
                 assert_true("Download Genotyping Worklist" in index_html, "Local UI should expose genotyping worklist export.")
                 assert_true("Download Ready CSV" in index_html, "Local UI should expose gated final CSV export.")
                 assert_true("Cage View" in index_html, "Local UI should expose cage management.")
+                assert_true("Breeding / Litter View" in index_html, "Local UI should expose mating and litter management.")
                 assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
                 assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
                 assert_true("exportRows" in index_html, "Local UI should expose export preview rows.")
@@ -609,6 +751,54 @@ def main() -> None:
                     any(item["cage_label"] == "A-101" and item["active_mouse_count"] == 1 for item in cages),
                     "Cage list should include active assignment counts.",
                 )
+                female_parent = next(mouse for mouse in mice if mouse["display_id"] == "MT322")
+                mating = client.post(
+                    "/api/matings",
+                    json={
+                        "mating_label": "MT321 x MT322",
+                        "male_mouse_id": genotyping_target["mouse_id"],
+                        "female_mouse_id": female_parent["mouse_id"],
+                        "strain_goal": genotyping_target["raw_strain_text"],
+                        "expected_genotype": "Tg/Tg",
+                        "start_date": "2026-05-01",
+                        "purpose": "verification",
+                    },
+                )
+                assert_true(mating.status_code == 200, "Could not create mating registry entry.")
+                mating_payload = mating.json()
+                mating_rows = client.get("/api/matings").json()
+                assert_true(
+                    any(
+                        row["mating_id"] == mating_payload["mating_id"]
+                        and "MT321" in row["male_mice"]
+                        and "MT322" in row["female_mice"]
+                        for row in mating_rows
+                    ),
+                    "Mating list should expose linked parent mice by role.",
+                )
+                missing_parent_mating = client.post(
+                    "/api/matings",
+                    json={"mating_label": "bad mating", "male_mouse_id": "missing_mouse"},
+                )
+                assert_true(missing_parent_mating.status_code == 404, "Mating creation should reject missing parent mouse IDs.")
+                litter = client.post(
+                    "/api/litters",
+                    json={
+                        "litter_label": "L-MT321-001",
+                        "mating_id": mating_payload["mating_id"],
+                        "birth_date": "2026-05-02",
+                        "number_born": 10,
+                        "number_alive": 9,
+                        "status": "born",
+                    },
+                )
+                assert_true(litter.status_code == 200, "Could not create litter registry entry.")
+                litter_payload = litter.json()
+                litter_rows = client.get("/api/litters").json()
+                assert_true(
+                    any(row["litter_id"] == litter_payload["litter_id"] and row["number_born"] == 10 for row in litter_rows),
+                    "Litter list should expose source-backed litter counts.",
+                )
                 genotyping_update = client.post(
                     "/api/genotyping/update",
                     json={
@@ -725,6 +915,36 @@ def main() -> None:
                         """,
                         (genotyping_target["mouse_id"],),
                     ).fetchone()["count"]
+                    mating_action_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM action_log
+                        WHERE action_type = 'mating_created' AND target_id = ?
+                        """,
+                        (mating_payload["mating_id"],),
+                    ).fetchone()["count"]
+                    litter_action_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM action_log
+                        WHERE action_type = 'litter_created' AND target_id = ?
+                        """,
+                        (litter_payload["litter_id"],),
+                    ).fetchone()["count"]
+                    paired_event_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM mouse_event
+                        WHERE event_type = 'paired' AND related_entity_type = 'mating'
+                        """
+                    ).fetchone()["count"]
+                    litter_event_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM mouse_event
+                        WHERE event_type = 'litter_produced' AND related_entity_type = 'litter'
+                        """
+                    ).fetchone()["count"]
                 assert_true(note_count >= 10, "Persisted note item evidence count is too low.")
                 assert_true(mouse_count >= 3, "Persisted mouse candidate count is too low.")
                 assert_true(moved_count >= 1, "Single-struck mouse note should create a moved candidate.")
@@ -734,6 +954,10 @@ def main() -> None:
                 assert_true(cage_move_event_count >= 1, "Cage move should create a mouse event.")
                 assert_true(active_cage_assignment_count == 1, "Cage moves should leave only one active assignment per mouse.")
                 assert_true(ended_cage_assignment_count >= 1, "Cage moves should close the previous active assignment.")
+                assert_true(mating_action_count == 1, "Mating creation should create an action log entry.")
+                assert_true(litter_action_count == 1, "Litter creation should create an action log entry.")
+                assert_true(paired_event_count >= 2, "Mating creation should create parent pairing events.")
+                assert_true(litter_event_count >= 2, "Litter creation should create parent litter events.")
                 correction = client.post(
                     "/api/corrections",
                     json={

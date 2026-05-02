@@ -4,8 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "mousedb": "python -m mousedb",
     "parse:distribution": "python scripts/parse_distribution_workbook.py",
-    "test": "node scripts/verify-mvp.js"
+    "test": "node scripts/verify-mvp.js",
+    "test:local": "python scripts/verify-local-app.py",
+    "test:mousedb": "python -m pytest tests/test_mousedb_cli.py",
+    "verify": "npm test && npm run test:local && npm run test:mousedb"
   },
   "keywords": [],
   "author": "",

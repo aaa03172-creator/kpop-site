@@ -335,6 +335,55 @@ def init_db() -> None:
                 FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
             );
 
+            CREATE TABLE IF NOT EXISTS mating_registry (
+                mating_id TEXT PRIMARY KEY,
+                mating_label TEXT NOT NULL,
+                strain_goal TEXT NOT NULL DEFAULT '',
+                expected_genotype TEXT NOT NULL DEFAULT '',
+                start_date TEXT NOT NULL DEFAULT '',
+                end_date TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                purpose TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                source_record_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS mating_mouse (
+                mating_mouse_id TEXT PRIMARY KEY,
+                mating_id TEXT NOT NULL,
+                mouse_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                joined_date TEXT NOT NULL DEFAULT '',
+                removed_date TEXT,
+                note TEXT NOT NULL DEFAULT '',
+                source_record_id TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (mating_id) REFERENCES mating_registry(mating_id),
+                FOREIGN KEY (mouse_id) REFERENCES mouse_master(mouse_id),
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS litter_registry (
+                litter_id TEXT PRIMARY KEY,
+                litter_label TEXT NOT NULL,
+                mating_id TEXT NOT NULL,
+                birth_date TEXT NOT NULL DEFAULT '',
+                number_born INTEGER,
+                number_alive INTEGER,
+                number_weaned INTEGER,
+                weaning_date TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'born',
+                note TEXT NOT NULL DEFAULT '',
+                source_record_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (mating_id) REFERENCES mating_registry(mating_id),
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
             CREATE TABLE IF NOT EXISTS my_assigned_strain (
                 assigned_strain_id TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL,
@@ -489,6 +538,14 @@ def init_db() -> None:
                 ON cage_registry(cage_label COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS idx_mouse_cage_assignment_active
                 ON mouse_cage_assignment(mouse_id, status, assigned_at);
+            CREATE INDEX IF NOT EXISTS idx_mating_registry_status
+                ON mating_registry(status, start_date);
+            CREATE INDEX IF NOT EXISTS idx_mating_mouse_mating
+                ON mating_mouse(mating_id, role);
+            CREATE INDEX IF NOT EXISTS idx_mating_mouse_mouse
+                ON mating_mouse(mouse_id, joined_date);
+            CREATE INDEX IF NOT EXISTS idx_litter_registry_mating
+                ON litter_registry(mating_id, birth_date);
             """
         )
         conn.executemany(
