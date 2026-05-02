@@ -1,10 +1,12 @@
 ﻿from __future__ import annotations
 
 import json
+import io
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 try:
@@ -408,6 +410,14 @@ def main() -> None:
                 assert_true("exportLogRows" in index_html, "Local UI should expose export history.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
                 assert_true("Distribution Assignment Import" in index_html, "Local UI should expose distribution import.")
+                assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
+                assert_true("Mouse Detail" in index_html, "Local UI should expose the mouse detail visualization.")
+                assert_true("Strain Detail" in index_html, "Local UI should expose the strain detail visualization.")
+                assert_true("renderVisualizations" in index_html, "Local UI should render visualizations from API data.")
+                assert_true("vizHeatmapHead" in index_html, "Genotype heatmap should be driven by rendered data labels.")
+                assert_true("demo-note-1" not in index_html, "Mouse detail visualization should not use demo source evidence.")
+                assert_true("selectedStrainMice.length || aliveMice" not in index_html, "Strain detail active mice should not fall back to colony-wide counts.")
+                assert_true("EXP-2026-041" not in index_html, "Strain visualization should not hard-code experiment IDs.")
                 assert_true("/[^a-z0-9가-힣]/g" in index_html, "Local UI strain matching key should preserve Korean strain text.")
                 assert_true(client.get("/api/assigned-strains").json() == [], "Assigned strain scope should start empty.")
                 assert_true(client.get("/api/source-records").json() == [], "Source evidence should start empty.")
@@ -689,12 +699,21 @@ def main() -> None:
                 assert_true(export_log[0]["source_layer"] == "export or view", "Export log should stay in the export/view layer.")
                 blocked_export = client.get("/api/exports/mice.csv", params={"query": "MT321", "require_ready": "true"})
                 assert_true(blocked_export.status_code == 409, "Final CSV export should be blocked by open review items.")
+                blocked_separation_xlsx = client.get("/api/exports/separation.xlsx")
+                assert_true(blocked_separation_xlsx.status_code == 409, "Final separation XLSX export should be blocked by open review items.")
+                blocked_animal_xlsx = client.get("/api/exports/animal-sheet.xlsx")
+                assert_true(blocked_animal_xlsx.status_code == 409, "Final animal sheet XLSX export should be blocked by open review items.")
                 blocked_payload = blocked_export.json()["detail"]
                 assert_true(
                     blocked_payload["source_layer"] == "export or view" and blocked_payload["blocked_review_count"] > 0,
                     "Blocked final export should report export/view layer and blocker count.",
                 )
-                blocked_log = client.get("/api/export-log").json()[0]
+                blocked_logs = client.get("/api/export-log").json()
+                blocked_log = next(
+                    (item for item in blocked_logs if item["export_type"] == "mouse_csv" and item["status"] == "blocked"),
+                    None,
+                )
+                assert_true(blocked_log is not None, "Blocked final CSV export should create a blocked export log entry.")
                 assert_true(blocked_log["status"] == "blocked", "Blocked final export should create a blocked export log entry.")
                 assert_true(blocked_log["filename"] == "mouse_records_filtered.csv", "Blocked export log should preserve intended filename.")
                 export_preview = client.get("/api/export-preview").json()
@@ -1201,6 +1220,27 @@ def main() -> None:
                 ready_export = client.get("/api/exports/mice.csv", params={"query": "MT321", "require_ready": "true"})
                 assert_true(ready_export.status_code == 200, "Ready CSV export should succeed after review resolution.")
                 assert_true("MT321" in ready_export.text, "Ready CSV export should include the filtered mouse row.")
+                ready_separation_xlsx = client.get("/api/exports/separation.xlsx")
+                assert_true(ready_separation_xlsx.status_code == 200, "Ready separation XLSX export should succeed after review resolution.")
+                assert_true(
+                    ready_separation_xlsx.content[:4] == b"PK\x03\x04",
+                    "Separation XLSX export should be a ZIP-based workbook.",
+                )
+                with zipfile.ZipFile(io.BytesIO(ready_separation_xlsx.content)) as workbook_zip:
+                    separation_sheet_xml = workbook_zip.read("xl/worksheets/sheet1.xml").decode("utf-8")
+                assert_true("Sampling point" in separation_sheet_xml, "Separation XLSX should include the template header.")
+                assert_true("ApoM Tg/Tg" in separation_sheet_xml, "Separation XLSX should include accepted strain rows.")
+                ready_animal_xlsx = client.get("/api/exports/animal-sheet.xlsx")
+                assert_true(ready_animal_xlsx.status_code == 200, "Ready animal sheet XLSX export should succeed after review resolution.")
+                assert_true(
+                    ready_animal_xlsx.content[:4] == b"PK\x03\x04",
+                    "Animal sheet XLSX export should be a ZIP-based workbook.",
+                )
+                with zipfile.ZipFile(io.BytesIO(ready_animal_xlsx.content)) as workbook_zip:
+                    animal_sheet_xml = workbook_zip.read("xl/worksheets/sheet1.xml").decode("utf-8")
+                assert_true("Cage No." in animal_sheet_xml, "Animal sheet XLSX should include the template header.")
+                assert_true("MT321" in animal_sheet_xml and "MT322" in animal_sheet_xml, "Animal sheet XLSX should include parent IDs.")
+                assert_true("2026-05-02 10p" in animal_sheet_xml, "Animal sheet XLSX should include litter pup evidence.")
                 ready_export_log = client.get("/api/export-log").json()[0]
                 assert_true(ready_export_log["status"] == "generated", "Ready export should create a generated export log entry.")
                 assert_true(
