@@ -156,6 +156,13 @@ def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
             "updated_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
         },
     )
+    ensure_columns(
+        conn,
+        "legacy_workbook_row",
+        {
+            "review_id": "TEXT",
+        },
+    )
 
 
 def init_db() -> None:
@@ -444,11 +451,13 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS legacy_workbook_row (
                 legacy_row_id TEXT PRIMARY KEY,
                 legacy_import_id TEXT NOT NULL,
+                review_id TEXT,
                 row_type TEXT NOT NULL DEFAULT '',
                 source_sheet TEXT NOT NULL DEFAULT '',
                 source_row_number INTEGER,
                 raw_row_json TEXT NOT NULL DEFAULT '{}',
                 review_status TEXT NOT NULL DEFAULT 'candidate',
+                FOREIGN KEY (review_id) REFERENCES review_queue(review_id),
                 FOREIGN KEY (legacy_import_id) REFERENCES legacy_workbook_import(legacy_import_id)
             );
 
@@ -557,6 +566,8 @@ def init_db() -> None:
                 ON legacy_workbook_import(imported_at);
             CREATE INDEX IF NOT EXISTS idx_legacy_workbook_row_import
                 ON legacy_workbook_row(legacy_import_id, source_row_number);
+            CREATE INDEX IF NOT EXISTS idx_legacy_workbook_row_review
+                ON legacy_workbook_row(review_id);
             CREATE INDEX IF NOT EXISTS idx_strain_registry_name
                 ON strain_registry(strain_name COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS idx_source_record_type

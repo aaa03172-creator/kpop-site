@@ -122,12 +122,13 @@
     }
     .review-actions {
       display: grid;
-      grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) auto;
+      grid-template-columns: minmax(130px, 0.8fr) minmax(120px, 1fr) minmax(120px, 1fr) auto;
       gap: 6px;
       align-items: center;
-      min-width: 420px;
+      min-width: 560px;
     }
-    .review-actions input[type="text"] {
+    .review-actions input[type="text"],
+    .review-actions select {
       margin: 0;
     }
     .metric-grid {
@@ -579,8 +580,9 @@
     <section>
       <h2>Upload Source Photo</h2>
       <p>Raw cage card evidence stays local.</p>
-      <input id="photoFile" type="file" accept="image/*">
-      <button id="uploadButton" type="button">Upload Photo</button>
+      <input id="photoFile" type="file" accept="image/*" multiple>
+      <button id="uploadButton" type="button">Upload Photos</button>
+      <button id="photoReviewCandidateButton" type="button">Create Missing Photo Reviews</button>
       <p class="muted" id="uploadMessage"></p>
     </section>
 
@@ -589,6 +591,43 @@
       <p>Imports sample parsed/intermediate records without OCR.</p>
       <button id="fixtureButton" type="button">Import Sample Fixture</button>
       <p class="muted" id="fixtureMessage"></p>
+    </section>
+
+    <section class="full">
+      <h2>Manual Photo Transcription</h2>
+      <p>Enter only what you can verify from the latest cage-card photo; values stay reviewable until accepted.</p>
+      <div class="form-grid">
+        <label>
+          Source photo
+          <select id="transcriptionPhotoId"></select>
+        </label>
+        <label>
+          Card type
+          <select id="transcriptionCardType">
+            <option value="Separated">Separated</option>
+            <option value="Mating">Mating</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </label>
+        <label>
+          Raw strain
+          <input id="transcriptionRawStrain" type="text" placeholder="ApoM Tg/Tg">
+        </label>
+        <label>
+          DOB
+          <input id="transcriptionDobRaw" type="text" placeholder="25.10.20-28">
+        </label>
+        <label>
+          Count
+          <input id="transcriptionMouseCount" type="text" placeholder="♂ 2p or 2 total">
+        </label>
+        <label>
+          Note lines
+          <textarea id="transcriptionNotes" rows="3" placeholder="MT318 R'&#10;MT322 L'&#10;26.04.13 - 10p"></textarea>
+        </label>
+        <button id="transcriptionButton" type="button">Save Manual Transcription</button>
+      </div>
+      <p class="muted" id="transcriptionMessage"></p>
     </section>
 
     <section class="full">
@@ -679,12 +718,23 @@
             <th>Workbook</th>
             <th>Kind</th>
             <th>Rows</th>
+            <th>Review items</th>
             <th>Preview</th>
             <th>Source evidence</th>
           </tr>
         </thead>
         <tbody id="legacyWorkbookRows"></tbody>
       </table>
+    </section>
+
+    <section class="full">
+      <h2>Evidence Reconciliation</h2>
+      <p>Latest photos stay raw until reviewed; predecessor Excel rows remain non-canonical comparison context.</p>
+      <table>
+        <thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead>
+        <tbody id="evidenceReconciliationRows"></tbody>
+      </table>
+      <p class="muted" id="evidenceReconciliationSummary"></p>
     </section>
 
     <section class="full">
@@ -1193,6 +1243,7 @@
         item.source_file_name,
         `${item.workbook_kind || "--"} / ${item.sheet_name || "--"}`,
         String(rows.length),
+        `${item.open_review_count || 0} open / ${item.review_count || 0} total`,
         preview || "--",
         item.source_record_id || "--"
       ]);
@@ -1527,7 +1578,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, legacyWorkbookImports, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, legacyWorkbookImports, evidenceReconciliation, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -1535,6 +1586,7 @@
         api("/api/corrections"),
         api("/api/distribution-imports"),
         api("/api/legacy-workbook-imports"),
+        api("/api/evidence-reconciliation"),
         api("/api/photos"),
         api("/api/review-items"),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
@@ -1582,7 +1634,13 @@
       document.getElementById("distributionRows").innerHTML = suggestions.map(distributionRow).join("") ||
         row(["No distribution candidates yet", "", "", "", "", ""]);
       document.getElementById("legacyWorkbookRows").innerHTML = legacyWorkbookImports.map(legacyWorkbookRow).join("") ||
-        row(["No legacy workbooks imported yet", "", "", "", ""]);
+        row(["No legacy workbooks imported yet", "", "", "", "", ""]);
+      document.getElementById("evidenceReconciliationRows").innerHTML = (evidenceReconciliation.comparison_rows || []).map((item) =>
+        row([item.check, item.status, item.detail])
+      ).join("") || row(["No evidence loaded", "missing", "Upload latest cage-card photos and predecessor Excel views."]);
+      document.getElementById("evidenceReconciliationSummary").textContent =
+        `${evidenceReconciliation.next_action || "No reconciliation status yet"} ` +
+        `Priority: ${(evidenceReconciliation.source_priority || []).join(" > ") || "raw source photo > reviewed note line > predecessor Excel view"}.`;
       document.querySelectorAll(".add-distribution-scope").forEach((button) => {
         button.addEventListener("click", async () => {
           const canonical = button.dataset.canonical;
@@ -1603,8 +1661,11 @@
         });
       });
       document.getElementById("photoRows").innerHTML = photos.map((photo) =>
-        row([photo.photo_id, photo.original_filename, photo.status, photo.uploaded_at])
+        row([photo.photo_id, photo.original_filename, `${photo.status} (${photo.open_review_count || 0} open)`, photo.uploaded_at])
       ).join("") || row(["No photos yet", "", "", ""]);
+      document.getElementById("transcriptionPhotoId").innerHTML = photos.map((photo) =>
+        `<option value="${escapeHtml(photo.photo_id)}">${escapeHtml(photo.original_filename)} (${escapeHtml(photo.status)})</option>`
+      ).join("") || '<option value="">No photos uploaded</option>';
       document.getElementById("reviewStatusFilter").value = reviewStatusFilter;
       document.getElementById("reviewSeverityFilter").value = reviewSeverityFilter;
       document.getElementById("reviewEvidenceFilter").value = reviewEvidenceFilter;
@@ -1619,6 +1680,12 @@
           <td>${
             item.status === "open"
               ? `<div class="review-actions">
+                   <select class="review-legacy-decision" aria-label="Legacy decision">
+                     <option value="resolve">Resolve only</option>
+                     <option value="accept_legacy_candidate">Accept legacy</option>
+                     <option value="reject_legacy_candidate">Reject legacy</option>
+                     <option value="map_to_canonical_candidate">Map candidate</option>
+                   </select>
                    <input class="review-resolved-value" type="text" value="${escapeHtml(item.suggested_value || "")}" aria-label="Resolved value">
                    <input class="review-resolution-note" type="text" placeholder="Resolution note" aria-label="Resolution note">
                    <button class="resolve-review" type="button"
@@ -1634,6 +1701,7 @@
           const container = button.closest(".review-actions");
           const note = container.querySelector(".review-resolution-note").value;
           const resolvedValue = container.querySelector(".review-resolved-value").value;
+          const legacyDecision = container.querySelector(".review-legacy-decision").value;
           if (!note || !note.trim()) return;
           await api(`/api/review-items/${button.dataset.reviewId}/resolve`, {
             method: "POST",
@@ -1641,6 +1709,7 @@
             body: JSON.stringify({
               resolution_note: note.trim(),
               resolved_value: resolvedValue || "",
+              legacy_decision: legacyDecision,
               correction_entity_type: "review_item",
               correction_entity_id: button.dataset.reviewId,
               correction_field_name: "reviewed_value",
@@ -1849,16 +1918,54 @@
     }
 
     document.getElementById("uploadButton").addEventListener("click", async () => {
-      const file = document.getElementById("photoFile").files[0];
-      if (!file) {
+      const files = Array.from(document.getElementById("photoFile").files || []);
+      if (!files.length) {
         document.getElementById("uploadMessage").textContent = "Choose a photo first.";
         return;
       }
-      const form = new FormData();
-      form.append("file", file);
-      const result = await api("/api/photos", { method: "POST", body: form });
-      document.getElementById("uploadMessage").textContent = `Stored ${result.original_filename}.`;
+      let uploaded = 0;
+      for (const file of files) {
+        const form = new FormData();
+        form.append("file", file);
+        await api("/api/photos", { method: "POST", body: form });
+        uploaded += 1;
+      }
+      document.getElementById("uploadMessage").textContent = `Stored ${uploaded} photo(s) and opened manual review candidates.`;
       document.getElementById("photoFile").value = "";
+      await refresh();
+    });
+    document.getElementById("photoReviewCandidateButton").addEventListener("click", async () => {
+      const result = await api("/api/photos/review-candidates", { method: "POST" });
+      document.getElementById("uploadMessage").textContent =
+        `Created ${result.created_review_candidates} photo review candidates; ${result.existing_review_candidates} already existed.`;
+      await refresh();
+    });
+    document.getElementById("transcriptionButton").addEventListener("click", async () => {
+      const photoId = document.getElementById("transcriptionPhotoId").value;
+      if (!photoId) {
+        document.getElementById("transcriptionMessage").textContent = "Upload or choose a source photo first.";
+        return;
+      }
+      const notes = document.getElementById("transcriptionNotes").value
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => ({ raw: line, strike: "none" }));
+      const result = await api(`/api/photos/${encodeURIComponent(photoId)}/manual-transcription`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          card_type: document.getElementById("transcriptionCardType").value,
+          raw_strain: document.getElementById("transcriptionRawStrain").value,
+          matched_strain: document.getElementById("transcriptionRawStrain").value,
+          dob_raw: document.getElementById("transcriptionDobRaw").value,
+          mouse_count: document.getElementById("transcriptionMouseCount").value,
+          notes
+        })
+      });
+      document.getElementById("transcriptionMessage").textContent =
+        `Saved transcription ${result.parse_id}; ${result.created_note_items} note line(s) require review before canonical writes.`;
+      document.getElementById("transcriptionNotes").value = "";
       await refresh();
     });
 
@@ -1952,7 +2059,7 @@
       }
       const result = await response.json();
       document.getElementById("legacyWorkbookMessage").textContent =
-        `Imported ${result.stored_rows} candidate rows from ${result.source_file_name}; source evidence ${result.source_record_id}.`;
+        `Imported ${result.stored_rows} candidate rows and opened ${result.created_review_items} review items from ${result.source_file_name}; source evidence ${result.source_record_id}.`;
       document.getElementById("legacyWorkbookFile").value = "";
       await refresh();
     });

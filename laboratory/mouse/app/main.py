@@ -95,12 +95,27 @@ class MouseEventCreate(BaseModel):
 class ReviewResolutionCreate(BaseModel):
     resolution_note: str = Field(min_length=1)
     resolved_value: str = ""
+    legacy_decision: str = "resolve"
+    canonical_entity_type: str = ""
+    canonical_entity_id: str = ""
     correction_entity_type: str = ""
     correction_entity_id: str = ""
     correction_field_name: str = ""
     correction_before_value: str = ""
     correction_after_value: str = ""
     correction_source_record_id: str | None = None
+
+
+class PhotoManualTranscriptionCreate(BaseModel):
+    card_type: str = "Separated"
+    raw_strain: str = ""
+    matched_strain: str = ""
+    dob_raw: str = ""
+    dob_normalized: str = ""
+    mouse_count: str = ""
+    confidence: float = Field(default=75, ge=0, le=100)
+    notes: list[dict[str, Any]] = Field(default_factory=list)
+    reviewer_note: str = ""
 
 
 class GenotypingUpdate(BaseModel):
@@ -199,8 +214,19 @@ def list_photos() -> list[dict[str, Any]]:
     with connection() as conn:
         rows = conn.execute(
             """
-            SELECT photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind
-            FROM photo_log
+            SELECT photo.photo_id, photo.original_filename, photo.stored_path,
+                   photo.uploaded_at, photo.status, photo.raw_source_kind,
+                   COALESCE(review_counts.open_reviews, 0) AS open_review_count,
+                   review_counts.latest_parse_id
+            FROM photo_log photo
+            LEFT JOIN (
+                SELECT parse.photo_id, COUNT(review.review_id) AS open_reviews,
+                       MAX(parse.parse_id) AS latest_parse_id
+                FROM parse_result parse
+                LEFT JOIN review_queue review
+                    ON review.parse_id = parse.parse_id AND review.status = 'open'
+                GROUP BY parse.photo_id
+            ) review_counts ON review_counts.photo_id = photo.photo_id
             ORDER BY uploaded_at DESC
             """
         ).fetchall()
@@ -241,6 +267,103 @@ def create_source_record(
         ),
     )
     return source_record_id
+
+
+def ensure_photo_review_candidate(
+    conn: Any,
+    *,
+    photo_id: str,
+    original_filename: str,
+    stored_path: str,
+    uploaded_at: str,
+    source_record_id: str = "",
+) -> dict[str, Any]:
+    existing = conn.execute(
+        """
+        SELECT parse.parse_id, review.review_id
+        FROM parse_result parse
+        LEFT JOIN review_queue review ON review.parse_id = parse.parse_id
+        WHERE parse.photo_id = ? AND parse.source_name = ?
+        ORDER BY parse.parsed_at DESC
+        LIMIT 1
+        """,
+        (photo_id, "photo_manual_review"),
+    ).fetchone()
+    if existing is not None:
+        return {
+            "parse_id": existing["parse_id"],
+            "review_id": existing["review_id"],
+            "created": False,
+        }
+
+    parse_id = new_id("parse")
+    review_id = new_id("review")
+    now = utc_now()
+    raw_payload = {
+        "layer": "review item",
+        "source_layer": "raw source",
+        "source_type": "cage_card_photo",
+        "photo_id": photo_id,
+        "source_record_id": source_record_id,
+        "original_filename": original_filename,
+        "stored_path": stored_path,
+        "uploaded_at": uploaded_at,
+        "external_processing": "none",
+        "extraction_status": "not_attempted",
+        "note": "Create a manual card transcription before accepting this latest photo into canonical state.",
+    }
+    conn.execute(
+        """
+        INSERT INTO parse_result
+            (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            parse_id,
+            photo_id,
+            "photo_manual_review",
+            json.dumps(raw_payload, ensure_ascii=False),
+            now,
+            "review",
+            0,
+            1,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO review_queue
+            (review_id, parse_id, severity, issue, current_value, suggested_value,
+             review_reason, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            review_id,
+            parse_id,
+            "Medium",
+            "Photo requires manual cage-card transcription",
+            original_filename,
+            "Review visible strain, sex, IDs, DOB, mating date, notes, and strike marks before accepting.",
+            "Latest cage-card photo is raw evidence and may supersede predecessor Excel views. No OCR or inference has been accepted.",
+            "open",
+            now,
+        ),
+    )
+    conn.execute("UPDATE photo_log SET status = ? WHERE photo_id = ?", ("review_pending", photo_id))
+    conn.execute(
+        """
+        INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id("action"),
+            "photo_review_candidate_created",
+            photo_id,
+            None,
+            json.dumps({"parse_id": parse_id, "review_id": review_id}, ensure_ascii=False),
+            now,
+        ),
+    )
+    return {"parse_id": parse_id, "review_id": review_id, "created": True}
 
 
 @app.get("/api/source-records")
@@ -527,6 +650,32 @@ def legacy_row_payload(row: Any) -> dict[str, Any]:
     result = dict(row)
     result["raw_row"] = json_object(result.pop("raw_row_json", "{}"))
     return result
+
+
+def legacy_review_current_value(row: dict[str, Any], fallback_row_number: int) -> str:
+    source_cells = row.get("source_cells") if isinstance(row.get("source_cells"), dict) else {}
+    anchors = {
+        "row_type": row.get("row_type") or "",
+        "source_row_number": row.get("source_row_number") or fallback_row_number,
+        "cage_no_raw": row.get("cage_no_raw") or row.get("group_name_raw") or "",
+        "strain_raw": row.get("strain_raw") or row.get("male_raw") or "",
+        "display_id_raw": row.get("display_id_raw") or row.get("female_raw") or "",
+        "genotype_raw": row.get("genotype_raw") or row.get("total_raw") or "",
+        "source_cells": source_cells,
+    }
+    return json.dumps({key: value for key, value in anchors.items() if value not in ("", None, {})}, ensure_ascii=False)
+
+
+def legacy_review_reason(row: dict[str, Any], source_file_name: str, sheet_name: str, fallback_row_number: int) -> str:
+    row_number = parse_optional_int(row.get("source_row_number")) or fallback_row_number
+    source_sheet = str(row.get("source_sheet") or sheet_name or "")
+    cells = row.get("source_cells") if isinstance(row.get("source_cells"), dict) else {}
+    cell_refs = ", ".join(f"{key}:{value}" for key, value in cells.items() if value) or "no cell refs"
+    return (
+        f"Legacy workbook row from {source_file_name}, sheet {source_sheet or '--'}, row {row_number}; "
+        f"source cells {cell_refs}. Imported as a review candidate only; do not write canonical mouse, cage, "
+        "litter, or genotype state until a human resolves the row."
+    )
 
 
 def json_object(value: str | None) -> dict[str, Any]:
@@ -1117,14 +1266,25 @@ def list_legacy_workbook_imports() -> list[dict[str, Any]]:
         imports = conn.execute(
             """
             SELECT legacy_import_id, source_record_id, source_file_name, source_file_path,
-                   workbook_kind, sheet_name, imported_at, status, notes
+                   workbook_kind, sheet_name, imported_at, status, notes,
+                   (
+                       SELECT COUNT(*)
+                       FROM review_queue review
+                       WHERE review.parse_id = 'legacy_parse_' || legacy_workbook_import.legacy_import_id
+                   ) AS review_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM review_queue review
+                       WHERE review.parse_id = 'legacy_parse_' || legacy_workbook_import.legacy_import_id
+                         AND review.status = 'open'
+                   ) AS open_review_count
             FROM legacy_workbook_import
             ORDER BY imported_at DESC
             """
         ).fetchall()
         rows = conn.execute(
             """
-            SELECT legacy_row_id, legacy_import_id, row_type, source_sheet,
+            SELECT legacy_row_id, legacy_import_id, review_id, row_type, source_sheet,
                    source_row_number, raw_row_json, review_status
             FROM legacy_workbook_row
             ORDER BY legacy_import_id, source_row_number
@@ -1154,95 +1314,152 @@ def create_legacy_workbook_import(
         raise HTTPException(status_code=400, detail="Legacy workbook kind must be auto, animal, or separation.")
 
     import_id = new_id("legacy_import")
+    parse_id = f"legacy_parse_{import_id}"
     stored_path = save_legacy_workbook(file, import_id)
     source_uri = str(stored_path.relative_to(ROOT))
     try:
         parsed = parse_workbook(stored_path, kind=kind, sheet_name=sheet_name.strip() or None)
     except Exception as error:
+        stored_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=f"Could not parse legacy workbook: {error}") from error
 
     rows = parsed.get("rows") or []
     if not isinstance(rows, list):
+        stored_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="Legacy workbook parser returned an invalid row payload.")
 
     imported_at = utc_now()
     raw_payload = json.dumps(parsed, ensure_ascii=False)
-    with connection() as conn:
-        source_record_id = create_source_record(
-            conn,
-            source_type="legacy_workbook",
-            source_uri=source_uri,
-            source_label=file.filename,
-            raw_payload=raw_payload,
-            note="Predecessor Excel workbook preserved as an export/view source; parsed rows stay review candidates.",
-        )
-        conn.execute(
-            """
-            INSERT INTO legacy_workbook_import
-                (legacy_import_id, source_record_id, source_file_name, source_file_path,
-                 workbook_kind, sheet_name, imported_at, status, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                import_id,
-                source_record_id,
-                file.filename,
-                source_uri,
-                str(parsed.get("workbook_kind") or ""),
-                str(parsed.get("sheet_name") or ""),
-                imported_at,
-                "parsed",
-                "Legacy Excel rows are parsed/intermediate review candidates, not canonical colony state.",
-            ),
-        )
-        inserted_rows = 0
-        for index, row in enumerate(rows, start=1):
-            if not isinstance(row, dict):
-                continue
+    inserted_rows = 0
+    created_review_items = 0
+    try:
+        with connection() as conn:
+            source_record_id = create_source_record(
+                conn,
+                source_type="legacy_workbook",
+                source_uri=source_uri,
+                source_label=file.filename,
+                raw_payload=raw_payload,
+                note="Predecessor Excel workbook preserved as an export/view source; parsed rows stay review candidates.",
+            )
             conn.execute(
                 """
-                INSERT INTO legacy_workbook_row
-                    (legacy_row_id, legacy_import_id, row_type, source_sheet,
-                     source_row_number, raw_row_json, review_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    new_id("legacy_row"),
-                    import_id,
-                    str(row.get("row_type") or ""),
-                    str(row.get("source_sheet") or parsed.get("sheet_name") or ""),
-                    parse_optional_int(row.get("source_row_number")) or index,
-                    json.dumps(row, ensure_ascii=False),
-                    str(row.get("review_status") or "candidate"),
+                    parse_id,
+                    None,
+                    file.filename,
+                    raw_payload,
+                    imported_at,
+                    "review",
+                    1,
+                    1,
                 ),
             )
-            inserted_rows += 1
-        conn.execute(
-            """
-            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                new_id("action"),
-                "legacy_workbook_import_created",
-                import_id,
-                None,
-                json.dumps(
-                    {
-                        "source_file_name": file.filename,
-                        "source_record_id": source_record_id,
-                        "workbook_kind": parsed.get("workbook_kind"),
-                        "rows": inserted_rows,
-                        "boundary": "parsed or intermediate result",
-                    },
-                    ensure_ascii=False,
+            conn.execute(
+                """
+                INSERT INTO legacy_workbook_import
+                    (legacy_import_id, source_record_id, source_file_name, source_file_path,
+                     workbook_kind, sheet_name, imported_at, status, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    import_id,
+                    source_record_id,
+                    file.filename,
+                    source_uri,
+                    str(parsed.get("workbook_kind") or ""),
+                    str(parsed.get("sheet_name") or ""),
+                    imported_at,
+                    "parsed",
+                    "Legacy Excel rows are parsed/intermediate review candidates, not canonical colony state.",
                 ),
-                imported_at,
-            ),
-        )
+            )
+            for index, row in enumerate(rows, start=1):
+                if not isinstance(row, dict):
+                    continue
+                row_number = parse_optional_int(row.get("source_row_number")) or index
+                legacy_row_id = new_id("legacy_row")
+                review_id = new_id("review")
+                conn.execute(
+                    """
+                    INSERT INTO review_queue
+                        (review_id, parse_id, severity, issue, current_value, suggested_value,
+                         review_reason, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        review_id,
+                        parse_id,
+                        "Medium",
+                        "Legacy workbook row requires review",
+                        legacy_review_current_value(row, row_number),
+                        str(row.get("row_type") or "candidate"),
+                        legacy_review_reason(
+                            row,
+                            file.filename,
+                            str(parsed.get("sheet_name") or ""),
+                            row_number,
+                        ),
+                        "open",
+                        imported_at,
+                    ),
+                )
+                created_review_items += 1
+                conn.execute(
+                    """
+                    INSERT INTO legacy_workbook_row
+                        (legacy_row_id, legacy_import_id, review_id, row_type, source_sheet,
+                         source_row_number, raw_row_json, review_status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        legacy_row_id,
+                        import_id,
+                        review_id,
+                        str(row.get("row_type") or ""),
+                        str(row.get("source_sheet") or parsed.get("sheet_name") or ""),
+                        row_number,
+                        json.dumps(row, ensure_ascii=False),
+                        str(row.get("review_status") or "candidate"),
+                    ),
+                )
+                inserted_rows += 1
+            conn.execute(
+                """
+                INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("action"),
+                    "legacy_workbook_import_created",
+                    import_id,
+                    None,
+                    json.dumps(
+                        {
+                            "source_file_name": file.filename,
+                            "source_record_id": source_record_id,
+                            "parse_id": parse_id,
+                            "workbook_kind": parsed.get("workbook_kind"),
+                            "rows": inserted_rows,
+                            "created_review_items": created_review_items,
+                            "boundary": "parsed or intermediate result",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    imported_at,
+                ),
+            )
+    except Exception:
+        stored_path.unlink(missing_ok=True)
+        raise
 
     return {
         "legacy_import_id": import_id,
+        "parse_id": parse_id,
         "source_record_id": source_record_id,
         "source_file_name": file.filename,
         "source_file_path": source_uri,
@@ -1251,6 +1468,7 @@ def create_legacy_workbook_import(
         "imported_at": imported_at,
         "status": "parsed",
         "stored_rows": inserted_rows,
+        "created_review_items": created_review_items,
         "boundary": "parsed or intermediate result",
     }
 
@@ -1279,6 +1497,14 @@ def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
                 """,
                 (photo_id, file.filename, str(stored_path.relative_to(ROOT)), uploaded_at, "uploaded"),
             )
+            review_candidate = ensure_photo_review_candidate(
+                conn,
+                photo_id=photo_id,
+                original_filename=file.filename,
+                stored_path=str(stored_path.relative_to(ROOT)),
+                uploaded_at=uploaded_at,
+                source_record_id=source_record_id,
+            )
     except Exception:
         stored_path.unlink(missing_ok=True)
         raise
@@ -1287,8 +1513,165 @@ def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
         "original_filename": file.filename,
         "stored_path": str(stored_path.relative_to(ROOT)),
         "uploaded_at": uploaded_at,
-        "status": "uploaded",
+        "status": "review_pending",
         "source_record_id": source_record_id,
+        "review_candidate": review_candidate,
+    }
+
+
+@app.post("/api/photos/review-candidates")
+def create_missing_photo_review_candidates() -> dict[str, Any]:
+    created = 0
+    existing = 0
+    with connection() as conn:
+        photos = conn.execute(
+            """
+            SELECT photo.photo_id, photo.original_filename, photo.stored_path,
+                   photo.uploaded_at,
+                   source.source_record_id
+            FROM photo_log photo
+            LEFT JOIN source_record source
+                ON source.source_type = 'photo'
+               AND source.source_uri = photo.stored_path
+               AND source.source_label = photo.original_filename
+            ORDER BY photo.uploaded_at
+            """
+        ).fetchall()
+        for photo in photos:
+            result = ensure_photo_review_candidate(
+                conn,
+                photo_id=photo["photo_id"],
+                original_filename=photo["original_filename"],
+                stored_path=photo["stored_path"],
+                uploaded_at=photo["uploaded_at"],
+                source_record_id=photo["source_record_id"] or "",
+            )
+            if result["created"]:
+                created += 1
+            else:
+                existing += 1
+    return {
+        "created_review_candidates": created,
+        "existing_review_candidates": existing,
+        "boundary": "review item",
+        "source_layer": "raw source",
+    }
+
+
+@app.post("/api/photos/{photo_id}/manual-transcription")
+def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscriptionCreate) -> dict[str, Any]:
+    now = utc_now()
+    with connection() as conn:
+        photo = conn.execute(
+            """
+            SELECT photo_id, original_filename, stored_path, uploaded_at, status
+            FROM photo_log
+            WHERE photo_id = ?
+            """,
+            (photo_id,),
+        ).fetchone()
+        if photo is None:
+            raise HTTPException(status_code=404, detail="Photo not found.")
+
+        parse_id = new_id("parse")
+        notes = [
+            {
+                "raw": str(note.get("raw") or "").strip(),
+                "meaning": str(note.get("meaning") or ""),
+                "strike": str(note.get("strike") or "none"),
+            }
+            for note in payload.notes
+            if isinstance(note, dict) and str(note.get("raw") or "").strip()
+        ]
+        record = {
+            "id": parse_id,
+            "uploaded": photo["original_filename"],
+            "type": payload.card_type or "Separated",
+            "rawStrain": payload.raw_strain,
+            "matchedStrain": payload.matched_strain or payload.raw_strain,
+            "dobRaw": payload.dob_raw,
+            "dobNormalized": payload.dob_normalized,
+            "mouseCount": payload.mouse_count,
+            "confidence": payload.confidence,
+            "status": "review",
+            "issue": "Manual photo transcription needs review",
+            "severity": "Medium",
+            "reviewField": "manualTranscription",
+            "currentValue": payload.mouse_count or payload.raw_strain or photo["original_filename"],
+            "suggestedValue": "Compare against latest cage-card photo and predecessor Excel candidate rows.",
+            "reviewReason": "Manual transcription is parsed/intermediate evidence. Review it before writing canonical mouse or cage state.",
+            "notes": notes,
+            "actions": [
+                "Preserve latest photo as raw source evidence.",
+                "Keep manual transcription reviewable.",
+                "Compare against predecessor Excel rows before accepting changes.",
+            ],
+            "sourcePhotoId": photo_id,
+            "sourceLayer": "parsed or intermediate result",
+            "reviewerNote": payload.reviewer_note,
+        }
+        conn.execute(
+            """
+            INSERT INTO parse_result
+                (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                parse_id,
+                photo_id,
+                "manual_photo_transcription",
+                json.dumps(record, ensure_ascii=False),
+                now,
+                "review",
+                payload.confidence,
+                1,
+            ),
+        )
+        note_count, mouse_count, ear_review_count = write_note_items_and_mouse_candidates(conn, parse_id, record, "review")
+        review_id = f"review_{parse_id}"
+        conn.execute(
+            """
+            INSERT INTO review_queue
+                (review_id, parse_id, severity, issue, current_value, suggested_value,
+                 review_reason, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                review_id,
+                parse_id,
+                "Medium",
+                "Manual photo transcription needs review",
+                payload.mouse_count or payload.raw_strain or photo["original_filename"],
+                "Compare with raw photo and predecessor Excel before accepting.",
+                "Latest cage-card photo should drive updates, but the manual transcription itself must be reviewed before canonical writes.",
+                "open",
+                now,
+            ),
+        )
+        conn.execute("UPDATE photo_log SET status = ? WHERE photo_id = ?", ("transcribed_review_pending", photo_id))
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("action"),
+                "manual_photo_transcription_created",
+                photo_id,
+                None,
+                json.dumps({"parse_id": parse_id, "review_id": review_id, "note_count": note_count}, ensure_ascii=False),
+                now,
+            ),
+        )
+
+    return {
+        "parse_id": parse_id,
+        "review_id": review_id,
+        "photo_id": photo_id,
+        "created_note_items": note_count,
+        "created_mouse_candidates": mouse_count,
+        "created_ear_review_items": ear_review_count,
+        "boundary": "parsed or intermediate result",
     }
 
 
@@ -1323,6 +1706,20 @@ def list_review_items() -> list[dict[str, Any]]:
 @app.post("/api/review-items/{review_id}/resolve")
 def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict[str, Any]:
     resolved_at = utc_now()
+    allowed_legacy_decisions = {
+        "resolve",
+        "accept_legacy_candidate",
+        "reject_legacy_candidate",
+        "map_to_canonical_candidate",
+    }
+    legacy_decision = payload.legacy_decision.strip() or "resolve"
+    if legacy_decision not in allowed_legacy_decisions:
+        raise HTTPException(status_code=400, detail="Legacy decision must be resolve, accept, reject, or map.")
+    legacy_status_by_decision = {
+        "accept_legacy_candidate": "accepted",
+        "reject_legacy_candidate": "rejected",
+        "map_to_canonical_candidate": "mapped_candidate",
+    }
     with connection() as conn:
         existing = conn.execute(
             """
@@ -1359,6 +1756,9 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
             "status": "resolved",
             "resolved_value": payload.resolved_value,
             "resolution_note": payload.resolution_note,
+            "legacy_decision": legacy_decision,
+            "canonical_entity_type": payload.canonical_entity_type,
+            "canonical_entity_id": payload.canonical_entity_id,
         }
         conn.execute(
             """
@@ -1384,6 +1784,49 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
                 resolved_at,
             ),
         )
+        legacy_row_review_status = None
+        if legacy_decision in legacy_status_by_decision:
+            legacy_row_review_status = legacy_status_by_decision[legacy_decision]
+            legacy_row = conn.execute(
+                """
+                SELECT legacy_row_id, review_status
+                FROM legacy_workbook_row
+                WHERE review_id = ?
+                """,
+                (review_id,),
+            ).fetchone()
+            if legacy_row is not None:
+                conn.execute(
+                    """
+                    UPDATE legacy_workbook_row
+                    SET review_status = ?
+                    WHERE legacy_row_id = ?
+                    """,
+                    (legacy_row_review_status, legacy_row["legacy_row_id"]),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_id("action"),
+                        "legacy_workbook_row_reviewed",
+                        legacy_row["legacy_row_id"],
+                        json.dumps({"review_status": legacy_row["review_status"]}, ensure_ascii=False),
+                        json.dumps(
+                            {
+                                "review_status": legacy_row_review_status,
+                                "legacy_decision": legacy_decision,
+                                "canonical_entity_type": payload.canonical_entity_type,
+                                "canonical_entity_id": payload.canonical_entity_id,
+                                "review_id": review_id,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        resolved_at,
+                    ),
+                )
         if all(correction_identity_fields):
             correction_id = record_correction(
                 conn,
@@ -1405,6 +1848,8 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "resolved_at": resolved_at,
         "resolution_note": payload.resolution_note,
         "resolved_value": payload.resolved_value,
+        "legacy_decision": legacy_decision,
+        "legacy_row_review_status": legacy_row_review_status,
         "correction_id": correction_id,
     }
 
@@ -3326,6 +3771,111 @@ def search_records(query: str = "") -> dict[str, Any]:
         "strains": [dict(row) for row in strains],
         "reviews": [dict(row) for row in reviews],
         "sources": [dict(row) for row in sources],
+    }
+
+
+@app.get("/api/evidence-reconciliation")
+def evidence_reconciliation() -> dict[str, Any]:
+    with connection() as conn:
+        photo_summary = conn.execute(
+            """
+            SELECT COUNT(*) AS total_photos,
+                   SUM(CASE WHEN status = 'review_pending' THEN 1 ELSE 0 END) AS review_pending_photos,
+                   MAX(uploaded_at) AS latest_photo_uploaded_at
+            FROM photo_log
+            """
+        ).fetchone()
+        photo_review_summary = conn.execute(
+            """
+            SELECT COUNT(*) AS photo_review_candidates,
+                   SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_photo_reviews
+            FROM parse_result parse
+            LEFT JOIN review_queue review ON review.parse_id = parse.parse_id
+            WHERE parse.source_name = 'photo_manual_review'
+            """
+        ).fetchone()
+        manual_transcription_summary = conn.execute(
+            """
+            SELECT COUNT(*) AS manual_transcriptions,
+                   SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_manual_transcription_reviews
+            FROM parse_result parse
+            LEFT JOIN review_queue review ON review.parse_id = parse.parse_id
+            WHERE parse.source_name = 'manual_photo_transcription'
+            """
+        ).fetchone()
+        legacy_summary = conn.execute(
+            """
+            SELECT COUNT(DISTINCT legacy.legacy_import_id) AS legacy_imports,
+                   COUNT(row.legacy_row_id) AS legacy_rows,
+                   MAX(legacy.imported_at) AS latest_legacy_imported_at
+            FROM legacy_workbook_import legacy
+            LEFT JOIN legacy_workbook_row row ON row.legacy_import_id = legacy.legacy_import_id
+            """
+        ).fetchone()
+        canonical_summary = conn.execute(
+            """
+            SELECT COUNT(*) AS accepted_mice,
+                   SUM(CASE WHEN source_record_id IS NOT NULL OR source_note_item_id IS NOT NULL OR source_photo_id IS NOT NULL THEN 1 ELSE 0 END)
+                       AS mice_with_evidence
+            FROM mouse_master
+            """
+        ).fetchone()
+        open_reviews = conn.execute(
+            "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
+        ).fetchone()["count"]
+
+    total_photos = int(photo_summary["total_photos"] or 0)
+    photo_review_candidates = int(photo_review_summary["photo_review_candidates"] or 0)
+    open_photo_reviews = int(photo_review_summary["open_photo_reviews"] or 0)
+    manual_transcriptions = int(manual_transcription_summary["manual_transcriptions"] or 0)
+    open_manual_transcription_reviews = int(manual_transcription_summary["open_manual_transcription_reviews"] or 0)
+    legacy_rows = int(legacy_summary["legacy_rows"] or 0)
+    accepted_mice = int(canonical_summary["accepted_mice"] or 0)
+    mice_with_evidence = int(canonical_summary["mice_with_evidence"] or 0)
+    return {
+        "boundary": "export or view",
+        "source_priority": ["raw source photo", "reviewed note line", "predecessor Excel view"],
+        "total_photos": total_photos,
+        "photo_review_candidates": photo_review_candidates,
+        "photos_missing_review_candidates": max(total_photos - photo_review_candidates, 0),
+        "open_photo_reviews": open_photo_reviews,
+        "manual_transcriptions": manual_transcriptions,
+        "open_manual_transcription_reviews": open_manual_transcription_reviews,
+        "legacy_imports": int(legacy_summary["legacy_imports"] or 0),
+        "legacy_rows": legacy_rows,
+        "accepted_mice": accepted_mice,
+        "mice_with_evidence": mice_with_evidence,
+        "open_reviews": int(open_reviews or 0),
+        "latest_photo_uploaded_at": photo_summary["latest_photo_uploaded_at"] or "",
+        "latest_legacy_imported_at": legacy_summary["latest_legacy_imported_at"] or "",
+        "ready_for_comparison": total_photos > 0 and legacy_rows > 0,
+        "comparison_rows": [
+            {
+                "check": "Latest photo evidence",
+                "status": "ready" if total_photos else "missing",
+                "detail": f"{total_photos} photo(s), {open_photo_reviews} open manual review(s)",
+            },
+            {
+                "check": "Predecessor Excel view",
+                "status": "ready" if legacy_rows else "missing",
+                "detail": f"{legacy_rows} candidate row(s) across {int(legacy_summary['legacy_imports'] or 0)} import(s)",
+            },
+            {
+                "check": "Manual photo transcription",
+                "status": "ready" if manual_transcriptions else "pending",
+                "detail": f"{manual_transcriptions} transcription(s), {open_manual_transcription_reviews} open review(s)",
+            },
+            {
+                "check": "Canonical acceptance",
+                "status": "blocked" if open_reviews else "ready",
+                "detail": f"{accepted_mice} accepted mouse row(s), {mice_with_evidence} with source evidence",
+            },
+        ],
+        "next_action": (
+            "Review latest photo cards and resolve blockers before treating Excel differences as accepted state."
+            if open_reviews
+            else "Comparison view is clear of open review blockers."
+        ),
     }
 
 

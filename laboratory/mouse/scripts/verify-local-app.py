@@ -191,6 +191,10 @@ def main() -> None:
                 row[1]
                 for row in migrated_conn.execute("PRAGMA table_info(genotyping_record)").fetchall()
             }
+            legacy_columns = {
+                row[1]
+                for row in migrated_conn.execute("PRAGMA table_info(legacy_workbook_row)").fetchall()
+            }
         finally:
             migrated_conn.close()
         assert_true(
@@ -213,6 +217,10 @@ def main() -> None:
         assert_true(
             {"target_name", "normalized_result", "result_status", "updated_at"}.issubset(genotype_columns),
             "Existing genotyping_record tables should migrate to the result tracking schema.",
+        )
+        assert_true(
+            "review_id" in legacy_columns,
+            "Existing legacy_workbook_row tables should migrate to review linkage.",
         )
 
     if CLI_PYTHON.exists():
@@ -366,6 +374,8 @@ def main() -> None:
                 "my_assigned_strain",
                 "distribution_import",
                 "distribution_assignment_row",
+                "legacy_workbook_import",
+                "legacy_workbook_row",
                 "ear_label_master",
                 "ear_label_alias",
                 "mouse_master",
@@ -508,6 +518,12 @@ def main() -> None:
                 assert_true("Legacy Workbook Import" in index_html, "Local UI should expose legacy workbook import.")
                 assert_true("legacyWorkbookKind" in index_html, "Local UI should expose legacy workbook kind selection.")
                 assert_true("legacyWorkbookRows" in index_html, "Local UI should render legacy workbook rows.")
+                assert_true("Review items" in index_html, "Local UI should expose legacy workbook review item counts.")
+                assert_true("Legacy decision" in index_html, "Local UI should expose legacy review decision controls.")
+                assert_true("Create Missing Photo Reviews" in index_html, "Local UI should expose photo review candidate creation.")
+                assert_true("Evidence Reconciliation" in index_html, "Local UI should expose photo/workbook reconciliation.")
+                assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
+                assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
                 assert_true("Mouse Detail" in index_html, "Local UI should expose the mouse detail visualization.")
                 assert_true("Mouse Audit Trace" in index_html, "Local UI should expose mouse audit trace.")
@@ -608,6 +624,11 @@ def main() -> None:
                 legacy_payload = legacy_import.json()
                 assert_true(legacy_payload["boundary"] == "parsed or intermediate result", "Legacy workbook import should stay non-canonical.")
                 assert_true(legacy_payload["stored_rows"] == 2, "Legacy workbook import row count is wrong.")
+                assert_true(legacy_payload["parse_id"], "Legacy workbook import should create parse evidence for review items.")
+                assert_true(
+                    legacy_payload["created_review_items"] == 2,
+                    "Legacy workbook import should open one review item per parsed row.",
+                )
                 assert_true(legacy_payload["source_record_id"], "Legacy workbook import should create source evidence.")
                 legacy_imports = client.get("/api/legacy-workbook-imports").json()
                 stored_legacy = next(
@@ -620,13 +641,134 @@ def main() -> None:
                 )
                 assert_true(stored_legacy is not None, "Legacy workbook import list should include the stored import.")
                 assert_true(stored_legacy["workbook_kind"] == "legacy_animal_sheet", "Legacy workbook kind was not preserved.")
+                assert_true(stored_legacy["review_count"] == 2, "Legacy workbook list should expose linked review items.")
+                assert_true(stored_legacy["open_review_count"] == 2, "Legacy workbook list should expose open review items.")
                 assert_true(
                     stored_legacy["rows"][0]["raw_row"]["source_cells"]["display_id"] == "D2",
                     "Legacy workbook import should preserve source cell traceability.",
                 )
+                legacy_review_items = [
+                    item
+                    for item in client.get("/api/review-items").json()
+                    if item["parse_id"] == legacy_payload["parse_id"]
+                ]
+                assert_true(len(legacy_review_items) == 2, "Legacy workbook rows should be visible in Review Queue.")
+                assert_true(
+                    all(item["status"] == "open" for item in legacy_review_items),
+                    "Legacy workbook review items should start open.",
+                )
+                assert_true(
+                    any("display_id" in item["current_value"] and "D2" in item["review_reason"] for item in legacy_review_items),
+                    "Legacy workbook review items should preserve row anchors and source cell evidence.",
+                )
+                rejected_legacy_review = legacy_review_items[0]
+                legacy_reject = client.post(
+                    f"/api/review-items/{rejected_legacy_review['review_id']}/resolve",
+                    json={
+                        "resolution_note": "Reject predecessor workbook row after latest photo comparison.",
+                        "resolved_value": "not accepted",
+                        "legacy_decision": "reject_legacy_candidate",
+                    },
+                )
+                assert_true(legacy_reject.status_code == 200, "Could not reject a legacy workbook review row.")
+                legacy_reject_payload = legacy_reject.json()
+                assert_true(
+                    legacy_reject_payload["legacy_row_review_status"] == "rejected",
+                    "Legacy review rejection should mark the workbook row rejected.",
+                )
+                updated_legacy_imports = client.get("/api/legacy-workbook-imports").json()
+                updated_stored_legacy = next(
+                    item
+                    for item in updated_legacy_imports
+                    if item["legacy_import_id"] == legacy_payload["legacy_import_id"]
+                )
+                assert_true(
+                    updated_stored_legacy["open_review_count"] == 1,
+                    "Resolving a legacy row should reduce the legacy import open review count.",
+                )
+                rejected_rows = [
+                    row
+                    for row in updated_stored_legacy["rows"]
+                    if row["review_id"] == rejected_legacy_review["review_id"]
+                ]
+                assert_true(
+                    rejected_rows and rejected_rows[0]["review_status"] == "rejected",
+                    "Legacy workbook row should expose the reviewer decision status.",
+                )
+                with sqlite3.connect(db.DB_PATH) as conn:
+                    conn.row_factory = sqlite3.Row
+                    legacy_parse = conn.execute(
+                        "SELECT parse_id, source_name, status, needs_review FROM parse_result WHERE parse_id = ?",
+                        (legacy_payload["parse_id"],),
+                    ).fetchone()
+                assert_true(legacy_parse is not None, "Legacy workbook review parse_result should be persisted.")
+                assert_true(legacy_parse["source_name"] == "legacy_animal_upload.xlsx", "Legacy parse should keep source filename.")
+                assert_true(legacy_parse["status"] == "review", "Legacy parse should remain in review state.")
+                assert_true(legacy_parse["needs_review"] == 1, "Legacy parse should require review.")
                 assert_true(
                     client.get("/api/mice").json() == mice_before_legacy,
                     "Legacy workbook import should not write canonical mouse state.",
+                )
+                photo_upload = client.post(
+                    "/api/photos",
+                    files={"file": ("latest_card.jpg", io.BytesIO(b"fake local image bytes"), "image/jpeg")},
+                )
+                assert_true(photo_upload.status_code == 200, f"Could not upload source photo: {photo_upload.text}")
+                photo_payload = photo_upload.json()
+                assert_true(photo_payload["status"] == "review_pending", "Uploaded photos should enter manual review state.")
+                assert_true(photo_payload["review_candidate"]["review_id"], "Photo upload should create a review candidate.")
+                photos = client.get("/api/photos").json()
+                assert_true(
+                    photos[0]["open_review_count"] >= 1 and photos[0]["latest_parse_id"],
+                    "Photo list should expose review candidate context.",
+                )
+                photo_reviews = [
+                    item for item in client.get("/api/review-items").json()
+                    if item["photo_id"] == photo_payload["photo_id"]
+                ]
+                assert_true(photo_reviews, "Photo review candidate should be visible in Review Queue.")
+                assert_true(
+                    "manual cage-card transcription" in photo_reviews[0]["issue"],
+                    "Photo review candidate should require manual transcription.",
+                )
+                manual_transcription = client.post(
+                    f"/api/photos/{photo_payload['photo_id']}/manual-transcription",
+                    json={
+                        "card_type": "Separated",
+                        "raw_strain": "ApoM Tg/Tg",
+                        "dob_raw": "25.10.20-28",
+                        "mouse_count": "2 total",
+                        "notes": [
+                            {"raw": "MT321 R'", "strike": "none"},
+                            {"raw": "MT322 L'", "strike": "none"},
+                        ],
+                    },
+                )
+                assert_true(manual_transcription.status_code == 200, f"Could not create manual transcription: {manual_transcription.text}")
+                transcription_payload = manual_transcription.json()
+                assert_true(
+                    transcription_payload["boundary"] == "parsed or intermediate result",
+                    "Manual photo transcription should stay parsed/intermediate.",
+                )
+                assert_true(
+                    transcription_payload["created_note_items"] == 2
+                    and transcription_payload["created_mouse_candidates"] == 0,
+                    "Manual photo transcription should create note evidence without canonical mouse candidates.",
+                )
+                idempotent_photo_reviews = client.post("/api/photos/review-candidates")
+                assert_true(idempotent_photo_reviews.status_code == 200, "Could not run photo review candidate backfill.")
+                assert_true(
+                    idempotent_photo_reviews.json()["existing_review_candidates"] >= 1,
+                    "Photo review candidate backfill should be idempotent.",
+                )
+                reconciliation = client.get("/api/evidence-reconciliation").json()
+                assert_true(reconciliation["boundary"] == "export or view", "Evidence reconciliation should remain a view.")
+                assert_true(reconciliation["total_photos"] >= 1, "Evidence reconciliation should count uploaded photos.")
+                assert_true(reconciliation["legacy_rows"] >= 2, "Evidence reconciliation should count legacy workbook rows.")
+                assert_true(reconciliation["manual_transcriptions"] >= 1, "Evidence reconciliation should count manual photo transcriptions.")
+                assert_true(
+                    reconciliation["source_priority"][0] == "raw source photo",
+                    "Evidence reconciliation should prioritize raw photos over predecessor Excel views.",
                 )
                 created = client.post(
                     "/api/assigned-strains",
