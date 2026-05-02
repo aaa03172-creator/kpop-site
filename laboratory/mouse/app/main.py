@@ -2613,6 +2613,58 @@ def log_workbook_export(
         )
 
 
+def export_staleness(conn: Any) -> dict[str, Any]:
+    latest_data_change = conn.execute(
+        """
+        SELECT MAX(changed_at) AS changed_at
+        FROM (
+            SELECT uploaded_at AS changed_at FROM photo_log
+            UNION ALL SELECT parsed_at FROM parse_result
+            UNION ALL SELECT created_at FROM review_queue
+            UNION ALL SELECT resolved_at FROM review_queue WHERE resolved_at IS NOT NULL
+            UNION ALL SELECT imported_at FROM source_record
+            UNION ALL SELECT updated_at FROM strain_registry
+            UNION ALL SELECT corrected_at FROM correction_log
+            UNION ALL SELECT created_at FROM mouse_event
+            UNION ALL SELECT updated_at FROM genotyping_record
+            UNION ALL SELECT updated_at FROM cage_registry
+            UNION ALL SELECT assigned_at FROM mouse_cage_assignment
+            UNION ALL SELECT ended_at FROM mouse_cage_assignment WHERE ended_at IS NOT NULL
+            UNION ALL SELECT updated_at FROM mating_registry
+            UNION ALL SELECT updated_at FROM litter_registry
+            UNION ALL SELECT updated_at FROM mouse_master
+            UNION ALL SELECT created_at FROM action_log
+        )
+        """
+    ).fetchone()["changed_at"]
+    latest_generated_export = conn.execute(
+        """
+        SELECT MAX(exported_at) AS exported_at
+        FROM export_log
+        WHERE status = 'generated'
+        """
+    ).fetchone()["exported_at"]
+    return {
+        "latest_data_change_at": latest_data_change or "",
+        "latest_generated_export_at": latest_generated_export or "",
+        "export_stale": bool(latest_data_change and (not latest_generated_export or latest_data_change > latest_generated_export)),
+    }
+
+
+def open_review_blockers(conn: Any, limit: int = 10) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT review_id, parse_id, severity, issue, suggested_value, review_reason, created_at
+        FROM review_queue
+        WHERE status = 'open'
+        ORDER BY severity DESC, created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 @app.get("/api/mice")
 def list_mice(query: str = "") -> list[dict[str, Any]]:
     with connection() as conn:
@@ -3053,6 +3105,7 @@ def export_mice_csv(query: str = "", require_ready: bool = False) -> Response:
         if export_status == "blocked":
             blocked_error = {
                 "blocked_review_count": blocked_review_count,
+                "review_blockers": open_review_blockers(conn),
                 "filename": filename,
                 "source_layer": "export or view",
             }
@@ -3191,6 +3244,7 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
             detail={
                 "message": "Resolve open review items before final separation workbook export.",
                 "blocked_review_count": blocked_count,
+                "review_blockers": preview["review_blockers"],
                 "filename": filename,
                 "source_layer": "export or view",
             },
@@ -3232,6 +3286,7 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
             detail={
                 "message": "Resolve open review items before final animal sheet workbook export.",
                 "blocked_review_count": blocked_count,
+                "review_blockers": preview["review_blockers"],
                 "filename": filename,
                 "source_layer": "export or view",
             },
@@ -3249,15 +3304,7 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
 def export_preview() -> dict[str, Any]:
     with connection() as conn:
         photos = conn.execute("SELECT COUNT(*) AS count FROM photo_log").fetchone()["count"]
-        review_rows = conn.execute(
-            """
-            SELECT review_id, parse_id, severity, issue, suggested_value, review_reason, created_at
-            FROM review_queue
-            WHERE status = 'open'
-            ORDER BY severity DESC, created_at DESC
-            LIMIT 10
-            """
-        ).fetchall()
+        review_rows = open_review_blockers(conn)
         open_reviews = conn.execute(
             "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
         ).fetchone()["count"]
@@ -3296,6 +3343,7 @@ def export_preview() -> dict[str, Any]:
             LIMIT 120
             """
         ).fetchall()
+        stale_state = export_staleness(conn)
     rows = []
     separation_groups: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for mouse in mice:
@@ -3417,6 +3465,7 @@ def export_preview() -> dict[str, Any]:
         "source_layer": "export or view",
         "export_type": "separation_preview",
         "expected_filename": "mouse_records_preview.csv",
+        **stale_state,
         "expected_separation_filename": export_filename(
             "separation",
             {"separation_rows": separation_rows, "animal_sheet_rows": animal_rows},

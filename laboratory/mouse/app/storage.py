@@ -11,7 +11,7 @@ from .db import DATA_DIR, ensure_data_dirs
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def new_id(prefix: str) -> str:
