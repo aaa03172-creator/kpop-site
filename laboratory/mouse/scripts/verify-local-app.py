@@ -15,8 +15,9 @@ except (ModuleNotFoundError, RuntimeError):
     TestClient = None
 
 try:
-    from openpyxl import load_workbook
+    from openpyxl import Workbook, load_workbook
 except ModuleNotFoundError:
+    Workbook = None
     load_workbook = None
 
 
@@ -61,9 +62,88 @@ def main() -> None:
     fixture = json.loads((ROOT / "fixtures" / "sample_parse_results.json").read_text(encoding="utf-8"))
     assert_true(fixture.get("layer") == "parsed or intermediate result", "Fixture must stay non-canonical.")
     assert_true(len(fixture.get("records", [])) >= 3, "Fixture should contain parse records.")
+    assert_true(Workbook is not None and load_workbook is not None, "openpyxl is required for workbook parsing and validation.")
+
+    with tempfile.TemporaryDirectory() as source_dir:
+        animal_path = Path(source_dir) / "legacy_animal.xlsx"
+        animal_workbook = Workbook()
+        animal_sheet = animal_workbook.active
+        animal_sheet.title = "animal sheet"
+        animal_sheet.append(["Cage No.", "Strain", "Sex", "I.D", "genotype", "DOB", "Mating date", "Pubs"])
+        animal_sheet.append(["1", "ApoM Tg/Tg", "M", "MT321", "Tg/Tg", "2026-01-01", "2026-05-01", ""])
+        animal_sheet.append(["", "", "F1", "9p", "pre_weaning", "2026-05-02", "", "2026-05-02 9p"])
+        animal_workbook.save(animal_path)
+        python_executable = str(CLI_PYTHON) if CLI_PYTHON.exists() else sys.executable
+        animal_result = subprocess.run(
+            [python_executable, str(ROOT / "scripts" / "parse_legacy_workbooks.py"), str(animal_path), "--kind", "animal"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert_true(animal_result.returncode == 0, f"Legacy animal parser failed: {animal_result.stderr}")
+        animal_payload = json.loads(animal_result.stdout)
+        assert_true(animal_payload["layer"] == "parsed or intermediate result", "Legacy workbook parser should stay non-canonical.")
+        assert_true(animal_payload["source_layer"] == "export or view", "Legacy workbook source should be classified as export/view.")
+        assert_true(animal_payload["rows"][0]["row_type"] == "parent_or_mouse_snapshot", "Animal parser should classify M rows as mouse snapshots.")
+        assert_true(animal_payload["rows"][1]["row_type"] == "litter_or_offspring_snapshot", "Animal parser should classify F1 rows as litter snapshots.")
+        assert_true(animal_payload["rows"][0]["source_cells"]["display_id"] == "D2", "Animal parser should preserve cell traceability.")
+
+        separation_path = Path(source_dir) / "legacy_separation.xlsx"
+        separation_workbook = Workbook()
+        separation_sheet = separation_workbook.active
+        separation_sheet.title = "separation"
+        separation_sheet.append(["Strain", "Genotype", "total", "DOB", "WT", "Tg", "Sampling point"])
+        separation_sheet.append(["ApoM Tg/Tg", "Tg/Tg", "M 3p", "2026-01-01", "", "3", "tail"])
+        separation_workbook.save(separation_path)
+        separation_result = subprocess.run(
+            [python_executable, str(ROOT / "scripts" / "parse_legacy_workbooks.py"), str(separation_path), "--kind", "separation"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert_true(separation_result.returncode == 0, f"Legacy separation parser failed: {separation_result.stderr}")
+        separation_payload = json.loads(separation_result.stdout)
+        assert_true(separation_payload["workbook_kind"] == "legacy_separation_status", "Separation parser should label workbook kind.")
+        assert_true(separation_payload["rows"][0]["sex_candidate"] == "male", "Separation parser should infer ASCII M sex labels.")
+        assert_true(separation_payload["rows"][0]["count_candidate"] == 3, "Separation parser should infer pup counts.")
 
     sys.path.insert(0, str(ROOT))
     from app import db
+    from scripts.parse_legacy_workbooks import parse_workbook
+
+    with tempfile.TemporaryDirectory() as workbook_dir:
+        workbook_root = Path(workbook_dir)
+        animal_path = workbook_root / "legacy_animal.xlsx"
+        animal_wb = Workbook()
+        animal_ws = animal_wb.active
+        animal_ws.title = "ApoM TgTg"
+        animal_ws.append(["Cage No.", "Strain", "Sex", "I.D", "genotype", "DOB", "Mating date", "Pubs"])
+        animal_ws.append(["1", "ApoM Tg/Tg", "\u2642", "MT 318 R'", "Tg", "25.10.20-28", "26.01.30", ""])
+        animal_ws.append(["", "", "F1", "7p", "separated", "26.02.04", "", ""])
+        animal_wb.save(animal_path)
+        animal_payload = parse_workbook(animal_path, kind="animal")
+        assert_true(animal_payload["layer"] == "parsed or intermediate result", "Legacy animal parser must stay non-canonical.")
+        assert_true(animal_payload["source_layer"] == "export or view", "Legacy animal workbook must be classified as a view.")
+        assert_true(len(animal_payload["rows"]) == 2, "Legacy animal parser row count is wrong.")
+        assert_true(animal_payload["rows"][0]["source_cells"]["display_id"] == "D2", "Legacy animal parser must preserve cell traceability.")
+
+        separation_path = workbook_root / "legacy_separation.xlsx"
+        separation_wb = Workbook()
+        separation_ws = separation_wb.active
+        separation_ws.title = "ApoM TgTg"
+        separation_ws.append(["Strain", "Genotype", "total", "DOB", "Genotype", "", "", "Sampling point"])
+        separation_ws.append(["", "", "", "", "WT", "Tg", "", "10mths note"])
+        separation_ws.append(["Apom Tg/Tg", "Apom Tg/Tg", "\u2642 2p", "25.05.07", "", "2", "", ""])
+        separation_ws.append(["", "Apom Tg/Tg", "\u2640 6p", "26.02.18-24", "", "6", "", ""])
+        separation_wb.save(separation_path)
+        separation_payload = parse_workbook(separation_path, kind="separation")
+        assert_true(separation_payload["source_layer"] == "export or view", "Legacy separation workbook must be classified as a view.")
+        assert_true(len(separation_payload["rows"]) == 2, "Legacy separation parser should skip subheader-only rows.")
+        assert_true(separation_payload["rows"][0]["count_candidate"] == 2, "Legacy separation parser should extract total counts as candidates.")
+        assert_true(separation_payload["rows"][1]["sex_candidate"] == "female", "Legacy separation parser should extract sex as a candidate.")
+
     app = None
     if TestClient is not None:
         from app.main import app
