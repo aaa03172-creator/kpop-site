@@ -3428,6 +3428,16 @@ def list_review_items() -> list[dict[str, Any]]:
                    review_note.interpreted_status AS review_note_interpreted_status,
                    review_note.parsed_mouse_display_id AS review_note_mouse_display_id,
                    review_note.parsed_count AS review_note_count,
+                   review_snapshot.card_snapshot_id,
+                   review_snapshot.card_type AS review_card_type,
+                   review_snapshot.card_id_raw AS review_card_id_raw,
+                   review_snapshot.raw_strain_text AS review_raw_strain_text,
+                   review_snapshot.matched_strain_text AS review_matched_strain_text,
+                   review_snapshot.sex_raw AS review_sex_raw,
+                   review_snapshot.sex_normalized AS review_sex_normalized,
+                   review_snapshot.count_value AS review_count_value,
+                   review_snapshot.dob_raw AS review_dob_raw,
+                   review_snapshot.note_summary_json AS review_note_summary_json,
                    (
                        SELECT COUNT(*)
                        FROM card_note_item_log note
@@ -3449,10 +3459,18 @@ def list_review_items() -> list[dict[str, Any]]:
                         THEN SUBSTR(review.review_id, LENGTH('review_ear_') + 1)
                     ELSE ''
                 END
+            LEFT JOIN card_snapshot review_snapshot
+                ON review_snapshot.card_snapshot_id = review_note.card_snapshot_id
             ORDER BY review.created_at DESC
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    result = []
+    for row in rows:
+        payload = dict(row)
+        payload["image_url"] = f"/api/photos/{quote(payload['photo_id'])}/image" if payload.get("photo_id") else ""
+        payload["review_note_summary"] = json_object(payload.pop("review_note_summary_json", "{}"))
+        result.append(payload)
+    return result
 
 
 @app.post("/api/review-items/{review_id}/resolve")

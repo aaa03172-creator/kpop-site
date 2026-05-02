@@ -416,6 +416,53 @@
       grid-template-columns: 1fr;
       min-width: 0;
     }
+    .review-source-preview {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+    }
+    .review-source-preview img {
+      width: 100%;
+      max-height: 280px;
+      object-fit: contain;
+      border-radius: 6px;
+      background: #0d1412;
+    }
+    .review-source-preview img:not([src]) {
+      display: none;
+    }
+    .review-source-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      font-size: 12px;
+    }
+    .review-source-grid span {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 7px 8px;
+      color: var(--muted);
+      background: #fbfdfc;
+    }
+    .review-source-grid strong {
+      display: block;
+      margin-top: 2px;
+      color: var(--ink);
+      overflow-wrap: anywhere;
+    }
+    .review-note-anchor {
+      border-left: 3px solid var(--primary);
+      padding: 8px 10px;
+      background: #eef7f4;
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
     .field-pills {
       display: flex;
       flex-wrap: wrap;
@@ -2303,6 +2350,64 @@
       `;
     }
 
+    function reviewSourceEvidencePanel(item) {
+      const summary = item.review_note_summary || {};
+      const noteSummary = [
+        `${summary.note_count || item.note_line_count || 0} line(s)`,
+        summary.mouse_item_count ? `${summary.mouse_item_count} mouse` : "",
+        summary.count_note_lines ? `${summary.count_note_total || 0} count-reviewed` : "",
+        summary.needs_review_count ? `${summary.needs_review_count} review` : ""
+      ].filter(Boolean).join(" / ") || "--";
+      const sourceCells = [
+        ["Photo", item.original_filename || item.photo_id || "--"],
+        ["Parse", item.parse_id || "--"],
+        ["Snapshot", item.card_snapshot_id || "--"],
+        ["Card", [item.review_card_type, item.review_card_id_raw].filter(Boolean).join(" / ") || "--"],
+        ["Strain", item.review_matched_strain_text || item.review_raw_strain_text || "--"],
+        ["Sex / DOB", [item.review_sex_raw || item.review_sex_normalized, item.review_dob_raw].filter(Boolean).join(" / ") || "--"],
+        ["Note summary", noteSummary],
+        ["Boundary", item.card_snapshot_id ? "parsed or intermediate result" : "source pending"]
+      ];
+      const noteAnchor = item.note_item_id
+        ? `<div class="review-note-anchor"><strong>Note line anchor</strong><br>${escapeHtml(item.review_note_raw_line || "--")}<br><span class="muted">${escapeHtml([item.review_note_parsed_type, item.review_note_interpreted_status, item.review_note_mouse_display_id || item.review_note_count].filter(Boolean).join(" / ") || "parsed evidence")}</span></div>`
+        : `<div class="review-note-anchor"><strong>Note evidence</strong><br>${escapeHtml(item.evidence_preview || "No line-level note anchor for this review item.")}</div>`;
+      return `
+        <div class="review-source-preview">
+          ${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="Source cage-card photo for selected review">` : ""}
+          <div class="review-source-grid">
+            ${sourceCells.map(([label, value]) => `<span>${escapeHtml(label)}<strong>${escapeHtml(value)}</strong></span>`).join("")}
+          </div>
+          ${noteAnchor}
+        </div>
+      `;
+    }
+
+    function reviewEvidencePanel(item) {
+      if (!item?.note_item_id && !item?.card_snapshot_id && !item?.image_url) return "";
+      const summary = item.review_note_summary || {};
+      const snapshotSummary = [
+        `${summary.note_count || 0} line(s)`,
+        `${summary.mouse_item_count || 0} mouse`,
+        summary.unlabeled_numeric_count ? `${summary.unlabeled_numeric_count} unlabeled` : "",
+        summary.count_note_total ? `${summary.count_note_total} reviewed count` : "",
+        summary.needs_review_count ? `${summary.needs_review_count} needs review` : ""
+      ].filter(Boolean).join(" / ") || "--";
+      return `
+        <div class="detail-stack">
+          <div class="detail-row"><span>Review Note Evidence</span><strong>${escapeHtml(item.review_note_raw_line || "--")}</strong></div>
+          <div class="detail-row"><span>Note item</span><strong>${escapeHtml(item.note_item_id || "--")}</strong></div>
+          <div class="detail-row"><span>Parsed label</span><strong>${escapeHtml([item.review_note_parsed_type, item.review_note_interpreted_status].filter(Boolean).join(" / ") || "--")}</strong></div>
+          <div class="detail-row"><span>Parsed value</span><strong>${escapeHtml(item.review_note_mouse_display_id || item.review_note_count || "--")}</strong></div>
+          <div class="detail-row"><span>Card snapshot</span><strong>${escapeHtml(item.card_snapshot_id || "--")}</strong></div>
+          <div class="detail-row"><span>Snapshot card</span><strong>${escapeHtml([item.review_card_type, item.review_card_id_raw].filter(Boolean).join(" / ") || "--")}</strong></div>
+          <div class="detail-row"><span>Snapshot strain</span><strong>${escapeHtml(item.review_matched_strain_text || item.review_raw_strain_text || "--")}</strong></div>
+          <div class="detail-row"><span>Snapshot sex/count</span><strong>${escapeHtml([item.review_sex_raw, item.review_count_value].filter((value) => value !== null && value !== undefined && value !== "").join(" / ") || "--")}</strong></div>
+          <div class="detail-row"><span>Snapshot summary</span><strong>${escapeHtml(snapshotSummary)}</strong></div>
+          <div class="detail-row"><span>Photo evidence</span><strong>${escapeHtml(item.image_url || "--")}</strong></div>
+        </div>
+      `;
+    }
+
     function renderReviewDetail(item) {
       const panel = document.getElementById("reviewDetailPanel");
       if (!item) {
@@ -2315,6 +2420,7 @@
       panel.innerHTML = `
         <h3>${escapeHtml(item.issue)}</h3>
         <p class="muted">${escapeHtml(item.review_reason || "Review source evidence before accepting a value.")}</p>
+        ${reviewSourceEvidencePanel(item)}
         <div class="detail-stack">
           <div class="detail-row"><span>Status</span><strong>${escapeHtml(item.status)} / ${escapeHtml(item.severity)}</strong></div>
           <div class="detail-row"><span>Source</span><strong>${escapeHtml(item.original_filename || item.source_name || item.photo_id || item.parse_id || "--")}</strong></div>
@@ -2323,6 +2429,7 @@
           <div class="detail-row"><span>Suggested</span><strong>${escapeHtml(item.suggested_value || "--")}</strong></div>
           <div class="detail-row"><span>Note lines</span><strong>${escapeHtml(item.note_line_count ? `${item.note_line_count} note lines` : "No note lines")}</strong></div>
         </div>
+        ${reviewEvidencePanel(item)}
         <div class="detail-stack">${reviewResolutionControls(item)}</div>
       `;
     }
