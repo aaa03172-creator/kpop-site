@@ -125,7 +125,7 @@ The local FastAPI prototype exposes workbook-shaped previews and direct `.xlsx` 
 - `GET /api/exports/separation.xlsx`: exports the current `분리 현황표` preview.
 - `GET /api/exports/animal-sheet.xlsx`: exports the current `animal sheet` preview.
 
-Both endpoints default to `require_ready=true`. Open review blockers return `409` and create a blocked export log entry instead of silently generating a risky file. After review blockers are resolved, downloads are generated from accepted structured state, not from Excel as the source of truth.
+Both endpoints default to `require_ready=true`. Open review blockers return `409`, include a short blocker preview, and create a blocked export log entry instead of silently generating a risky file. Export preview also reports whether accepted data changed after the last generated export. After review blockers are resolved, downloads are generated from accepted structured state, not from Excel as the source of truth.
 
 The browser UI has matching buttons: `Download Separation XLSX` and `Download Animal Sheet XLSX`.
 

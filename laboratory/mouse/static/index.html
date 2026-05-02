@@ -460,9 +460,10 @@
           </table>
         </article>
         <article class="viz-card span-12">
-          <h3>Data Quality / Evidence Coverage</h3>
+          <h3>Evidence & Review Readiness</h3>
+          <p class="viz-note">Visualization numbers are useful only when they stay tied to source photos, note lines, reviewed corrections, and export blockers.</p>
           <table aria-label="Visualization data quality">
-            <thead><tr><th>Signal</th><th>Value</th><th>Boundary</th><th>Action</th></tr></thead>
+            <thead><tr><th>Check</th><th>Current</th><th>Data Boundary</th><th>Lab Action</th></tr></thead>
             <tbody id="vizQualityRows"></tbody>
           </table>
         </article>
@@ -1193,6 +1194,10 @@
       return Math.round((withEvidence / mice.length) * 10);
     }
 
+    function sourceCoverageCount(mice) {
+      return mice.filter((mouse) => mouse.source_note_item_id || mouse.source_record_id || mouse.source_photo_id).length;
+    }
+
     function genotypeBucket(mouse) {
       const value = String(mouse.genotype_result || mouse.genotype || mouse.target_match_status || mouse.genotyping_status || "Unknown").trim();
       const lower = value.toLowerCase();
@@ -1282,6 +1287,33 @@
           <td>${statusCell(item.status)}</td>
         </tr>
       `).join("") || row(["No open review alerts", ""]);
+      const evidenceCount = sourceCoverageCount(mice);
+      document.getElementById("vizQualityRows").innerHTML = [
+        [
+          "Mouse records with source evidence",
+          `${evidenceCount} / ${mice.length}`,
+          "canonical structured state",
+          evidenceCount === mice.length ? "Export views can cite mouse evidence." : "Link missing records to source photo, note line, or manual source record."
+        ],
+        [
+          "Open review blockers",
+          reviewCount,
+          "review item",
+          reviewCount ? "Resolve before final Excel export." : "No review blockers for exports."
+        ],
+        [
+          "Export preview rows",
+          preview.preview_row_count || 0,
+          "export or view",
+          preview.ready ? "Ready for final export." : "Use as preview only until blockers are cleared."
+        ],
+        [
+          "Stored source photos",
+          preview.photos || 0,
+          "raw source",
+          "Keep originals retained even when OCR is uncertain."
+        ]
+      ].map((items) => row(items)).join("");
 
       const mouse = firstMouse(mice);
       if (!mouse) {
@@ -1627,7 +1659,10 @@
         `Ready: ${preview.ready ? "yes" : "no"}.`;
       document.getElementById("exportFilenames").textContent =
         `Separation XLSX: ${preview.expected_separation_filename || "--"}; ` +
-        `Animal sheet XLSX: ${preview.expected_animal_sheet_filename || "--"}.`;
+        `Animal sheet XLSX: ${preview.expected_animal_sheet_filename || "--"}. ` +
+        `Last export: ${preview.latest_generated_export_at || "none"}; ` +
+        `Latest data change: ${preview.latest_data_change_at || "none"}; ` +
+        `Stale: ${preview.export_stale ? "yes" : "no"}.`;
       document.getElementById("exportRows").innerHTML = (preview.separation_rows || []).map((item) =>
         row([
           item.cage_number || "--",
@@ -1781,6 +1816,14 @@
       window.location.href = `/api/exports/genotyping-worklist.csv${query ? `?query=${query}` : ""}`;
     });
 
+    function blockedExportMessage(detail, fallback) {
+      const blockers = (detail.review_blockers || [])
+        .slice(0, 3)
+        .map((item) => `${item.issue}${item.parse_id ? ` (${item.parse_id})` : ""}`);
+      const suffix = blockers.length ? ` Blockers: ${blockers.join("; ")}.` : "";
+      return `${detail.message || fallback}${suffix}`;
+    }
+
     document.getElementById("exportReadyMouseCsvButton").addEventListener("click", async () => {
       const query = encodeURIComponent(activeSearchQuery);
       const response = await fetch(`/api/exports/mice.csv?require_ready=true${query ? `&query=${query}` : ""}`);
@@ -1788,7 +1831,7 @@
         const payload = await response.json().catch(() => ({}));
         const detail = payload.detail || {};
         document.getElementById("exportDownloadMessage").textContent =
-          detail.message || "Export blocked by open review items.";
+          blockedExportMessage(detail, "Export blocked by open review items.");
         await refresh();
         return;
       }
@@ -1812,7 +1855,7 @@
         const payload = await response.json().catch(() => ({}));
         const detail = payload.detail || {};
         document.getElementById("exportDownloadMessage").textContent =
-          detail.message || "Workbook export blocked by open review items.";
+          blockedExportMessage(detail, "Workbook export blocked by open review items.");
         await refresh();
         return;
       }

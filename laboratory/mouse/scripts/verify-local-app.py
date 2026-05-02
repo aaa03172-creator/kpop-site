@@ -420,8 +420,10 @@ def main() -> None:
                 assert_true("Mouse Audit Trace" in index_html, "Local UI should expose mouse audit trace.")
                 assert_true("auditTraceRows" in index_html, "Local UI should render audit trace rows.")
                 assert_true("Strain Detail" in index_html, "Local UI should expose the strain detail visualization.")
+                assert_true("Evidence & Review Readiness" in index_html, "Local UI should expose visualization evidence readiness.")
                 assert_true("renderVisualizations" in index_html, "Local UI should render visualizations from API data.")
                 assert_true("vizHeatmapHead" in index_html, "Genotype heatmap should be driven by rendered data labels.")
+                assert_true("vizQualityRows" in index_html, "Visualization readiness should render data quality rows.")
                 assert_true("demo-note-1" not in index_html, "Mouse detail visualization should not use demo source evidence.")
                 assert_true("selectedStrainMice.length || aliveMice" not in index_html, "Strain detail active mice should not fall back to colony-wide counts.")
                 assert_true("EXP-2026-041" not in index_html, "Strain visualization should not hard-code experiment IDs.")
@@ -726,6 +728,18 @@ def main() -> None:
                     blocked_payload["source_layer"] == "export or view" and blocked_payload["blocked_review_count"] > 0,
                     "Blocked final export should report export/view layer and blocker count.",
                 )
+                assert_true(
+                    blocked_payload["review_blockers"]
+                    and {"review_id", "issue", "severity", "review_reason"}.issubset(blocked_payload["review_blockers"][0]),
+                    "Blocked final CSV export should include actionable review blocker details.",
+                )
+                blocked_separation_payload = blocked_separation_xlsx.json()["detail"]
+                blocked_animal_payload = blocked_animal_xlsx.json()["detail"]
+                assert_true(
+                    blocked_separation_payload["review_blockers"]
+                    and blocked_animal_payload["review_blockers"],
+                    "Blocked workbook exports should include review blocker previews.",
+                )
                 blocked_logs = client.get("/api/export-log").json()
                 blocked_log = next(
                     (item for item in blocked_logs if item["export_type"] == "mouse_csv" and item["status"] == "blocked"),
@@ -738,6 +752,11 @@ def main() -> None:
                 assert_true(export_preview["source_layer"] == "export or view", "Export preview should stay an export/view layer.")
                 assert_true(export_preview["export_type"] == "separation_preview", "Export preview should identify its workbook-like shape.")
                 assert_true(export_preview["preview_row_count"] >= 3, "Export preview should include mouse candidate rows.")
+                assert_true(
+                    export_preview["latest_data_change_at"] and export_preview["latest_generated_export_at"],
+                    "Export preview should expose data and generated export timestamps.",
+                )
+                assert_true(export_preview["export_stale"] is False, "Freshly generated CSV export should not be stale before more data changes.")
                 assert_true(
                     export_preview["expected_separation_filename"].endswith("분리 현황표.xlsx"),
                     "Export preview should expose the expected separation workbook filename.",
@@ -1000,6 +1019,12 @@ def main() -> None:
                 assert_true(genotyping_payload["genotyping_status"] == "resulted", "Genotyping result should mark mouse resulted.")
                 assert_true(genotyping_payload["target_match_status"] == "matches_target", "Genotyping result should use configured target matching.")
                 assert_true(genotyping_payload["next_action"] == "consider_for_mating", "Matching target genotype should suggest a mating review action.")
+                stale_preview = client.get("/api/export-preview").json()
+                assert_true(
+                    stale_preview["export_stale"] is True
+                    and stale_preview["latest_data_change_at"] >= stale_preview["latest_generated_export_at"],
+                    "Export preview should warn when mouse data changed after the last generated export.",
+                )
                 duplicate_resulted_request = client.post(
                     "/api/genotyping/request",
                     json={"mouse_id": genotyping_target["mouse_id"], "sample_id": "already-resulted"},
@@ -1302,6 +1327,8 @@ def main() -> None:
                 ready_export = client.get("/api/exports/mice.csv", params={"query": "MT321", "require_ready": "true"})
                 assert_true(ready_export.status_code == 200, "Ready CSV export should succeed after review resolution.")
                 assert_true("MT321" in ready_export.text, "Ready CSV export should include the filtered mouse row.")
+                post_ready_preview = client.get("/api/export-preview").json()
+                assert_true(post_ready_preview["export_stale"] is False, "Generated ready export should clear the stale export warning.")
                 ready_separation_xlsx = client.get("/api/exports/separation.xlsx")
                 assert_true(ready_separation_xlsx.status_code == 200, "Ready separation XLSX export should succeed after review resolution.")
                 assert_true(
