@@ -997,6 +997,8 @@ def create_canonical_candidate_draft(
     proposed = {
         "display_id": manual.get("display_id") or legacy_summary.get("display_id") or "",
         "strain": manual.get("strain") or legacy_summary.get("strain") or "",
+        "sex": manual.get("sex") or legacy_summary.get("sex") or "",
+        "card_id_raw": manual.get("id") or legacy_summary.get("display_id") or "",
         "dob": manual.get("dob") or legacy_summary.get("dob") or "",
         "count": manual.get("count_raw") or manual.get("count") or legacy_summary.get("count_raw") or legacy_summary.get("count") or "",
         "manual": manual,
@@ -1078,7 +1080,7 @@ def resolve_note_label_correction(
         raise HTTPException(status_code=400, detail="note_item_id is required for note label review corrections.")
     note = conn.execute(
         """
-        SELECT note_item_id, parse_id, card_type, line_number, raw_line_text, strike_status,
+        SELECT note_item_id, photo_id, parse_id, card_snapshot_id, card_type, line_number, raw_line_text, strike_status,
                parsed_type, interpreted_status, parsed_mouse_display_id,
                parsed_ear_label_raw, parsed_ear_label_code, parsed_ear_label_confidence,
                parsed_ear_label_review_status, parsed_event_date, parsed_count,
@@ -1200,10 +1202,12 @@ def resolve_note_label_correction(
             resolved_at,
         ),
     )
+    snapshot_update = refresh_card_snapshot_summary(conn, str(note["card_snapshot_id"] or ""), resolved_at)
     return {
         "note_item_id": note_item_id,
         "decision": decision,
         "correction_id": correction_id,
+        "card_snapshot_update": snapshot_update,
         "boundary": "parsed or intermediate result",
     }
 
@@ -2408,6 +2412,72 @@ def create_card_snapshot(conn: Any, parse_id: str, photo_id: str | None, record:
         ),
     )
     return card_snapshot_id
+
+
+def refresh_card_snapshot_summary(conn: Any, card_snapshot_id: str, updated_at: str) -> dict[str, Any] | None:
+    if not card_snapshot_id:
+        return None
+    rows = conn.execute(
+        """
+        SELECT parsed_type, raw_line_text, parsed_count, parsed_metadata_json, needs_review
+        FROM card_note_item_log
+        WHERE card_snapshot_id = ?
+        ORDER BY line_number
+        """,
+        (card_snapshot_id,),
+    ).fetchall()
+    if not rows:
+        return None
+
+    summary: dict[str, Any] = {
+        "note_count": len(rows),
+        "mouse_item_count": 0,
+        "litter_event_count": 0,
+        "unlabeled_numeric_count": 0,
+        "unlabeled_numeric_labels": [],
+        "unlabeled_numeric_display": [],
+        "count_note_total": 0,
+        "count_note_lines": 0,
+        "reviewed_note_count": 0,
+        "ignored_note_count": 0,
+        "unknown_count": 0,
+        "needs_review_count": 0,
+    }
+    for row in rows:
+        parsed_type = row["parsed_type"]
+        if parsed_type == "mouse_item":
+            summary["mouse_item_count"] += 1
+        elif parsed_type == "litter_event":
+            summary["litter_event_count"] += 1
+        elif parsed_type == "unlabeled_numeric_note":
+            metadata = json_object(row["parsed_metadata_json"])
+            summary["unlabeled_numeric_count"] += int(metadata.get("count") or 0)
+            summary["unlabeled_numeric_labels"].extend(metadata.get("labels") or [])
+            summary["unlabeled_numeric_display"].append(metadata.get("display_ko") or row["raw_line_text"])
+        elif parsed_type == "count_note":
+            summary["count_note_lines"] += 1
+            summary["count_note_total"] += int(row["parsed_count"] or 0)
+        elif parsed_type == "reviewed_note":
+            summary["reviewed_note_count"] += 1
+        elif parsed_type == "ignored_note":
+            summary["ignored_note_count"] += 1
+        else:
+            summary["unknown_count"] += 1
+        if row["needs_review"]:
+            summary["needs_review_count"] += 1
+
+    status = "review" if summary["needs_review_count"] else "reviewed"
+    conn.execute(
+        """
+        UPDATE card_snapshot
+        SET note_summary_json = ?,
+            status = ?,
+            updated_at = ?
+        WHERE card_snapshot_id = ?
+        """,
+        (json.dumps(summary, ensure_ascii=False), status, updated_at, card_snapshot_id),
+    )
+    return {"card_snapshot_id": card_snapshot_id, "status": status, "note_summary": summary}
 
 
 def validation_review_for_record(conn: Any, record: dict[str, Any], status: str) -> dict[str, str] | None:
