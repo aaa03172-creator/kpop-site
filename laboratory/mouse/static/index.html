@@ -225,6 +225,10 @@
       font-weight: 700;
       cursor: pointer;
     }
+    button:disabled {
+      cursor: wait;
+      opacity: 0.62;
+    }
     input[type="file"] {
       width: 100%;
       margin: 8px 0 12px;
@@ -253,6 +257,52 @@
     .status.warn {
       background: #fff4d7;
       color: var(--warn);
+    }
+    .extraction-progress {
+      display: none;
+      gap: 10px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+    .extraction-progress.active {
+      display: grid;
+    }
+    .progress-track {
+      height: 8px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #d9e7e2;
+    }
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--primary);
+      transition: width 180ms ease;
+    }
+    .progress-list {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .progress-list li {
+      display: grid;
+      grid-template-columns: 84px minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .progress-list strong {
+      color: var(--ink);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     table {
       width: 100%;
@@ -1328,6 +1378,14 @@
       <button id="uploadButton" type="button">Upload Photos</button>
       <button id="photoReviewCandidateButton" type="button">Create Missing Photo Reviews</button>
       <p class="muted" id="uploadMessage"></p>
+      <div class="extraction-progress" id="extractionProgress" aria-live="polite">
+        <strong id="extractionProgressTitle">Preparing extraction</strong>
+        <div class="progress-track" aria-hidden="true">
+          <div class="progress-fill" id="extractionProgressFill"></div>
+        </div>
+        <p class="muted" id="extractionProgressDetail">Waiting for upload.</p>
+        <ul class="progress-list" id="extractionProgressList"></ul>
+      </div>
     </section>
 
     <section data-view="settings">
@@ -2028,6 +2086,7 @@
     let photoPreviewScale = 1;
     let photoPreviewRotation = 0;
     let photoPreviewFitMode = true;
+    let currentAiStatus = { available: false };
     async function api(path, options) {
       const response = await fetch(path, options);
       if (!response.ok) {
@@ -2513,8 +2572,25 @@
           <div class="detail-row"><span>Note lines</span><strong>${escapeHtml(item.note_line_count ? `${item.note_line_count} note lines` : "No note lines")}</strong></div>
         </div>
         ${reviewEvidencePanel(item)}
+        <div class="detail-stack">
+          <button class="audit-review-item" type="button" data-review-id="${escapeHtml(item.review_id)}">Load Audit Trace</button>
+          <p class="muted" id="reviewAuditSummary">Audit trace includes source photo, card snapshot, note lines, corrections, and action log entries.</p>
+        </div>
         <div class="detail-stack">${reviewResolutionControls(item)}</div>
       `;
+    }
+
+    function attachReviewAuditHandler() {
+      document.querySelectorAll(".audit-review-item").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const result = await api(`/api/review-items/${encodeURIComponent(button.dataset.reviewId)}/audit`);
+          document.getElementById("reviewAuditSummary").textContent =
+            `Audit: ${result.summary.note_item_count} note line(s), ` +
+            `${result.summary.correction_count} correction(s), ${result.summary.action_count} action(s), ` +
+            `${result.summary.has_photo ? "photo linked" : "photo pending"}, ` +
+            `${result.summary.has_card_snapshot ? "snapshot linked" : "snapshot pending"}.`;
+        });
+      });
     }
 
     async function renderAuditTrace(mice) {
@@ -2628,6 +2704,22 @@
         ["Reviews", `${photo.open_review_count || 0} open / ${photo.review_count || 0} total`],
         ["Latest parse", photo.latest_parse_id || "--"]
       ].map(([label, value]) => `<span>${escapeHtml(label)}<strong>${escapeHtml(value || "--")}</strong></span>`).join("");
+    }
+
+    function setExtractionProgress({ active = true, title = "", detail = "", done = 0, total = 0, items = [] } = {}) {
+      const panel = document.getElementById("extractionProgress");
+      const fill = document.getElementById("extractionProgressFill");
+      panel.classList.toggle("active", active);
+      document.getElementById("extractionProgressTitle").textContent = title || "Preparing extraction";
+      document.getElementById("extractionProgressDetail").textContent = detail || "";
+      const percent = total ? Math.round((done / total) * 100) : 0;
+      fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      document.getElementById("extractionProgressList").innerHTML = items.map((item) => `
+        <li>
+          <span class="status${item.status === "failed" ? " warn" : ""}">${escapeHtml(item.status || "pending")}</span>
+          <strong title="${escapeHtml(item.name || "")}">${escapeHtml(item.name || "--")}</strong>
+        </li>
+      `).join("");
     }
 
     function applyPhotoPreviewTransform() {
@@ -3061,9 +3153,10 @@
 
       renderShellStatus({ health, photoWorkbench, photos, reviews, mice, evidenceComparison, preview });
       const aiStatus = health.ai_draft || {};
+      currentAiStatus = aiStatus;
       document.getElementById("aiDraftMessage").textContent = aiStatus.available
-        ? `AI draft ready with ${aiStatus.model} (${aiStatus.key_source || "configured"} key); approval is required for each selected photo.`
-        : "AI draft unavailable: enter a session API key here or set OPENAI_API_KEY before starting the server. Manual transcription remains available.";
+        ? `AI extraction ready with ${aiStatus.model} (${aiStatus.key_source || "configured"} key); uploaded photos will be extracted automatically as review evidence.`
+        : "AI extraction unavailable: enter a session API key here or set OPENAI_API_KEY before starting the server. Manual transcription remains available.";
       renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview });
       await renderAuditTrace(mice);
       const searchResults = activeSearchQuery
@@ -3213,10 +3306,12 @@
         </article>
       `).join("") || '<p class="muted">No review items match the current filters.</p>';
       renderReviewDetail(selectedReview);
+      attachReviewAuditHandler();
       document.querySelectorAll(".inspect-review").forEach((button) => {
         button.addEventListener("click", () => {
           selectedReviewId = button.dataset.reviewId;
           renderReviewDetail(visibleReviews.find((item) => item.review_id === selectedReviewId));
+          attachReviewAuditHandler();
           document.querySelectorAll("#reviewRows .review-card").forEach((card) => card.classList.remove("selected-card"));
           button.closest(".review-card").classList.add("selected-card");
         });
@@ -3473,15 +3568,116 @@
         document.getElementById("uploadMessage").textContent = "Choose a photo first.";
         return;
       }
+      const uploadButton = document.getElementById("uploadButton");
+      const reviewButton = document.getElementById("photoReviewCandidateButton");
+      const progressItems = files.map((file) => ({ name: file.name, status: "queued" }));
       let uploaded = 0;
-      for (const file of files) {
-        const form = new FormData();
-        form.append("file", file);
-        await api("/api/photos", { method: "POST", body: form });
-        uploaded += 1;
+      const uploadedPhotos = [];
+      let extracted = 0;
+      let failed = 0;
+      uploadButton.disabled = true;
+      reviewButton.disabled = true;
+      setExtractionProgress({
+        active: true,
+        title: `Uploading ${files.length} photo${files.length === 1 ? "" : "s"}`,
+        detail: "Saving raw cage-card evidence locally.",
+        done: 0,
+        total: files.length * (currentAiStatus.available ? 2 : 1),
+        items: progressItems
+      });
+      try {
+        for (let index = 0; index < files.length; index += 1) {
+          const file = files[index];
+          progressItems[index].status = "uploading";
+          setExtractionProgress({
+            active: true,
+            title: `Uploading ${index + 1} of ${files.length}`,
+            detail: file.name,
+            done: uploaded + extracted,
+            total: files.length * (currentAiStatus.available ? 2 : 1),
+            items: progressItems
+          });
+          const form = new FormData();
+          form.append("file", file);
+          const result = await api("/api/photos", { method: "POST", body: form });
+          uploadedPhotos.push({ ...result, progressIndex: index });
+          uploaded += 1;
+          progressItems[index].status = currentAiStatus.available ? "queued extraction" : "stored";
+        }
+        document.getElementById("photoFile").value = "";
+        document.getElementById("uploadMessage").textContent = `Stored ${uploaded} photo(s) and opened review candidates.`;
+        if (!uploadedPhotos.length) return;
+        if (!currentAiStatus.available) {
+          setExtractionProgress({
+            active: true,
+            title: "Upload complete",
+            detail: "AI extraction did not run because no API key is configured.",
+            done: uploaded,
+            total: files.length,
+            items: progressItems
+          });
+          document.getElementById("uploadMessage").textContent =
+            `Stored ${uploaded} photo(s). AI extraction did not run because no API key is configured. Enter a session key, then use Extract & Save Review.`;
+          await refresh();
+          return;
+        }
+        const extractionApproved = window.confirm(
+          `Send ${uploaded} selected uploaded photo(s) plus active assigned strain names to the external inference service and save extracted values as review evidence?`
+        );
+        if (!extractionApproved) {
+          setExtractionProgress({
+            active: true,
+            title: "Upload complete",
+            detail: "AI extraction skipped by user confirmation.",
+            done: uploaded,
+            total: files.length,
+            items: progressItems.map((item) => ({ ...item, status: item.status === "queued extraction" ? "stored" : item.status }))
+          });
+          document.getElementById("uploadMessage").textContent =
+            `Stored ${uploaded} photo(s). AI extraction was skipped; photos remain in Review Queue.`;
+          await refresh();
+          return;
+        }
+        for (let index = 0; index < uploadedPhotos.length; index += 1) {
+          const photo = uploadedPhotos[index];
+          progressItems[photo.progressIndex].status = "extracting";
+          setExtractionProgress({
+            active: true,
+            title: `Extracting ${index + 1} of ${uploadedPhotos.length}`,
+            detail: `${photo.original_filename || progressItems[photo.progressIndex].name} - high detail OCR/AI pass`,
+            done: uploaded + extracted,
+            total: files.length * 2,
+            items: progressItems
+          });
+          try {
+            await api(`/api/photos/${encodeURIComponent(photo.photo_id)}/ai-extract-transcription`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ approved_external_inference: true, detail: "high" })
+            });
+            extracted += 1;
+            progressItems[photo.progressIndex].status = "review saved";
+          } catch (error) {
+            failed += 1;
+            progressItems[photo.progressIndex].status = "failed";
+            document.getElementById("uploadMessage").textContent = `Extraction failed for ${photo.original_filename || progressItems[photo.progressIndex].name}: ${error.message}`;
+          }
+        }
+      } finally {
+        uploadButton.disabled = false;
+        reviewButton.disabled = false;
       }
-      document.getElementById("uploadMessage").textContent = `Stored ${uploaded} photo(s) and opened manual review candidates.`;
-      document.getElementById("photoFile").value = "";
+      setExtractionProgress({
+        active: true,
+        title: failed ? "Extraction completed with issues" : "Extraction complete",
+        detail: `Stored ${uploaded}; saved ${extracted} review transcription(s); ${failed} failed.`,
+        done: uploaded + extracted + failed,
+        total: files.length * (currentAiStatus.available ? 2 : 1),
+        items: progressItems
+      });
+      document.getElementById("uploadMessage").textContent = failed
+        ? `Stored ${uploaded} photo(s), saved ${extracted} extracted review transcription(s), ${failed} extraction failed.`
+        : `Stored ${uploaded} photo(s) and saved ${extracted} extracted review transcription(s).`;
       await refresh();
     });
     document.getElementById("photoReviewCandidateButton").addEventListener("click", async () => {
@@ -3536,7 +3732,7 @@
         const result = await api(`/api/photos/${encodeURIComponent(photoId)}/ai-transcription-draft`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ approved_external_inference: true, detail: "low" })
+          body: JSON.stringify({ approved_external_inference: true, detail: "high" })
         });
         fillTranscriptionDraft(result.draft || {});
         const uncertain = (result.draft?.uncertain_fields || []).join(", ") || "none listed";
@@ -3565,7 +3761,7 @@
         const result = await api(`/api/photos/${encodeURIComponent(photoId)}/ai-extract-transcription`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ approved_external_inference: true, detail: "low" })
+          body: JSON.stringify({ approved_external_inference: true, detail: "high" })
         });
         message.textContent =
           `Saved extracted review ${result.parse_id}; ${result.created_note_items} note line(s), confidence ${result.draft_confidence ?? "--"}.`;

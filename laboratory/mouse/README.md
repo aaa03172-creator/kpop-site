@@ -140,9 +140,16 @@ npm run parse:legacy -- "path\to\animal sheet.xlsx" --kind animal
 
 The inspection helper lists workbook sheet shapes, compact sample rows, photo dimensions, and local file timestamps before any parse/import decision. The parser treats predecessor Excel files as `export or view` snapshots, keeps raw values and source-cell references, and does not write canonical mouse state. Parsed rows are `candidate` review inputs only; newer photo-backed cage-card records, accepted note lines, and correction history remain the stronger continuity evidence.
 
-In the local browser prototype, legacy workbook imports create Review Queue items for each parsed row. Uploaded cage-card photos also create manual review candidates, and manual photo transcriptions stay `parsed or intermediate result` until reviewed. The Evidence Reconciliation view keeps raw photos ahead of predecessor Excel views when deciding what needs human review.
+In the local browser prototype, legacy workbook imports create Review Queue items for each parsed row. Uploaded cage-card photos also create review candidates, and approved AI photo extraction or manual photo transcriptions stay `parsed or intermediate result` until reviewed. The Evidence Reconciliation view keeps raw photos ahead of predecessor Excel views when deciding what needs human review.
 
-The manual transcription form can optionally request an AI draft from the selected cage-card photo. This is approval-gated in the UI, requires `OPENAI_API_KEY`, sends only the selected source photo plus active assigned strain names/aliases, and returns an unstored `parsed or intermediate result` draft for the user to review before saving manual transcription.
+AI cage-card extraction requires `OPENAI_API_KEY`, sends only the selected source photo plus active assigned strain names/aliases after user confirmation, and saves extracted values as `parsed or intermediate result` review evidence rather than canonical mouse state. When the key is configured, uploaded photos can be extracted after upload once the user confirms the external inference step. You can set the key once for local startup by creating `.env.local` next to `start.bat`:
+
+```text
+OPENAI_API_KEY=sk-...
+OPENAI_PARSE_ASSIST_MODEL=gpt-4.1
+```
+
+`.env.local` is ignored by Git. Alternatively, set `OPENAI_API_KEY` in your shell or Windows user environment before starting the server.
 
 ## MVP Non-Goals
 
