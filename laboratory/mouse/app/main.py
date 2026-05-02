@@ -136,7 +136,7 @@ class PhotoManualTranscriptionCreate(BaseModel):
 
 class PhotoAiDraftCreate(BaseModel):
     approved_external_inference: bool = False
-    detail: str = "low"
+    detail: str = "high"
 
 
 class AiDraftSettingsUpdate(BaseModel):
@@ -238,7 +238,7 @@ def ai_draft_status() -> dict[str, Any]:
     return {
         "available": bool(current_openai_api_key()),
         "key_source": key_source,
-        "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-4.1-mini"),
+        "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-4.1"),
         "approval_required": True,
         "payload_minimization": "selected photo plus active assigned strain names only",
     }
@@ -475,12 +475,13 @@ def request_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -
     data_url = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
     assigned_scope = assigned_strain_scope_for_prompt()
     request_payload = {
-        "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-4.1-mini"),
+        "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-4.1"),
         "store": False,
         "instructions": (
             "You draft cage-card transcription fields for review. "
             "Never invent hidden text. Preserve visible raw text. "
             "Use unknown/empty values when uncertain. "
+            "Prioritize exact transcription of symbols, letters, and digits over normalization. "
             "Classify all output as draft parsed evidence, not canonical state."
         ),
         "input": [
@@ -493,11 +494,15 @@ def request_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -
                             "Read this mouse cage card photo. Return only JSON matching the schema. "
                             "Fields: card_type, raw_strain, matched_strain, sex_raw, id_raw, dob_raw, "
                             "dob_normalized, mating_date_raw, mating_date_normalized, lmo_raw, mouse_count, "
-                            "notes. sex_raw is the visible Sex field and may "
-                            "include symbols such as male/female marks, mixed, or unclear handwriting. id_raw "
-                            "is the visible I.D field, not the internal database id. lmo_raw preserves visible "
+                            "notes. sex_raw is the visible Sex field: preserve the exact symbol/text. "
+                            "The symbol \u2642 means male and \u2640 means female; do not leave these blank when visible. "
+                            "mouse_count should preserve count text such as \u2642 2p, \u2640 6p, 2 total, or mixed. "
+                            "id_raw is the visible I.D field, not the internal database id. lmo_raw preserves visible "
                             "LMO/O/N or similar checkbox marks without interpretation. Notes should preserve each "
                             "visible mouse ID, date/event line, or numeric-only temporary label line. "
+                            "Mouse IDs commonly combine letters and digits, such as MT318 or Atg021. "
+                            "Be careful with ambiguous characters: O vs 0, I/l vs 1, S vs 5, Z vs 2, B vs 8, G vs 6. "
+                            "If a character is uncertain, keep the best raw visible guess and list the field in uncertain_fields. "
                             "For numeric-only post-separation labels, keep the raw numbers as notes and mark "
                             "meaning as unlabeled_numeric_note rather than inventing mouse IDs. "
                             "Strike marks: none, single, double, unclear. "
@@ -1003,6 +1008,91 @@ def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -
     return correction_id
 
 
+def review_source_context(conn: Any, review_id: str) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT review.review_id, review.parse_id, review.severity, review.issue,
+               review.current_value, review.suggested_value, review.review_reason,
+               review.status, review.created_at, review.resolved_at, review.resolution_note,
+               parse.source_name, parse.photo_id, photo.original_filename,
+               snapshot.card_snapshot_id, snapshot.card_type, snapshot.card_id_raw,
+               snapshot.note_summary_json, snapshot.status AS snapshot_status
+        FROM review_queue review
+        LEFT JOIN parse_result parse ON parse.parse_id = review.parse_id
+        LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
+        LEFT JOIN card_snapshot snapshot ON snapshot.parse_id = review.parse_id
+        WHERE review.review_id = ?
+        """,
+        (review_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Review item not found.")
+    payload = dict(row)
+    payload["note_summary"] = json_object(payload.pop("note_summary_json", "{}"))
+    payload["image_url"] = f"/api/photos/{quote(payload['photo_id'])}/image" if payload.get("photo_id") else ""
+    return payload
+
+
+def review_item_audit_view(conn: Any, review_id: str) -> dict[str, Any]:
+    review = review_source_context(conn, review_id)
+    note_rows = conn.execute(
+        """
+        SELECT note_item_id, photo_id, parse_id, card_snapshot_id, card_type,
+               line_number, raw_line_text, strike_status, parsed_type,
+               interpreted_status, parsed_mouse_display_id, parsed_ear_label_raw,
+               parsed_ear_label_code, parsed_ear_label_review_status,
+               parsed_event_date, parsed_count, confidence, needs_review, created_at
+        FROM card_note_item_log
+        WHERE parse_id = ?
+        ORDER BY line_number, created_at
+        """,
+        (review["parse_id"],),
+    ).fetchall()
+    correction_rows = conn.execute(
+        """
+        SELECT correction_id, entity_type, entity_id, field_name,
+               before_value, after_value, reason, source_record_id,
+               review_id, corrected_at
+        FROM correction_log
+        WHERE review_id = ?
+        ORDER BY corrected_at, correction_id
+        """,
+        (review_id,),
+    ).fetchall()
+    action_rows = conn.execute(
+        """
+        SELECT action_id, action_type, target_id, before_value, after_value, created_at
+        FROM action_log
+        WHERE target_id = ?
+           OR after_value LIKE ?
+           OR before_value LIKE ?
+        ORDER BY created_at, action_id
+        """,
+        (review_id, f"%{review_id}%", f"%{review_id}%"),
+    ).fetchall()
+    actions = []
+    for action in action_rows:
+        payload = dict(action)
+        payload["before_value"] = json_object(payload.get("before_value"))
+        payload["after_value"] = json_object(payload.get("after_value"))
+        actions.append(payload)
+    return {
+        "source_layer": "export or view",
+        "boundary": "export or view",
+        "review": review,
+        "note_items": [dict(row) for row in note_rows],
+        "corrections": [dict(row) for row in correction_rows],
+        "actions": actions,
+        "summary": {
+            "note_item_count": len(note_rows),
+            "correction_count": len(correction_rows),
+            "action_count": len(actions),
+            "has_photo": bool(review.get("photo_id")),
+            "has_card_snapshot": bool(review.get("card_snapshot_id")),
+        },
+    }
+
+
 def create_canonical_candidate_draft(
     conn: Any,
     *,
@@ -1308,7 +1398,7 @@ def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str,
     dob_raw, dob_start, dob_end = split_dob_range(dob_raw, dob_raw)
     note_rows = conn.execute(
         """
-        SELECT note_item_id, photo_id, line_number, raw_line_text, interpreted_status,
+        SELECT note_item_id, photo_id, card_snapshot_id, line_number, raw_line_text, interpreted_status,
                parsed_mouse_display_id, parsed_ear_label_raw, parsed_ear_label_code,
                parsed_ear_label_confidence, parsed_ear_label_review_status
         FROM card_note_item_log
@@ -1361,6 +1451,7 @@ def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str,
                 "status": note["interpreted_status"] or "active",
                 "source_note_item_id": note["note_item_id"],
                 "source_photo_id": note["photo_id"],
+                "card_snapshot_id": note["card_snapshot_id"] or "",
                 "raw_line_text": note["raw_line_text"],
                 "will_create_mouse": existing is None,
                 "existing_mouse_id": existing["mouse_id"] if existing is not None else "",
@@ -1548,7 +1639,7 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
         dob_raw, dob_start, dob_end = split_dob_range(dob_raw, dob_raw)
         note_rows = conn.execute(
             """
-            SELECT note_item_id, photo_id, line_number, raw_line_text, interpreted_status,
+            SELECT note_item_id, photo_id, card_snapshot_id, line_number, raw_line_text, interpreted_status,
                    parsed_mouse_display_id, parsed_ear_label_raw, parsed_ear_label_code,
                    parsed_ear_label_confidence, parsed_ear_label_review_status
             FROM card_note_item_log
@@ -1604,8 +1695,8 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
                     INSERT INTO mouse_master
                         (mouse_id, display_id, id_prefix, raw_strain_text, dob_raw, dob_start, dob_end,
                          ear_label_raw, ear_label_code, ear_label_confidence, ear_label_review_status,
-                         source_note_item_id, status, source_photo_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         source_note_item_id, status, source_photo_id, current_card_snapshot_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         mouse_id,
@@ -1622,6 +1713,7 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
                         note["note_item_id"],
                         note["interpreted_status"] or "active",
                         note["photo_id"],
+                        note["card_snapshot_id"],
                         applied_at,
                     ),
                 )
@@ -1693,6 +1785,14 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
                         "existing_mice": existing_mice,
                         "created_events": created_events,
                         "mouse_ids": mouse_ids,
+                        "review_id": candidate["review_id"],
+                        "parse_id": candidate["parse_id"],
+                        "legacy_row_id": candidate["legacy_row_id"],
+                        "source_note_item_ids": [note["note_item_id"] for note in note_rows],
+                        "source_photo_ids": list(dict.fromkeys(note["photo_id"] for note in note_rows if note["photo_id"])),
+                        "card_snapshot_ids": list(dict.fromkeys(note["card_snapshot_id"] for note in note_rows if note["card_snapshot_id"])),
+                        "raw_note_lines": [note["raw_line_text"] for note in note_rows],
+                        "boundary": "canonical structured state",
                     },
                     ensure_ascii=False,
                 ),
@@ -3527,6 +3627,12 @@ def list_review_items() -> list[dict[str, Any]]:
     return result
 
 
+@app.get("/api/review-items/{review_id}/audit")
+def audit_review_item(review_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        return review_item_audit_view(conn, review_id)
+
+
 @app.post("/api/review-items/{review_id}/resolve")
 def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict[str, Any]:
     resolved_at = utc_now()
@@ -3595,20 +3701,6 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
             WHERE review_id = ?
             """,
             (resolved_at, payload.resolution_note, review_id),
-        )
-        conn.execute(
-            """
-            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                new_id("action"),
-                "review_resolved",
-                review_id,
-                json.dumps(before, ensure_ascii=False),
-                json.dumps(after, ensure_ascii=False),
-                resolved_at,
-            ),
         )
         note_label_update = resolve_note_label_correction(
             conn,
@@ -3682,6 +3774,36 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
                 ),
                 resolved_at,
             )
+        source_context = review_source_context(conn, review_id)
+        after.update(
+            {
+                "correction_id": correction_id,
+                "canonical_candidate_id": canonical_candidate_id,
+                "legacy_row_review_status": legacy_row_review_status,
+                "note_label_update": note_label_update,
+                "source_parse_id": source_context.get("parse_id") or "",
+                "source_photo_id": source_context.get("photo_id") or "",
+                "source_photo_filename": source_context.get("original_filename") or "",
+                "card_snapshot_id": source_context.get("card_snapshot_id") or "",
+                "note_summary": source_context.get("note_summary") or {},
+                "boundary": "review item",
+            }
+        )
+        review_action_id = new_id("action")
+        conn.execute(
+            """
+            INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                review_action_id,
+                "review_resolved",
+                review_id,
+                json.dumps(before, ensure_ascii=False),
+                json.dumps(after, ensure_ascii=False),
+                resolved_at,
+            ),
+        )
     return {
         "review_id": review_id,
         "status": "resolved",
@@ -3693,6 +3815,8 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "canonical_candidate_id": canonical_candidate_id,
         "correction_id": correction_id,
         "note_label_update": note_label_update,
+        "review_action_id": review_action_id,
+        "audit_url": f"/api/review-items/{quote(review_id)}/audit",
     }
 
 

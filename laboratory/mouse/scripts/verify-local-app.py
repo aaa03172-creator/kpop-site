@@ -542,6 +542,8 @@ def main() -> None:
                 assert_true("exportLogRows" in index_html, "Local UI should expose export history.")
                 assert_true("Review Queue" in index_html and "Evidence" in index_html, "Local UI should show review evidence context.")
                 assert_true("Extract & Save Review" in index_html, "Local UI should expose AI photo extraction as a saved review workflow.")
+                assert_true("Load Audit Trace" in index_html, "Review detail should expose review audit trace loading.")
+                assert_true("AI extraction skipped by user confirmation" in index_html, "AI photo extraction should stay user-confirmed before external inference.")
                 assert_true("reviewStatusFilter" in index_html, "Local UI should expose review status filtering.")
                 assert_true("reviewSeverityFilter" in index_html, "Local UI should expose review severity filtering.")
                 assert_true("reviewEvidenceFilter" in index_html, "Local UI should expose review evidence filtering.")
@@ -1267,6 +1269,16 @@ def main() -> None:
                     and candidate_audit_payload["summary"]["event_count"] >= 2,
                     "Applied candidate audit should expose linked mouse records and events before void.",
                 )
+                applied_action = next(
+                    action for action in candidate_audit_payload["actions"]
+                    if action["action_type"] == "canonical_candidate_applied"
+                )
+                assert_true(
+                    applied_action["after_value"]["review_id"] == mapped_review_id
+                    and applied_action["after_value"]["source_note_item_ids"]
+                    and applied_action["after_value"]["raw_note_lines"],
+                    "Canonical apply action should preserve review, source note, and raw line evidence.",
+                )
                 created = client.post(
                     "/api/assigned-strains",
                     json={
@@ -1410,9 +1422,29 @@ def main() -> None:
                 assert_true(resolved.status_code == 200, "Could not resolve review item.")
                 resolved_payload = resolved.json()
                 assert_true(resolved_payload["correction_id"], "Review resolution with correction values should create a correction log entry.")
+                assert_true(resolved_payload["audit_url"].endswith("/audit"), "Review resolution should return an audit endpoint.")
                 resolved_items = client.get("/api/review-items").json()
                 resolved_count_review = next(item for item in resolved_items if item["review_id"] == count_review["review_id"])
                 assert_true(resolved_count_review["status"] == "resolved", "Resolved review item stayed open.")
+                review_audit = client.get(resolved_payload["audit_url"])
+                assert_true(review_audit.status_code == 200, "Review audit endpoint should load after resolution.")
+                review_audit_payload = review_audit.json()
+                review_resolved_action = next(
+                    action for action in review_audit_payload["actions"]
+                    if action["action_type"] == "review_resolved"
+                )
+                assert_true(
+                    review_audit_payload["source_layer"] == "export or view"
+                    and review_audit_payload["summary"]["action_count"] >= 1
+                    and review_audit_payload["summary"]["correction_count"] == 1,
+                    "Review audit should expose action and correction trace as a view.",
+                )
+                assert_true(
+                    review_resolved_action["after_value"]["correction_id"] == resolved_payload["correction_id"]
+                    and review_resolved_action["after_value"]["source_parse_id"] == count_review["parse_id"]
+                    and "boundary" in review_resolved_action["after_value"],
+                    "Review resolved action should preserve correction and source context.",
+                )
                 with db.connection() as conn:
                     review_action_count = conn.execute(
                         """
