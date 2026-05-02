@@ -14,6 +14,11 @@ try:
 except (ModuleNotFoundError, RuntimeError):
     TestClient = None
 
+try:
+    from openpyxl import load_workbook
+except ModuleNotFoundError:
+    load_workbook = None
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI_MAIN = ROOT / "mousedb" / "__main__.py"
@@ -412,6 +417,10 @@ def main() -> None:
                 assert_true("exportBlockerRows" in index_html, "Local UI should expose export blockers.")
                 assert_true("exportLogRows" in index_html, "Local UI should expose export history.")
                 assert_true("Review Queue" in index_html and "Evidence" in index_html, "Local UI should show review evidence context.")
+                assert_true("reviewStatusFilter" in index_html, "Local UI should expose review status filtering.")
+                assert_true("reviewSeverityFilter" in index_html, "Local UI should expose review severity filtering.")
+                assert_true("reviewEvidenceFilter" in index_html, "Local UI should expose review evidence filtering.")
+                assert_true("review-resolution-note" in index_html, "Local UI should resolve reviews inline instead of using prompt-only workflow.")
                 assert_true("Mouse Audit Trace" in index_html, "Local UI should expose mouse audit trace view.")
                 assert_true("auditTraceRows" in index_html, "Local UI should render audit trace rows.")
                 assert_true("Deactivate" in index_html, "Local UI should expose assigned strain deactivation.")
@@ -1444,6 +1453,26 @@ def main() -> None:
                 assert_true("<cols>" in separation_sheet_xml and 's="1"' in separation_sheet_xml, "Separation XLSX should include column widths and styled headers.")
                 assert_true("Export_Trace" in separation_workbook_xml and "Source note" in separation_trace_xml, "Separation XLSX should include traceability sheet.")
                 assert_true("<b/>" in separation_styles_xml, "Separation XLSX should include bold header style.")
+                assert_true(load_workbook is not None, "openpyxl is required to validate generated XLSX workbooks.")
+                separation_workbook = load_workbook(io.BytesIO(ready_separation_xlsx.content), data_only=True)
+                assert_true("분리 현황표" in separation_workbook.sheetnames, "openpyxl should load the separation sheet name.")
+                assert_true("Export_Trace" in separation_workbook.sheetnames, "openpyxl should load the separation trace sheet.")
+                separation_sheet = separation_workbook["분리 현황표"]
+                assert_true(
+                    [separation_sheet.cell(1, column).value for column in range(1, 9)]
+                    == ["Cage number", "Strain", "Genotype", "total", "DOB", "WT", "Tg", "Sampling point"],
+                    "openpyxl should read the separation workbook headers.",
+                )
+                assert_true(
+                    any(row[1] == "ApoM Tg/Tg" for row in separation_sheet.iter_rows(min_row=2, values_only=True)),
+                    "openpyxl should read accepted separation strain rows.",
+                )
+                separation_trace_sheet = separation_workbook["Export_Trace"]
+                assert_true(
+                    separation_trace_sheet.cell(1, 2).value == "Source note"
+                    and separation_trace_sheet.cell(1, 4).value == "Boundary",
+                    "openpyxl should read separation trace headers.",
+                )
                 ready_animal_xlsx = client.get("/api/exports/animal-sheet.xlsx")
                 assert_true(ready_animal_xlsx.status_code == 200, "Ready animal sheet XLSX export should succeed after review resolution.")
                 assert_true(
@@ -1472,6 +1501,31 @@ def main() -> None:
                 assert_true("animal sheet" in animal_workbook_xml and "Export_Trace" in animal_workbook_xml, "Animal sheet XLSX should name workbook sheets clearly.")
                 assert_true("<cols>" in animal_sheet_xml and 's="1"' in animal_sheet_xml, "Animal sheet XLSX should include column widths and styled headers.")
                 assert_true("Source record" in animal_trace_xml, "Animal sheet XLSX should include traceability sheet.")
+                animal_workbook = load_workbook(io.BytesIO(ready_animal_xlsx.content), data_only=True)
+                assert_true("animal sheet" in animal_workbook.sheetnames, "openpyxl should load the animal sheet name.")
+                assert_true("Export_Trace" in animal_workbook.sheetnames, "openpyxl should load the animal trace sheet.")
+                animal_sheet = animal_workbook["animal sheet"]
+                assert_true(
+                    [animal_sheet.cell(1, column).value for column in range(1, 9)]
+                    == ["Cage No.", "Strain", "Sex", "I.D", "genotype", "DOB", "Mating date", "Pubs"],
+                    "openpyxl should read the animal sheet headers.",
+                )
+                animal_values = list(animal_sheet.iter_rows(min_row=2, values_only=True))
+                assert_true(
+                    any("MT321" in str(cell) for row in animal_values for cell in row if cell is not None)
+                    and any("MT322" in str(cell) for row in animal_values for cell in row if cell is not None),
+                    "openpyxl should read animal sheet parent IDs.",
+                )
+                assert_true(
+                    any("2026-05-02 10p" in str(cell) for row in animal_values for cell in row if cell is not None),
+                    "openpyxl should read animal sheet litter pup evidence.",
+                )
+                animal_trace_sheet = animal_workbook["Export_Trace"]
+                assert_true(
+                    animal_trace_sheet.cell(1, 3).value == "Source record"
+                    and animal_trace_sheet.cell(1, 4).value == "Boundary",
+                    "openpyxl should read animal trace headers.",
+                )
                 ready_logs = client.get("/api/export-log").json()
                 assert_true(
                     any(item["export_type"] == "separation_xlsx" and item["status"] == "generated" for item in ready_logs),
