@@ -642,6 +642,8 @@
         <button id="exportMouseCsvButton" type="button">Download Mouse CSV</button>
         <button id="exportGenotypingCsvButton" type="button">Download Genotyping Worklist</button>
         <button id="exportReadyMouseCsvButton" type="button">Download Ready CSV</button>
+        <button id="exportSeparationXlsxButton" type="button">Download Separation XLSX</button>
+        <button id="exportAnimalSheetXlsxButton" type="button">Download Animal Sheet XLSX</button>
       </div>
       <p class="muted" id="exportDownloadMessage"></p>
       <p class="muted" id="searchSummary">No active search.</p>
@@ -1737,6 +1739,38 @@
       URL.revokeObjectURL(url);
       document.getElementById("exportDownloadMessage").textContent = `Downloaded ${filename}.`;
       await refresh();
+    });
+
+    async function downloadWorkbook(path, fallbackName) {
+      const response = await fetch(`${path}?require_ready=true`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const detail = payload.detail || {};
+        document.getElementById("exportDownloadMessage").textContent =
+          detail.message || "Workbook export blocked by open review items.";
+        await refresh();
+        return;
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : fallbackName;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      document.getElementById("exportDownloadMessage").textContent = `Downloaded ${filename}.`;
+      await refresh();
+    }
+
+    document.getElementById("exportSeparationXlsxButton").addEventListener("click", () => {
+      downloadWorkbook("/api/exports/separation.xlsx", "separation.xlsx");
+    });
+
+    document.getElementById("exportAnimalSheetXlsxButton").addEventListener("click", () => {
+      downloadWorkbook("/api/exports/animal-sheet.xlsx", "animal sheet.xlsx");
     });
 
     document.getElementById("cageButton").addEventListener("click", async () => {

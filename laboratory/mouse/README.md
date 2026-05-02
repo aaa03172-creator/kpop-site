@@ -58,6 +58,8 @@ python -m mousedb genotype list --mouse M-2026-0231 --json
 
 python -m mousedb mating create --male M-2026-0101 --female M-2026-0102 --goal "PV-Cre" --start-date 2026-02-01 --status active --json
 python -m mousedb litter create --mating MAT-2026-001 --birth-date 2026-03-01 --number-born 8 --json
+python -m mousedb litter create-mice LIT-2026-001 --count 8 --strain STR-0001 --json
+python -m mousedb litter wean LIT-2026-001 --date 2026-03-22 --json
 
 python -m mousedb colony summary --json
 python -m mousedb experiment-ready --strain STR-0001 --genotype "AL-0001:positive" --sex male --age-min-weeks 8 --json
@@ -93,6 +95,10 @@ Core canonical tables:
 - `mouse_event`
 
 Mouse records stay lightweight and hold current state. Detailed history is stored in `mouse_event`. Genotype display summaries on Mouse are convenience values; structured `genotype_result` rows are the source of truth.
+
+Corrections preserve before/after values in `correction_log`. When a correction changes a mouse record, MouseDB also writes a `correction_applied` event so the timeline remains auditable.
+
+Litter weaning updates generated offspring from `weaning_pending` to `alive` and writes a `weaned` event for each mouse, preserving the litter snapshot as the related entity.
 
 ## Integration Direction
 
