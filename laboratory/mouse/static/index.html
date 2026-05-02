@@ -474,6 +474,28 @@
       gap: 8px;
       min-width: 0;
     }
+    .photo-preview-toolbar {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .photo-preview-toolbar button {
+      margin: 0;
+      padding: 7px 9px;
+      font-size: 12px;
+    }
+    .photo-preview-frame {
+      width: 100%;
+      max-height: 560px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0d1412;
+      display: grid;
+      place-items: center;
+      min-height: 240px;
+    }
     .transcription-form {
       grid-template-columns: 1fr;
     }
@@ -490,14 +512,38 @@
     }
     .photo-preview-image {
       width: 100%;
-      max-height: 520px;
       object-fit: contain;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #0d1412;
+      transform-origin: center center;
+      transition: transform 120ms ease;
     }
     .photo-preview-image:not([src]) {
       display: none;
+    }
+    .photo-preview-frame.actual-size {
+      place-items: start;
+    }
+    .photo-preview-frame.actual-size .photo-preview-image {
+      width: auto;
+      max-width: none;
+      max-height: none;
+    }
+    .photo-evidence-meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      font-size: 12px;
+    }
+    .photo-evidence-meta span {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfdfc;
+      padding: 7px 8px;
+      color: var(--muted);
+    }
+    .photo-evidence-meta strong {
+      display: block;
+      color: var(--ink);
+      margin-top: 2px;
     }
     .metric-grid {
       display: grid;
@@ -1220,8 +1266,19 @@
           <div class="photo-worklist" id="workbenchPhotoCards"></div>
         </aside>
         <div class="photo-preview-pane">
-          <img id="transcriptionPhotoPreview" class="photo-preview-image" alt="Selected cage card photo preview">
+          <div class="photo-preview-toolbar" aria-label="Photo preview controls">
+            <button id="photoFitButton" type="button">Fit</button>
+            <button id="photoActualButton" type="button">Actual Size</button>
+            <button id="photoZoomOutButton" type="button">Zoom -</button>
+            <button id="photoZoomInButton" type="button">Zoom +</button>
+            <button id="photoRotateLeftButton" type="button">Rotate Left</button>
+            <button id="photoRotateRightButton" type="button">Rotate Right</button>
+          </div>
+          <div class="photo-preview-frame" id="transcriptionPhotoPreviewFrame">
+            <img id="transcriptionPhotoPreview" class="photo-preview-image" alt="Selected cage card photo preview">
+          </div>
           <p class="muted" id="transcriptionPhotoPreviewCaption">Select a source photo to review the raw cage-card evidence.</p>
+          <div class="photo-evidence-meta" id="transcriptionPhotoEvidenceMeta"></div>
         </div>
         <div class="form-grid transcription-form">
         <label>
@@ -1856,6 +1913,9 @@
   <script>
     let latestPhotos = [];
     let selectedTranscriptionPhotoId = "";
+    let photoPreviewScale = 1;
+    let photoPreviewRotation = 0;
+    let photoPreviewFitMode = true;
     async function api(path, options) {
       const response = await fetch(path, options);
       if (!response.ok) {
@@ -2332,6 +2392,45 @@
       return value;
     }
 
+    function renderPhotoEvidenceMeta(photo) {
+      const meta = document.getElementById("transcriptionPhotoEvidenceMeta");
+      if (!photo) {
+        meta.innerHTML = "";
+        return;
+      }
+      meta.innerHTML = [
+        ["Photo ID", photo.photo_id],
+        ["Status", `${photo.status || "--"} / ${photo.next_action || "--"}`],
+        ["Reviews", `${photo.open_review_count || 0} open / ${photo.review_count || 0} total`],
+        ["Latest parse", photo.latest_parse_id || "--"]
+      ].map(([label, value]) => `<span>${escapeHtml(label)}<strong>${escapeHtml(value || "--")}</strong></span>`).join("");
+    }
+
+    function applyPhotoPreviewTransform() {
+      const frame = document.getElementById("transcriptionPhotoPreviewFrame");
+      const image = document.getElementById("transcriptionPhotoPreview");
+      frame.classList.toggle("actual-size", !photoPreviewFitMode);
+      image.style.transform = `scale(${photoPreviewScale}) rotate(${photoPreviewRotation}deg)`;
+    }
+
+    function resetPhotoPreviewControls() {
+      photoPreviewScale = 1;
+      photoPreviewRotation = 0;
+      photoPreviewFitMode = true;
+      applyPhotoPreviewTransform();
+    }
+
+    function adjustPhotoZoom(delta) {
+      photoPreviewFitMode = false;
+      photoPreviewScale = Math.min(3, Math.max(0.5, Math.round((photoPreviewScale + delta) * 10) / 10));
+      applyPhotoPreviewTransform();
+    }
+
+    function rotatePhotoPreview(delta) {
+      photoPreviewRotation = (photoPreviewRotation + delta + 360) % 360;
+      applyPhotoPreviewTransform();
+    }
+
     function updateTranscriptionPhotoPreview(photos) {
       const select = document.getElementById("transcriptionPhotoId");
       const image = document.getElementById("transcriptionPhotoPreview");
@@ -2341,10 +2440,14 @@
       if (!photo) {
         image.removeAttribute("src");
         caption.textContent = "Select a source photo to review the raw cage-card evidence.";
+        renderPhotoEvidenceMeta(null);
         return;
       }
       image.src = `/api/photos/${encodeURIComponent(photo.photo_id)}/image`;
-      caption.textContent = `${photo.original_filename || photo.photo_id} is raw source evidence; transcribe only what is visible.`;
+      caption.textContent =
+        `${photo.original_filename || photo.photo_id} is raw source evidence; preview controls change only this display.`;
+      renderPhotoEvidenceMeta(photo);
+      resetPhotoPreviewControls();
     }
 
     function pendingPhotoQueue() {
@@ -3133,6 +3236,20 @@
     document.getElementById("transcriptionPhotoId").addEventListener("change", async () => {
       setTranscriptionPhoto(document.getElementById("transcriptionPhotoId").value);
     });
+    document.getElementById("photoFitButton").addEventListener("click", () => {
+      photoPreviewFitMode = true;
+      photoPreviewScale = 1;
+      applyPhotoPreviewTransform();
+    });
+    document.getElementById("photoActualButton").addEventListener("click", () => {
+      photoPreviewFitMode = false;
+      photoPreviewScale = 1;
+      applyPhotoPreviewTransform();
+    });
+    document.getElementById("photoZoomOutButton").addEventListener("click", () => adjustPhotoZoom(-0.1));
+    document.getElementById("photoZoomInButton").addEventListener("click", () => adjustPhotoZoom(0.1));
+    document.getElementById("photoRotateLeftButton").addEventListener("click", () => rotatePhotoPreview(-90));
+    document.getElementById("photoRotateRightButton").addEventListener("click", () => rotatePhotoPreview(90));
     document.getElementById("firstPendingPhotoButton").addEventListener("click", () => {
       const first = pendingPhotoQueue()[0];
       if (first) setTranscriptionPhoto(first.photo_id);

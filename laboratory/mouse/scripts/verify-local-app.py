@@ -574,6 +574,12 @@ def main() -> None:
                 assert_true("ai-draft-settings" in index_html, "Local UI should update AI draft settings without storing the key in app records.")
                 assert_true("transcriptionSexRaw" in index_html and "transcriptionIdRaw" in index_html, "Manual transcription should capture raw Sex and I.D card fields.")
                 assert_true("unlabeled" in index_html or "1 2 3 4 5" in index_html, "Manual transcription should make numeric-only temporary labels visible in note entry.")
+                assert_true(
+                    "photoZoomInButton" in index_html
+                    and "photoRotateRightButton" in index_html
+                    and "transcriptionPhotoEvidenceMeta" in index_html,
+                    "Photo review should expose display-only zoom/rotation controls and source evidence metadata.",
+                )
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
