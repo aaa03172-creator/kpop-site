@@ -565,6 +565,12 @@ def main() -> None:
                 assert_true("Canonical Candidate Drafts" in index_html, "Local UI should expose canonical candidate drafts.")
                 assert_true("canonicalCandidateRows" in index_html, "Local UI should render canonical candidate drafts.")
                 assert_true("Preview" in index_html and "apply-preview" in index_html, "Local UI should expose canonical apply preview.")
+                assert_true(
+                    "canonicalApplyPreviewPanel" in index_html
+                    and "renderCanonicalApplyPreview" in index_html
+                    and "Applying this candidate writes canonical mouse state" in index_html,
+                    "Canonical apply preview should show proposed writes, blockers, and a clear canonical-write warning.",
+                )
                 assert_true("Void Applied" in index_html and "/audit" in index_html, "Local UI should expose applied candidate audit and void controls.")
                 assert_true("transcriptionPhotoPreview" in index_html, "Local UI should preview selected raw cage-card photos.")
                 assert_true("/api/photos/${encodeURIComponent(photo.photo_id)}/image" in index_html, "Local UI should load raw photo evidence from the local image endpoint.")
