@@ -738,6 +738,15 @@
     </section>
 
     <section class="full">
+      <h2>Evidence Comparison</h2>
+      <p>Manual photo transcriptions are compared against predecessor Excel candidates as a review view only.</p>
+      <table>
+        <thead><tr><th>Photo transcription</th><th>Legacy candidate</th><th>Status</th><th>Detail</th></tr></thead>
+        <tbody id="evidenceComparisonRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
       <h2>Search & CSV Export</h2>
       <p>Search across mouse IDs, strains, genotyping fields, review issues, and source evidence.</p>
       <div class="form-grid">
@@ -1249,6 +1258,30 @@
       ]);
     }
 
+    function comparisonSummaryText(summary) {
+      if (!summary) return "--";
+      return [
+        summary.strain,
+        summary.dob,
+        summary.count_raw || (summary.count !== null && summary.count !== undefined ? `${summary.count} count` : "")
+      ].filter(Boolean).join(" / ") || "--";
+    }
+
+    function evidenceComparisonRow(item) {
+      const legacy = item.legacy_candidate || {};
+      const legacySummary = legacy.summary || {};
+      const legacySource = [
+        legacy.source_file_name,
+        legacy.source_sheet ? `${legacy.source_sheet}:${legacy.source_row_number || "--"}` : ""
+      ].filter(Boolean).join(" / ");
+      return row([
+        `${item.photo_filename || item.photo_id || "--"}<br><span class="muted">${comparisonSummaryText(item.manual_summary)}</span>`,
+        `${legacySource || "No candidate"}<br><span class="muted">${comparisonSummaryText(legacySummary)}</span>`,
+        item.status,
+        item.detail
+      ]);
+    }
+
     function compactDetails(details) {
       if (!details || Object.keys(details).length === 0) return "--";
       return Object.entries(details).slice(0, 3).map(([key, value]) =>
@@ -1578,7 +1611,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, legacyWorkbookImports, evidenceReconciliation, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -1587,6 +1620,7 @@
         api("/api/distribution-imports"),
         api("/api/legacy-workbook-imports"),
         api("/api/evidence-reconciliation"),
+        api("/api/evidence-comparison"),
         api("/api/photos"),
         api("/api/review-items"),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
@@ -1641,6 +1675,19 @@
       document.getElementById("evidenceReconciliationSummary").textContent =
         `${evidenceReconciliation.next_action || "No reconciliation status yet"} ` +
         `Priority: ${(evidenceReconciliation.source_priority || []).join(" > ") || "raw source photo > reviewed note line > predecessor Excel view"}.`;
+      document.getElementById("evidenceComparisonRows").innerHTML = (evidenceComparison.comparisons || []).map((item) => {
+        const manual = item.manual_summary || {};
+        const legacy = item.legacy_candidate || {};
+        const legacySummary = legacy.summary || {};
+        return row([
+          `${item.photo_filename || item.manual_parse_id || "--"} / ${manual.strain || "--"} / ${manual.dob || "--"} / ${manual.count_raw || manual.count || "--"}`,
+          legacy.legacy_row_id
+            ? `${legacy.source_file_name || "--"} row ${legacy.source_row_number || "--"} / ${legacySummary.strain || "--"} / ${legacySummary.dob || "--"} / ${legacySummary.count_raw || legacySummary.count || "--"}`
+            : "No matching predecessor row",
+          item.status,
+          item.detail || "--"
+        ]);
+      }).join("") || row(["No manual photo transcriptions to compare", "", "", ""]);
       document.querySelectorAll(".add-distribution-scope").forEach((button) => {
         button.addEventListener("click", async () => {
           const canonical = button.dataset.canonical;

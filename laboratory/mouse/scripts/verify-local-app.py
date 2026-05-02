@@ -522,6 +522,8 @@ def main() -> None:
                 assert_true("Legacy decision" in index_html, "Local UI should expose legacy review decision controls.")
                 assert_true("Create Missing Photo Reviews" in index_html, "Local UI should expose photo review candidate creation.")
                 assert_true("Evidence Reconciliation" in index_html, "Local UI should expose photo/workbook reconciliation.")
+                assert_true("Evidence Comparison" in index_html, "Local UI should expose photo/workbook comparison.")
+                assert_true("evidenceComparisonRows" in index_html, "Local UI should render evidence comparison rows.")
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -769,6 +771,32 @@ def main() -> None:
                 assert_true(
                     reconciliation["source_priority"][0] == "raw source photo",
                     "Evidence reconciliation should prioritize raw photos over predecessor Excel views.",
+                )
+                mice_before_comparison = client.get("/api/mice").json()
+                comparison = client.get("/api/evidence-comparison")
+                assert_true(comparison.status_code == 200, f"Could not load evidence comparison: {comparison.text}")
+                comparison_payload = comparison.json()
+                assert_true(comparison_payload["boundary"] == "export or view", "Evidence comparison should remain a view.")
+                assert_true(
+                    comparison_payload["manual_transcription_count"] >= 1,
+                    "Evidence comparison should count manual photo transcriptions.",
+                )
+                assert_true(
+                    comparison_payload["legacy_candidate_count"] >= 1,
+                    "Evidence comparison should count predecessor Excel candidates.",
+                )
+                assert_true(
+                    comparison_payload["comparison_count"] >= 1,
+                    "Evidence comparison should produce manual-vs-legacy comparison rows.",
+                )
+                first_comparison = comparison_payload["comparisons"][0]
+                assert_true(
+                    {"source_layer", "manual_summary", "status", "detail"}.issubset(first_comparison),
+                    "Evidence comparison rows should expose review-view context.",
+                )
+                assert_true(
+                    client.get("/api/mice").json() == mice_before_comparison,
+                    "Evidence comparison should not write canonical mouse state.",
                 )
                 created = client.post(
                     "/api/assigned-strains",
