@@ -2793,7 +2793,7 @@ def export_preview() -> dict[str, Any]:
     separation_groups: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for mouse in mice:
         sex = mouse["sex"] or ""
-        sex_symbol = {"male": "♂", "female": "♀"}.get(sex.lower(), sex)
+        sex_symbol = {"male": "\u2642", "female": "\u2640"}.get(sex.lower(), sex)
         genotype = mouse["genotype_result"] or mouse["genotype"] or ""
         dob = mouse["dob_raw"] or mouse["dob_start"] or ""
         cage = mouse["current_cage_label"] or ""
@@ -2861,45 +2861,42 @@ def export_preview() -> dict[str, Any]:
     litter_by_mating: dict[str, list[Any]] = {}
     for litter in litter_rows:
         litter_by_mating.setdefault(litter["mating_id"], []).append(litter)
-    animal_rows = []
-    current_mating = None
-    cage_no = 0
-    litter_sequence: dict[str, int] = {}
+    mating_groups: dict[str, dict[str, Any]] = {}
     for mating in mating_rows:
-        if mating["mating_id"] != current_mating:
-            current_mating = mating["mating_id"]
-            cage_no += 1
-            litter_sequence[current_mating] = 0
-            first_parent_for_mating = True
-        else:
-            first_parent_for_mating = False
+        mating_id = mating["mating_id"]
+        if mating_id not in mating_groups:
+            mating_groups[mating_id] = {"mating": mating, "parents": []}
         if mating["display_id"]:
-            sex_value = {"male": "♂", "female": "♀"}.get((mating["sex"] or "").lower(), mating["sex"] or mating["role"] or "")
-            mouse_label = " ".join([mating["display_id"] or "", mating["ear_label_raw"] or ""]).strip()
+            mating_groups[mating_id]["parents"].append(mating)
+    animal_rows = []
+    for cage_no, group in enumerate(mating_groups.values(), start=1):
+        mating = group["mating"]
+        for index, parent in enumerate(group["parents"]):
+            sex_value = {"male": "\u2642", "female": "\u2640"}.get(
+                (parent["sex"] or "").lower(), parent["sex"] or parent["role"] or ""
+            )
+            mouse_label = " ".join([parent["display_id"] or "", parent["ear_label_raw"] or ""]).strip()
             animal_rows.append(
                 {
-                    "cage_no": str(cage_no) if first_parent_for_mating else "",
+                    "cage_no": str(cage_no) if index == 0 else "",
                     "strain": mating["strain_goal"] or "",
                     "sex": sex_value,
                     "mouse_id": mouse_label,
-                    "genotype": mating["genotype_result"] or mating["genotype"] or mating["expected_genotype"] or "",
-                    "dob": mating["dob_raw"] or mating["dob_start"] or "",
-                    "mating_date": mating["start_date"] if first_parent_for_mating else "",
+                    "genotype": parent["genotype_result"] or parent["genotype"] or mating["expected_genotype"] or "",
+                    "dob": parent["dob_raw"] or parent["dob_start"] or "",
+                    "mating_date": mating["start_date"] if index == 0 else "",
                     "pubs": "",
                     "status": mating["mating_status"] or "",
-                    "source": mating["source_note_item_id"] or mating["source_record_id"] or "",
+                    "source": parent["source_note_item_id"] or parent["source_record_id"] or "",
                 }
             )
-        for litter in litter_by_mating.get(current_mating, []):
-            if litter_sequence[current_mating] >= litter_by_mating[current_mating].index(litter) + 1:
-                continue
-            litter_sequence[current_mating] += 1
+        for litter_index, litter in enumerate(litter_by_mating.get(mating["mating_id"], []), start=1):
             born_count = litter["number_alive"] if litter["number_alive"] is not None else litter["number_born"]
             animal_rows.append(
                 {
                     "cage_no": "",
                     "strain": "",
-                    "sex": f"F{litter_sequence[current_mating]}",
+                    "sex": f"F{litter_index}",
                     "mouse_id": f"{born_count or ''}p".strip(),
                     "genotype": litter["status"] or "",
                     "dob": litter["birth_date"] or "",
