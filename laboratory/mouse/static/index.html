@@ -740,6 +740,8 @@
     <section class="full">
       <h2>Evidence Comparison</h2>
       <p>Manual photo transcriptions are compared against predecessor Excel candidates as a review view only.</p>
+      <button id="comparisonReviewButton" type="button">Create Comparison Reviews</button>
+      <p class="muted" id="comparisonReviewMessage"></p>
       <table>
         <thead><tr><th>Photo transcription</th><th>Legacy candidate</th><th>Status</th><th>Detail</th></tr></thead>
         <tbody id="evidenceComparisonRows"></tbody>
@@ -1684,7 +1686,7 @@
           legacy.legacy_row_id
             ? `${legacy.source_file_name || "--"} row ${legacy.source_row_number || "--"} / ${legacySummary.strain || "--"} / ${legacySummary.dob || "--"} / ${legacySummary.count_raw || legacySummary.count || "--"}`
             : "No matching predecessor row",
-          item.status,
+          `${item.status}${item.review_required ? " / review required" : ""}`,
           item.detail || "--"
         ]);
       }).join("") || row(["No manual photo transcriptions to compare", "", "", ""]);
@@ -1985,6 +1987,12 @@
       const result = await api("/api/photos/review-candidates", { method: "POST" });
       document.getElementById("uploadMessage").textContent =
         `Created ${result.created_review_candidates} photo review candidates; ${result.existing_review_candidates} already existed.`;
+      await refresh();
+    });
+    document.getElementById("comparisonReviewButton").addEventListener("click", async () => {
+      const result = await api("/api/evidence-comparison/review-candidates", { method: "POST" });
+      document.getElementById("comparisonReviewMessage").textContent =
+        `Created ${result.created_review_items} comparison review item(s); ${result.existing_review_items} already existed; ${result.skipped_comparisons} exact/no-action comparison(s) skipped.`;
       await refresh();
     });
     document.getElementById("transcriptionButton").addEventListener("click", async () => {

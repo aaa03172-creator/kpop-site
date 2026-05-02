@@ -689,7 +689,7 @@ def json_object(value: str | None) -> dict[str, Any]:
 
 
 def compact_compare_value(value: Any) -> str:
-    return re.sub(r"[^a-z0-9가-힣]+", "", str(value or "").lower())
+    return "".join(char for char in str(value or "").lower() if char.isalnum())
 
 
 def date_tokens(value: Any) -> set[str]:
@@ -759,6 +759,108 @@ def comparison_score(manual: dict[str, Any], legacy: dict[str, Any]) -> tuple[in
             mismatched.append("count")
 
     return score, matched, mismatched
+
+
+def comparison_review_id(manual_parse_id: str, legacy_row_id: str) -> str:
+    raw_id = f"review_comparison_{manual_parse_id}_{legacy_row_id}"
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", raw_id)
+
+
+def build_evidence_comparison_payload(conn: Any) -> dict[str, Any]:
+    manual_rows = conn.execute(
+        """
+        SELECT parse.parse_id, parse.photo_id, parse.raw_payload, parse.parsed_at,
+               photo.original_filename
+        FROM parse_result parse
+        LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
+        WHERE parse.source_name = 'manual_photo_transcription'
+        ORDER BY parse.parsed_at DESC
+        LIMIT 50
+        """
+    ).fetchall()
+    legacy_rows = conn.execute(
+        """
+        SELECT row.legacy_row_id, row.review_id, row.row_type, row.source_sheet,
+               row.source_row_number, row.raw_row_json,
+               legacy.source_file_name
+        FROM legacy_workbook_row row
+        LEFT JOIN legacy_workbook_import legacy ON legacy.legacy_import_id = row.legacy_import_id
+        ORDER BY legacy.imported_at DESC, row.source_row_number
+        LIMIT 300
+        """
+    ).fetchall()
+
+    legacy_candidates = []
+    for row in legacy_rows:
+        raw_row = json_object(row["raw_row_json"])
+        summary = legacy_candidate_summary(raw_row)
+        legacy_candidates.append(
+            {
+                "legacy_row_id": row["legacy_row_id"],
+                "review_id": row["review_id"],
+                "source_file_name": row["source_file_name"] or "",
+                "source_sheet": row["source_sheet"] or "",
+                "source_row_number": row["source_row_number"],
+                "raw_row": raw_row,
+                "summary": summary,
+            }
+        )
+
+    comparisons = []
+    for manual in manual_rows:
+        record = json_object(manual["raw_payload"])
+        manual_summary = manual_transcription_summary(record)
+        ranked = []
+        for legacy in legacy_candidates:
+            score, matched, mismatched = comparison_score(manual_summary, legacy["summary"])
+            if score > 0:
+                ranked.append((score, matched, mismatched, legacy))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        best = ranked[0] if ranked else None
+        if best is None:
+            status = "no_legacy_candidate"
+            matched_fields: list[str] = []
+            mismatched_fields: list[str] = []
+            legacy_payload: dict[str, Any] | None = None
+            detail = "No predecessor Excel candidate matched strain, DOB, or count."
+        else:
+            score, matched_fields, mismatched_fields, legacy_payload = best
+            status = "exact_match" if score >= 6 and not mismatched_fields else "value_mismatch"
+            detail = (
+                f"Matched {', '.join(matched_fields) or 'none'}"
+                + (f"; differs on {', '.join(mismatched_fields)}" if mismatched_fields else "")
+            )
+        legacy_row_id = (
+            str(legacy_payload.get("legacy_row_id"))
+            if isinstance(legacy_payload, dict) and legacy_payload.get("legacy_row_id")
+            else "no_legacy_candidate"
+        )
+        review_id = comparison_review_id(manual["parse_id"], legacy_row_id)
+        comparisons.append(
+            {
+                "source_layer": "export or view",
+                "manual_parse_id": manual["parse_id"],
+                "photo_id": manual["photo_id"],
+                "photo_filename": manual["original_filename"] or "",
+                "manual_summary": manual_summary,
+                "legacy_candidate": legacy_payload,
+                "status": status,
+                "matched_fields": matched_fields,
+                "mismatched_fields": mismatched_fields,
+                "detail": detail,
+                "review_required": status != "exact_match",
+                "review_id": review_id,
+            }
+        )
+
+    return {
+        "boundary": "export or view",
+        "source_priority": ["raw source photo", "manual transcription", "predecessor Excel view"],
+        "manual_transcription_count": len(manual_rows),
+        "legacy_candidate_count": len(legacy_candidates),
+        "comparison_count": len(comparisons),
+        "comparisons": comparisons,
+    }
 
 
 def split_dob_range(raw: Any, normalized: Any) -> tuple[str, str | None, str | None]:
@@ -3955,91 +4057,107 @@ def evidence_reconciliation() -> dict[str, Any]:
 @app.get("/api/evidence-comparison")
 def evidence_comparison() -> dict[str, Any]:
     with connection() as conn:
-        manual_rows = conn.execute(
-            """
-            SELECT parse.parse_id, parse.photo_id, parse.raw_payload, parse.parsed_at,
-                   photo.original_filename
-            FROM parse_result parse
-            LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
-            WHERE parse.source_name = 'manual_photo_transcription'
-            ORDER BY parse.parsed_at DESC
-            LIMIT 50
-            """
-        ).fetchall()
-        legacy_rows = conn.execute(
-            """
-            SELECT row.legacy_row_id, row.review_id, row.row_type, row.source_sheet,
-                   row.source_row_number, row.raw_row_json,
-                   legacy.source_file_name
-            FROM legacy_workbook_row row
-            LEFT JOIN legacy_workbook_import legacy ON legacy.legacy_import_id = row.legacy_import_id
-            ORDER BY legacy.imported_at DESC, row.source_row_number
-            LIMIT 300
-            """
-        ).fetchall()
+        return build_evidence_comparison_payload(conn)
 
-    legacy_candidates = []
-    for row in legacy_rows:
-        raw_row = json_object(row["raw_row_json"])
-        summary = legacy_candidate_summary(raw_row)
-        legacy_candidates.append(
-            {
-                "legacy_row_id": row["legacy_row_id"],
-                "review_id": row["review_id"],
-                "source_file_name": row["source_file_name"] or "",
-                "source_sheet": row["source_sheet"] or "",
-                "source_row_number": row["source_row_number"],
-                "raw_row": raw_row,
-                "summary": summary,
-            }
-        )
 
-    comparisons = []
-    for manual in manual_rows:
-        record = json_object(manual["raw_payload"])
-        manual_summary = manual_transcription_summary(record)
-        ranked = []
-        for legacy in legacy_candidates:
-            score, matched, mismatched = comparison_score(manual_summary, legacy["summary"])
-            if score > 0:
-                ranked.append((score, matched, mismatched, legacy))
-        ranked.sort(key=lambda item: item[0], reverse=True)
-        best = ranked[0] if ranked else None
-        if best is None:
-            status = "no_legacy_candidate"
-            matched_fields: list[str] = []
-            mismatched_fields: list[str] = []
-            legacy_payload: dict[str, Any] | None = None
-            detail = "No predecessor Excel candidate matched strain, DOB, or count."
-        else:
-            score, matched_fields, mismatched_fields, legacy_payload = best
-            status = "exact_match" if score >= 6 and not mismatched_fields else "value_mismatch"
-            detail = (
-                f"Matched {', '.join(matched_fields) or 'none'}"
-                + (f"; differs on {', '.join(mismatched_fields)}" if mismatched_fields else "")
+@app.post("/api/evidence-comparison/review-candidates")
+def create_evidence_comparison_reviews() -> dict[str, Any]:
+    created = 0
+    existing = 0
+    skipped = 0
+    review_ids: list[str] = []
+    now = utc_now()
+    with connection() as conn:
+        payload = build_evidence_comparison_payload(conn)
+        for comparison in payload["comparisons"]:
+            if not comparison.get("review_required"):
+                skipped += 1
+                continue
+            review_id = str(comparison.get("review_id") or "")
+            current = conn.execute(
+                "SELECT review_id FROM review_queue WHERE review_id = ?",
+                (review_id,),
+            ).fetchone()
+            if current is not None:
+                existing += 1
+                review_ids.append(review_id)
+                continue
+            manual = comparison.get("manual_summary") or {}
+            legacy = comparison.get("legacy_candidate") or {}
+            legacy_summary = legacy.get("summary") or {}
+            current_value = json.dumps(
+                {
+                    "manual": manual,
+                    "legacy": {
+                        "legacy_row_id": legacy.get("legacy_row_id"),
+                        "source_file_name": legacy.get("source_file_name"),
+                        "source_row_number": legacy.get("source_row_number"),
+                        "summary": legacy_summary,
+                    },
+                    "status": comparison.get("status"),
+                },
+                ensure_ascii=False,
             )
-        comparisons.append(
-            {
-                "source_layer": "export or view",
-                "manual_parse_id": manual["parse_id"],
-                "photo_id": manual["photo_id"],
-                "photo_filename": manual["original_filename"] or "",
-                "manual_summary": manual_summary,
-                "legacy_candidate": legacy_payload,
-                "status": status,
-                "matched_fields": matched_fields,
-                "mismatched_fields": mismatched_fields,
-                "detail": detail,
-            }
-        )
-
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value, suggested_value,
+                     review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    review_id,
+                    comparison["manual_parse_id"],
+                    "High" if comparison["status"] == "value_mismatch" else "Medium",
+                    (
+                        "Photo transcription differs from predecessor Excel"
+                        if comparison["status"] == "value_mismatch"
+                        else "Photo transcription missing predecessor Excel match"
+                    ),
+                    current_value,
+                    "Resolve the latest photo transcription against the predecessor Excel candidate before export.",
+                    (
+                        f"{comparison.get('detail') or 'Manual photo transcription requires predecessor Excel comparison review.'} "
+                        "This is a review item from an export/view comparison; do not write canonical mouse state "
+                        "until a reviewer resolves the source photo and predecessor Excel evidence."
+                    ),
+                    "open",
+                    now,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("action"),
+                    "evidence_comparison_review_created",
+                    review_id,
+                    None,
+                    json.dumps(
+                        {
+                            "manual_parse_id": comparison["manual_parse_id"],
+                            "legacy_row_id": legacy.get("legacy_row_id") or "no_legacy_candidate",
+                            "comparison_status": comparison["status"],
+                            "boundary": "review item",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    now,
+                ),
+            )
+            created += 1
+            review_ids.append(review_id)
     return {
-        "boundary": "export or view",
-        "source_priority": ["raw source photo", "manual transcription", "predecessor Excel view"],
-        "manual_transcription_count": len(manual_rows),
-        "legacy_candidate_count": len(legacy_candidates),
-        "comparison_count": len(comparisons),
-        "comparisons": comparisons,
+        "boundary": "review item",
+        "created_review_candidates": created,
+        "existing_review_candidates": existing,
+        "skipped_exact_matches": skipped,
+        "created_review_items": created,
+        "existing_review_items": existing,
+        "skipped_comparisons": skipped,
+        "review_ids": review_ids,
     }
 
 
