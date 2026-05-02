@@ -20,6 +20,7 @@ References reviewed:
 - Local: `design.md`
 - Local: `AGENTS.md`
 - Local: `mousedb_cli_first_review_ko.md`
+- Local: `ui_reference_comparison_plan_ko.md`
 
 ## Overall Adoption Direction
 
@@ -180,6 +181,26 @@ Guidance:
 - State-changing operations that update current mouse state and write events should be transactional.
 
 ## Design References To Adopt
+
+### 0. UI Reference Redesign Direction
+
+Source reference:
+
+- Local `ui_reference_comparison_plan_ko.md`
+
+Adopt:
+
+- Use the reference screens for product shell, hierarchy, density, and navigation quality, not as literal screens to copy.
+- Make Photo Review Workbench the first polished operational screen.
+- Add a persistent sidebar and top utility bar before expanding dashboard-style summaries.
+- Keep Evidence Comparison, Review Queue, and Export Readiness as secondary operational views.
+- Defer Mouse Detail, Strain Detail, and full Colony Dashboard until reviewed canonical data is strong enough to support them.
+
+Required adaptation:
+
+- Every dashboard, detail, chart, and summary should disclose whether it is based on raw source, parsed/intermediate data, review items, canonical structured state, or export/view data.
+- Raw photo review, manual transcription, evidence comparison, and candidate drafts must not create canonical state unless the user explicitly applies a reviewed candidate.
+- Uncertain values must remain visible and actionable rather than disappearing into clean KPI totals.
 
 ### 1. Workflow-First Information Architecture
 
