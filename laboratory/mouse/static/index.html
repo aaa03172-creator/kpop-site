@@ -743,7 +743,7 @@
       <button id="comparisonReviewButton" type="button">Create Comparison Reviews</button>
       <p class="muted" id="comparisonReviewMessage"></p>
       <table>
-        <thead><tr><th>Photo transcription</th><th>Legacy candidate</th><th>Status</th><th>Detail</th></tr></thead>
+        <thead><tr><th>Photo transcription</th><th>Legacy candidate</th><th>Status</th><th>Review state</th><th>Detail</th></tr></thead>
         <tbody id="evidenceComparisonRows"></tbody>
       </table>
     </section>
@@ -1078,6 +1078,15 @@
       <table>
         <thead><tr><th>Mouse</th><th>Event</th><th>Date</th><th>Related</th><th>Details</th></tr></thead>
         <tbody id="eventRows"></tbody>
+      </table>
+    </section>
+
+    <section class="full">
+      <h2>Canonical Candidate Drafts</h2>
+      <p>Resolved comparison reviews can create draft acceptance candidates without writing canonical mouse state.</p>
+      <table>
+        <thead><tr><th>Candidate</th><th>Mouse ID</th><th>Strain</th><th>DOB</th><th>Count</th><th>Status</th><th>Review</th></tr></thead>
+        <tbody id="canonicalCandidateRows"></tbody>
       </table>
     </section>
 
@@ -1613,12 +1622,13 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photos, reviews, mice, noteItems, mouseEvents, cages, matings, litters, targets, genotypingDashboard, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
         api("/api/source-records"),
         api("/api/corrections"),
+        api("/api/canonical-candidates"),
         api("/api/distribution-imports"),
         api("/api/legacy-workbook-imports"),
         api("/api/evidence-reconciliation"),
@@ -1681,15 +1691,19 @@
         const manual = item.manual_summary || {};
         const legacy = item.legacy_candidate || {};
         const legacySummary = legacy.summary || {};
+        const reviewState = item.review_required
+          ? `${item.review_status || "not_created"}${item.review_severity ? ` (${item.review_severity})` : ""}`
+          : "not_required";
         return row([
           `${item.photo_filename || item.manual_parse_id || "--"} / ${manual.strain || "--"} / ${manual.dob || "--"} / ${manual.count_raw || manual.count || "--"}`,
           legacy.legacy_row_id
             ? `${legacy.source_file_name || "--"} row ${legacy.source_row_number || "--"} / ${legacySummary.strain || "--"} / ${legacySummary.dob || "--"} / ${legacySummary.count_raw || legacySummary.count || "--"}`
             : "No matching predecessor row",
-          `${item.status}${item.review_required ? " / review required" : ""}`,
+          item.status,
+          reviewState,
           item.detail || "--"
         ]);
-      }).join("") || row(["No manual photo transcriptions to compare", "", "", ""]);
+      }).join("") || row(["No manual photo transcriptions to compare", "", "", "", ""]);
       document.querySelectorAll(".add-distribution-scope").forEach((button) => {
         button.addEventListener("click", async () => {
           const canonical = button.dataset.canonical;
@@ -1772,6 +1786,17 @@
       document.getElementById("sourceRows").innerHTML = sourceRecords.map((source) =>
         row([source.source_type, source.source_label || "--", source.source_uri || "--", source.imported_at, source.note || "--"])
       ).join("") || row(["No source evidence yet", "", "", "", ""]);
+      document.getElementById("canonicalCandidateRows").innerHTML = canonicalCandidates.map((candidate) =>
+        row([
+          candidate.candidate_id,
+          candidate.proposed_mouse_display_id || "--",
+          candidate.proposed_strain || "--",
+          candidate.proposed_dob || "--",
+          candidate.proposed_count || "--",
+          candidate.status,
+          candidate.review_id
+        ])
+      ).join("") || row(["No canonical candidate drafts yet", "", "", "", "", "", ""]);
       document.getElementById("correctionRows").innerHTML = corrections.map((correction) =>
         row([
           `${correction.entity_type}:${correction.entity_id}`,

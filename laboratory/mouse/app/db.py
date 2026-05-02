@@ -259,6 +259,23 @@ def init_db() -> None:
                 FOREIGN KEY (review_id) REFERENCES review_queue(review_id)
             );
 
+            CREATE TABLE IF NOT EXISTS canonical_candidate (
+                candidate_id TEXT PRIMARY KEY,
+                review_id TEXT NOT NULL,
+                parse_id TEXT NOT NULL,
+                legacy_row_id TEXT NOT NULL DEFAULT '',
+                proposed_mouse_display_id TEXT NOT NULL DEFAULT '',
+                proposed_strain TEXT NOT NULL DEFAULT '',
+                proposed_dob TEXT NOT NULL DEFAULT '',
+                proposed_count TEXT NOT NULL DEFAULT '',
+                candidate_payload TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (review_id) REFERENCES review_queue(review_id),
+                FOREIGN KEY (parse_id) REFERENCES parse_result(parse_id)
+            );
+
             CREATE TABLE IF NOT EXISTS export_log (
                 export_id TEXT PRIMARY KEY,
                 export_type TEXT NOT NULL,
@@ -574,6 +591,8 @@ def init_db() -> None:
                 ON source_record(source_type, imported_at);
             CREATE INDEX IF NOT EXISTS idx_correction_log_entity
                 ON correction_log(entity_type, entity_id, corrected_at);
+            CREATE INDEX IF NOT EXISTS idx_canonical_candidate_review
+                ON canonical_candidate(review_id, status);
             CREATE INDEX IF NOT EXISTS idx_export_log_type_time
                 ON export_log(export_type, exported_at);
             CREATE INDEX IF NOT EXISTS idx_mouse_event_mouse
