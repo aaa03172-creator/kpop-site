@@ -1286,12 +1286,12 @@
       document.getElementById("quickBackground").textContent = selectedBackground;
       const selectedStrainMice = mice.filter((item) => item.raw_strain_text === selectedStrainName);
       document.getElementById("strainProfileRows").innerHTML = [
-        ["Active mice", Math.min(10, selectedStrainMice.length || aliveMice || 0)],
+        ["Active mice", Math.min(10, selectedStrainMice.length)],
         ["Open reviews", Math.min(10, reviewCount)],
         ["Genotyping pending", Math.min(10, genotypingPending || 0)],
         ["Active matings", Math.min(10, activeMatings || 0)],
         ["Litters not weaned", Math.min(10, weaningDue || 0)],
-        ["Source coverage", Math.min(10, sourceCoverageScore(mice))]
+        ["Source coverage", Math.min(10, sourceCoverageScore(selectedStrainMice))]
       ].map(([label, value]) => `
         <div class="profile-row">
           <span>${escapeHtml(label)}</span>
