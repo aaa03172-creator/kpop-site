@@ -9,9 +9,10 @@
     "parse:distribution": "python -X utf8 scripts/parse_distribution_workbook.py",
     "parse:legacy": "python -X utf8 scripts/parse_legacy_workbooks.py",
     "test": "node scripts/verify-mvp.js",
+    "test:acceptance": "python scripts/verify-acceptance-matrix.py",
     "test:local": "python scripts/verify-local-app.py",
     "test:python": "python -m pytest tests",
-    "verify": "npm test && npm run test:local && npm run test:python"
+    "verify": "npm test && npm run test:acceptance && npm run test:local && npm run test:python"
   },
   "keywords": [],
   "author": "",

@@ -454,6 +454,47 @@
       color: var(--ink);
       overflow-wrap: anywhere;
     }
+    .apply-preview-panel {
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdfc;
+      padding: 14px;
+    }
+    .apply-preview-panel h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+    .apply-preview-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin: 10px 0 12px;
+    }
+    .apply-preview-summary span {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      padding: 8px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .apply-preview-summary strong {
+      display: block;
+      color: var(--ink);
+      font-size: 17px;
+      margin-top: 2px;
+    }
+    .canonical-warning {
+      border-left: 3px solid var(--warn);
+      background: #fff8e6;
+      padding: 8px 10px;
+      color: var(--warn);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.45;
+    }
     .review-note-anchor {
       border-left: 3px solid var(--primary);
       padding: 8px 10px;
@@ -1866,6 +1907,10 @@
         <thead><tr><th>Candidate</th><th>Mouse ID</th><th>Strain</th><th>DOB</th><th>Count</th><th>Status</th><th>Review</th><th>Action</th></tr></thead>
         <tbody id="canonicalCandidateRows"></tbody>
       </table>
+      <div class="apply-preview-panel" id="canonicalApplyPreviewPanel">
+        <h3>Canonical Apply Preview</h3>
+        <p class="muted">Select Preview to inspect mouse rows, events, duplicate risks, and source anchors before any canonical write.</p>
+      </div>
     </section>
 
     <section class="full" data-view="review">
@@ -2405,6 +2450,43 @@
           <div class="detail-row"><span>Snapshot summary</span><strong>${escapeHtml(snapshotSummary)}</strong></div>
           <div class="detail-row"><span>Photo evidence</span><strong>${escapeHtml(item.image_url || "--")}</strong></div>
         </div>
+      `;
+    }
+
+    function renderCanonicalApplyPreview(result) {
+      const panel = document.getElementById("canonicalApplyPreviewPanel");
+      const blockers = result.blockers || [];
+      const duplicateRows = result.duplicate_risks || [];
+      const proposedRows = result.proposed_mice || [];
+      panel.innerHTML = `
+        <h3>Canonical Apply Preview</h3>
+        <p class="canonical-warning">Applying this candidate writes canonical mouse state and mouse events. Review source photo, note line, and duplicate blockers before applying.</p>
+        <div class="apply-preview-summary">
+          <span>New mice<strong>${escapeHtml(result.summary?.new_mouse_rows ?? 0)}</strong></span>
+          <span>Existing mice<strong>${escapeHtml(result.summary?.existing_mouse_rows ?? 0)}</strong></span>
+          <span>Events<strong>${escapeHtml(result.summary?.events ?? 0)}</strong></span>
+          <span>Duplicate risks<strong>${escapeHtml(result.summary?.duplicate_risks ?? 0)}</strong></span>
+        </div>
+        ${blockers.length ? `<p class="status warn">Blocked: ${escapeHtml(blockers.join("; "))}</p>` : `<p class="status">No apply blockers detected</p>`}
+        <table>
+          <thead><tr><th>Mouse</th><th>State</th><th>Source note</th><th>Raw line</th><th>Event</th></tr></thead>
+          <tbody>${proposedRows.map((mouse) => row([
+            `${mouse.display_id || "--"} / ${mouse.mouse_id || "--"}`,
+            `${mouse.raw_strain_text || "--"} / ${mouse.dob_raw || "--"} / ${mouse.status || "--"}`,
+            [mouse.source_photo_id, mouse.source_note_item_id].filter(Boolean).join(" / ") || "--",
+            mouse.raw_line_text || "--",
+            mouse.will_create_event ? "will create mouse event" : "--"
+          ])).join("") || row(["No proposed mouse rows", "", "", "", ""])}</tbody>
+        </table>
+        <table>
+          <thead><tr><th>Duplicate display ID</th><th>Candidate mouse</th><th>Existing mouse</th><th>Existing source</th></tr></thead>
+          <tbody>${duplicateRows.map((risk) => row([
+            risk.display_id,
+            risk.candidate_mouse_id,
+            risk.existing_mouse_id,
+            risk.existing_source_note_item_id || "--"
+          ])).join("") || row(["No duplicate risks", "", "", ""])}</tbody>
+        </table>
       `;
     }
 
@@ -3191,6 +3273,7 @@
       document.querySelectorAll(".preview-canonical-candidate").forEach((button) => {
         button.addEventListener("click", async () => {
           const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply-preview`);
+          renderCanonicalApplyPreview(result);
           const blockers = result.blockers.length ? ` Blockers: ${result.blockers.join("; ")}` : "";
           document.getElementById("comparisonReviewMessage").textContent =
             `Preview ${result.candidate_id}: ${result.summary.new_mouse_rows} new mouse row(s), ${result.summary.events} event(s), ${result.summary.duplicate_risks} duplicate risk(s).${blockers}`;
@@ -3198,6 +3281,8 @@
       });
       document.querySelectorAll(".apply-canonical-candidate").forEach((button) => {
         button.addEventListener("click", async () => {
+          const approved = window.confirm("Apply this candidate to canonical mouse state and create mouse events? Review the apply preview first if anything is uncertain.");
+          if (!approved) return;
           const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply`, { method: "POST" });
           document.getElementById("comparisonReviewMessage").textContent =
             `Applied ${result.created_mice} mouse record(s) from ${result.candidate_id}; ${result.existing_mice} already existed.`;
