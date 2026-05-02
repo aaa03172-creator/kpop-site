@@ -142,6 +142,8 @@ The inspection helper lists workbook sheet shapes, compact sample rows, photo di
 
 In the local browser prototype, legacy workbook imports create Review Queue items for each parsed row. Uploaded cage-card photos also create manual review candidates, and manual photo transcriptions stay `parsed or intermediate result` until reviewed. The Evidence Reconciliation view keeps raw photos ahead of predecessor Excel views when deciding what needs human review.
 
+The manual transcription form can optionally request an AI draft from the selected cage-card photo. This is approval-gated in the UI, requires `OPENAI_API_KEY`, sends only the selected source photo plus active assigned strain names/aliases, and returns an unstored `parsed or intermediate result` draft for the user to review before saving manual transcription.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
@@ -162,7 +164,7 @@ The repository also keeps the browser prototype and local FastAPI scaffold check
 ```powershell
 npm test
 npm run test:local
-npm run test:mousedb
+npm run test:python
 npm run verify
 ```
 

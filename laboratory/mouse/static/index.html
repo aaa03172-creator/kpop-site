@@ -631,6 +631,7 @@
         <button id="firstPendingPhotoButton" type="button">First Pending</button>
         <button id="previousPendingPhotoButton" type="button">Previous</button>
         <button id="nextPendingPhotoButton" type="button">Next</button>
+        <button id="aiDraftButton" type="button">Create AI Draft</button>
         <span class="muted" id="photoQueueSummary">No photo queue loaded.</span>
       </div>
       <div class="photo-review-layout">
@@ -671,6 +672,7 @@
         </div>
       </div>
       <p class="muted" id="transcriptionMessage"></p>
+      <p class="muted" id="aiDraftMessage">AI draft sends only the selected photo and active assigned strain names after button approval.</p>
     </section>
 
     <section class="full">
@@ -1494,6 +1496,17 @@
         `${position} - ${selected?.original_filename || photoId} - ${selected?.next_action || "ready"}`;
     }
 
+    function fillTranscriptionDraft(draft) {
+      document.getElementById("transcriptionCardType").value = draft.card_type || "unknown";
+      document.getElementById("transcriptionRawStrain").value = draft.matched_strain || draft.raw_strain || "";
+      document.getElementById("transcriptionDobRaw").value = draft.dob_raw || draft.dob_normalized || "";
+      document.getElementById("transcriptionMouseCount").value = draft.mouse_count || "";
+      document.getElementById("transcriptionNotes").value = (draft.notes || [])
+        .map((note) => note.raw || "")
+        .filter(Boolean)
+        .join("\n");
+    }
+
     function movePhotoQueue(offset) {
       const queue = pendingPhotoQueue();
       if (!queue.length) return;
@@ -2176,6 +2189,35 @@
     });
     document.getElementById("nextPendingPhotoButton").addEventListener("click", () => {
       movePhotoQueue(1);
+    });
+    document.getElementById("aiDraftButton").addEventListener("click", async () => {
+      const photoId = document.getElementById("transcriptionPhotoId").value;
+      const message = document.getElementById("aiDraftMessage");
+      if (!photoId) {
+        message.textContent = "Choose a source photo first.";
+        return;
+      }
+      const approved = window.confirm(
+        "Create an AI draft by sending only this selected source photo and active assigned strain names to the external inference service?"
+      );
+      if (!approved) {
+        message.textContent = "AI draft cancelled; no external inference request was sent.";
+        return;
+      }
+      message.textContent = "Creating AI draft from the selected photo only...";
+      try {
+        const result = await api(`/api/photos/${encodeURIComponent(photoId)}/ai-transcription-draft`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approved_external_inference: true, detail: "low" })
+        });
+        fillTranscriptionDraft(result.draft || {});
+        const uncertain = (result.draft?.uncertain_fields || []).join(", ") || "none listed";
+        message.textContent =
+          `Draft filled from ${result.photo_filename}; confidence ${result.draft?.confidence ?? "--"}. Review uncertain fields: ${uncertain}.`;
+      } catch (error) {
+        message.textContent = `AI draft unavailable: ${error.message}`;
+      }
     });
     document.getElementById("comparisonReviewButton").addEventListener("click", async () => {
       const result = await api("/api/evidence-comparison/review-candidates", { method: "POST" });
