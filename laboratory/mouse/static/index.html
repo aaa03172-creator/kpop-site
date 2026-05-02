@@ -8,11 +8,14 @@
     :root {
       --bg: #f7faf9;
       --panel: #ffffff;
+      --panel-soft: #eef5f2;
       --line: #d6e0dc;
       --ink: #12201b;
       --muted: #667770;
       --primary: #0f6b5f;
+      --primary-dark: #0a4039;
       --warn: #8a5a00;
+      --danger: #9b2f3e;
     }
     * { box-sizing: border-box; }
     body {
@@ -21,20 +24,138 @@
       background: var(--bg);
       color: var(--ink);
     }
+    .app-shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+    }
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 18px;
+      padding: 18px 14px;
+      border-right: 1px solid var(--line);
+      background: #10211d;
+      color: #e9f4f1;
+      overflow-y: auto;
+    }
+    .brand {
+      display: grid;
+      gap: 4px;
+      padding: 4px 6px 10px;
+    }
+    .brand strong {
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+    .brand span,
+    .sidebar-footer {
+      color: #a9bbb5;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .nav-group {
+      display: grid;
+      gap: 6px;
+    }
+    .nav-label {
+      margin: 10px 8px 4px;
+      color: #90a49d;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .nav-button {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 24px 1fr auto;
+      gap: 9px;
+      align-items: center;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: #dceae6;
+      padding: 9px 10px;
+      text-align: left;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .nav-button:hover,
+    .nav-button.active {
+      background: #1b3932;
+      color: #fff;
+    }
+    .nav-icon {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #9fd6c8;
+      font-size: 11px;
+    }
+    .nav-count {
+      min-width: 22px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #dceae6;
+      padding: 2px 6px;
+      font-size: 11px;
+      text-align: center;
+    }
+    .app-body {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
     header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding: 16px 20px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding: 14px 20px;
       border-bottom: 1px solid var(--line);
-      background: var(--panel);
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(12px);
+    }
+    .topbar-title {
+      display: grid;
+      gap: 3px;
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .topbar-actions .topbar-search {
+      min-width: min(320px, 36vw);
+      margin: 0;
     }
     main {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 16px;
       padding: 20px;
+      align-content: start;
+    }
+    main[data-active-view] section {
+      display: none;
+    }
+    main[data-active-view] section.active-view {
+      display: block;
+    }
+    main[data-active-view] section.active-view.visual-shell {
+      display: grid;
     }
     section {
       border: 1px solid var(--line);
@@ -43,6 +164,50 @@
       padding: 16px;
       min-width: 0;
       overflow-x: auto;
+    }
+    .view-hero {
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      padding: 0;
+      overflow: visible;
+    }
+    .view-hero-panel {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(135deg, #ffffff 0%, #f0f7f4 100%);
+      padding: 16px;
+    }
+    .view-hero-panel h2 {
+      margin-bottom: 5px;
+      font-size: 18px;
+    }
+    .hero-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .hero-metric {
+      min-width: 104px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      padding: 9px 10px;
+    }
+    .hero-metric strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.1;
+    }
+    .hero-metric span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
     }
     h1, h2, p { margin: 0; }
     h1 { font-size: 22px; }
@@ -64,12 +229,16 @@
       width: 100%;
       margin: 8px 0 12px;
     }
-    input[type="text"], select {
+    input[type="text"], select, textarea {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
       padding: 8px 10px;
       margin: 6px 0 10px;
+    }
+    textarea {
+      min-height: 92px;
+      resize: vertical;
     }
     .muted { color: var(--muted); }
     .status {
@@ -103,6 +272,9 @@
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
+    tr.selected-row td {
+      background: #eef7f4;
+    }
     .mono {
       font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
       font-size: 12px;
@@ -131,16 +303,92 @@
     .review-actions select {
       margin: 0;
     }
-    .photo-review-layout {
+    .review-workbench {
       display: grid;
-      grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 1.1fr);
+      grid-template-columns: minmax(520px, 1.25fr) minmax(320px, 0.75fr);
       gap: 14px;
       align-items: start;
+    }
+    .review-list-panel,
+    .review-detail-panel {
+      min-width: 0;
+    }
+    .review-detail-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdfc;
+      padding: 14px;
+      position: sticky;
+      top: 88px;
+    }
+    .review-detail-panel h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+    .detail-stack {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .detail-row {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 10px;
+      border-top: 1px solid var(--line);
+      padding-top: 9px;
+      font-size: 13px;
+    }
+    .detail-row span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .review-detail-panel .review-actions {
+      grid-template-columns: 1fr;
+      min-width: 0;
+    }
+    .photo-review-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 0.65fr) minmax(360px, 1.35fr) minmax(320px, 0.9fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .photo-worklist {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+    .photo-worklist-card {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfdfc;
+      color: var(--ink);
+      padding: 9px;
+      text-align: left;
+      font-size: 12px;
+    }
+    .photo-worklist-card.active {
+      border-color: var(--primary);
+      background: #eef7f4;
+    }
+    .photo-worklist-card strong,
+    .photo-worklist-card span {
+      display: block;
+    }
+    .photo-worklist-card span {
+      color: var(--muted);
+      margin-top: 3px;
+      line-height: 1.35;
     }
     .photo-preview-pane {
       display: grid;
       gap: 8px;
       min-width: 0;
+    }
+    .transcription-form {
+      grid-template-columns: 1fr;
     }
     .photo-queue-bar {
       display: flex;
@@ -427,10 +675,35 @@
       background: var(--primary);
     }
     @media (max-width: 900px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar {
+        position: static;
+        height: auto;
+        grid-template-rows: auto auto auto;
+      }
+      .nav-group {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      header {
+        position: static;
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .topbar-actions {
+        justify-content: stretch;
+      }
+      .topbar-search {
+        min-width: 0;
+        width: 100%;
+      }
       main { grid-template-columns: 1fr; }
       .full { grid-column: auto; }
       .form-grid { grid-template-columns: 1fr; }
       .photo-review-layout { grid-template-columns: 1fr; }
+      .review-workbench { grid-template-columns: 1fr; }
+      .review-detail-panel { position: static; }
+      .view-hero-panel { display: grid; }
+      .hero-metrics { justify-content: flex-start; }
       .metric-grid { grid-template-columns: 1fr 1fr; }
       .viz-grid,
       .viz-kpis,
@@ -450,16 +723,76 @@
   </style>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>Mouse Colony LIMS Local MVP</h1>
-      <p>Photos, cage card review, and Excel export readiness.</p>
-    </div>
-    <span class="status" id="health">Checking...</span>
-  </header>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="brand">
+        <strong>Mouse Colony</strong>
+        <span>Evidence-first local workbench</span>
+      </div>
+      <nav class="nav-group">
+        <div class="nav-label">Workflow</div>
+        <button class="nav-button active" type="button" data-view-target="photo">
+          <span class="nav-icon">PH</span><span>Photo Review</span><span class="nav-count" id="navPhotoCount">0</span>
+        </button>
+        <button class="nav-button" type="button" data-view-target="review">
+          <span class="nav-icon">RV</span><span>Review Queue</span><span class="nav-count" id="navReviewCount">0</span>
+        </button>
+        <button class="nav-button" type="button" data-view-target="comparison">
+          <span class="nav-icon">CP</span><span>Evidence Comparison</span><span class="nav-count" id="navComparisonCount">0</span>
+        </button>
+        <button class="nav-button" type="button" data-view-target="exports">
+          <span class="nav-icon">EX</span><span>Exports</span><span class="nav-count" id="navExportCount">0</span>
+        </button>
+        <div class="nav-label">Records</div>
+        <button class="nav-button" type="button" data-view-target="records">
+          <span class="nav-icon">CR</span><span>Colony Records</span><span class="nav-count" id="navMouseCount">0</span>
+        </button>
+        <button class="nav-button" type="button" data-view-target="dashboard">
+          <span class="nav-icon">DB</span><span>Dashboard</span><span class="nav-count" id="navDashboardCount">0</span>
+        </button>
+        <button class="nav-button" type="button" data-view-target="mouse-detail">
+          <span class="nav-icon">MS</span><span>Mouse Detail</span><span class="nav-count">view</span>
+        </button>
+        <button class="nav-button" type="button" data-view-target="strain-detail">
+          <span class="nav-icon">ST</span><span>Strain Detail</span><span class="nav-count">view</span>
+        </button>
+        <button class="nav-button" type="button" data-view-target="settings">
+          <span class="nav-icon">SE</span><span>Settings</span><span class="nav-count">rules</span>
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        Raw photos and Excel files stay source evidence. Canonical state changes require reviewed acceptance.
+      </div>
+    </aside>
+    <div class="app-body">
+      <header>
+        <div class="topbar-title">
+          <h1 id="viewTitle">Photo Review Workbench</h1>
+          <p id="viewSubtitle">Review raw cage-card photos before any canonical state change.</p>
+        </div>
+        <div class="topbar-actions">
+          <input class="topbar-search" id="topbarSearch" type="text" placeholder="Search mouse, strain, review, source">
+          <span class="status" id="topOpenReviews">0 open reviews</span>
+          <span class="status warn" id="topExportStatus">Export checking</span>
+          <span class="status" id="health">Checking...</span>
+        </div>
+      </header>
 
-  <main>
-    <section class="full visual-shell" aria-label="Colony visualization dashboard">
+      <main id="appContent" data-active-view="photo">
+    <section class="full view-hero" data-view="photo">
+      <div class="view-hero-panel">
+        <div>
+          <h2>Photo Review Workbench</h2>
+          <p>Start with the preserved cage-card photo, transcribe visible notes, then route uncertainty to review before canonical writes.</p>
+        </div>
+        <div class="hero-metrics">
+          <div class="hero-metric"><strong id="heroPhotoCount">0</strong><span>raw photos</span></div>
+          <div class="hero-metric"><strong id="heroPendingPhotos">0</strong><span>need action</span></div>
+          <div class="hero-metric"><strong id="heroOpenReviews">0</strong><span>open reviews</span></div>
+        </div>
+      </div>
+    </section>
+    <section class="full visual-shell" data-view="dashboard" aria-label="Colony visualization dashboard">
       <div class="visual-header">
         <div>
           <h2>Colony Dashboard</h2>
@@ -518,7 +851,7 @@
       </div>
     </section>
 
-    <section class="full visual-shell" aria-label="Mouse detail visualization">
+    <section class="full visual-shell" data-view="mouse-detail" aria-label="Mouse detail visualization">
       <div class="visual-header">
         <div>
           <h2>Mouse Detail</h2>
@@ -559,7 +892,7 @@
       </div>
     </section>
 
-    <section class="full visual-shell" aria-label="Strain detail visualization">
+    <section class="full visual-shell" data-view="strain-detail" aria-label="Strain detail visualization">
       <div class="visual-header">
         <div>
           <h2 id="strainDetailTitle">Strain Detail</h2>
@@ -608,7 +941,7 @@
       </div>
     </section>
 
-    <section>
+    <section data-view="photo">
       <h2>Upload Source Photo</h2>
       <p>Raw cage card evidence stays local.</p>
       <input id="photoFile" type="file" accept="image/*" multiple>
@@ -617,14 +950,14 @@
       <p class="muted" id="uploadMessage"></p>
     </section>
 
-    <section>
+    <section data-view="settings">
       <h2>Fixture Parse Results</h2>
       <p>Imports sample parsed/intermediate records without OCR.</p>
       <button id="fixtureButton" type="button">Import Sample Fixture</button>
       <p class="muted" id="fixtureMessage"></p>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="photo">
       <h2>Manual Photo Transcription</h2>
       <p>Enter only what you can verify from the latest cage-card photo; values stay reviewable until accepted.</p>
       <div class="photo-queue-bar">
@@ -635,7 +968,16 @@
         <span class="muted" id="photoQueueSummary">No photo queue loaded.</span>
       </div>
       <div class="photo-review-layout">
-        <div class="form-grid">
+        <aside class="photo-worklist" aria-label="Photo worklist">
+          <strong>Photo Inbox</strong>
+          <p class="muted">Raw source photos remain preserved evidence.</p>
+          <div class="photo-worklist" id="workbenchPhotoCards"></div>
+        </aside>
+        <div class="photo-preview-pane">
+          <img id="transcriptionPhotoPreview" class="photo-preview-image" alt="Selected cage card photo preview">
+          <p class="muted" id="transcriptionPhotoPreviewCaption">Select a source photo to review the raw cage-card evidence.</p>
+        </div>
+        <div class="form-grid transcription-form">
         <label>
           Source photo
           <select id="transcriptionPhotoId"></select>
@@ -666,16 +1008,12 @@
         </label>
         <button id="transcriptionButton" type="button">Save Manual Transcription</button>
         </div>
-        <div class="photo-preview-pane">
-          <img id="transcriptionPhotoPreview" class="photo-preview-image" alt="Selected cage card photo preview">
-          <p class="muted" id="transcriptionPhotoPreviewCaption">Select a source photo to review the raw cage-card evidence.</p>
-        </div>
       </div>
       <p class="muted" id="transcriptionMessage"></p>
       <p class="muted" id="aiDraftMessage">AI draft sends only the selected photo and active assigned strain names after button approval.</p>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="settings">
       <h2>My Assigned Strains</h2>
       <p>Explicit active scope for OCR matching and export grouping.</p>
       <div class="form-grid">
@@ -696,7 +1034,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="settings">
       <h2>Strain Registry</h2>
       <p>Confirmed strain knowledge base entries stay separate from mouse records.</p>
       <div class="form-grid">
@@ -717,7 +1055,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="settings">
       <h2>Distribution Assignment Import</h2>
       <p>Parsed distribution rows stay non-canonical until added to My Assigned Strains.</p>
       <input id="distributionFile" type="file" accept="application/json,.json">
@@ -738,7 +1076,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="settings">
       <h2>Legacy Workbook Import</h2>
       <p>Upload predecessor animal sheet or separation workbook views as reviewable, non-canonical evidence.</p>
       <div class="form-grid">
@@ -772,7 +1110,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="comparison">
       <h2>Evidence Reconciliation</h2>
       <p>Latest photos stay raw until reviewed; predecessor Excel rows remain non-canonical comparison context.</p>
       <table>
@@ -782,7 +1120,7 @@
       <p class="muted" id="evidenceReconciliationSummary"></p>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="comparison">
       <h2>Evidence Comparison</h2>
       <p>Manual photo transcriptions are compared against predecessor Excel candidates as a review view only.</p>
       <button id="comparisonReviewButton" type="button">Create Comparison Reviews</button>
@@ -793,7 +1131,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="exports">
       <h2>Search & CSV Export</h2>
       <p>Search across mouse IDs, strains, genotyping fields, review issues, and source evidence.</p>
       <div class="form-grid">
@@ -816,7 +1154,7 @@
       </table>
     </section>
 
-    <section>
+    <section data-view="photo">
       <h2>Photo Inbox</h2>
       <table>
         <thead><tr><th>ID</th><th>File</th><th>Status</th><th>Uploaded</th><th>Action</th></tr></thead>
@@ -824,7 +1162,7 @@
       </table>
     </section>
 
-    <section>
+    <section class="full" data-view="review">
       <h2>Review Queue</h2>
       <div class="review-controls">
         <label>
@@ -853,13 +1191,21 @@
           </select>
         </label>
       </div>
-      <table>
-        <thead><tr><th>Issue</th><th>Severity</th><th>Evidence</th><th>Source</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody id="reviewRows"></tbody>
-      </table>
+      <div class="review-workbench">
+        <div class="review-list-panel">
+          <table>
+            <thead><tr><th>Issue</th><th>Severity</th><th>Evidence</th><th>Source</th><th>Status</th><th>Inspect</th></tr></thead>
+            <tbody id="reviewRows"></tbody>
+          </table>
+        </div>
+        <aside class="review-detail-panel" id="reviewDetailPanel" aria-label="Selected review detail">
+          <h3>No review selected</h3>
+          <p class="muted">Select a review item to inspect source evidence and resolve it with a note.</p>
+        </aside>
+      </div>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="review records">
       <h2>Source Evidence</h2>
       <p>Raw photos, manual entries, and imported rows remain traceable evidence.</p>
       <table>
@@ -868,7 +1214,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="records">
       <h2>Colony Records</h2>
       <p>Current mouse-level candidate state from accepted source-backed note lines.</p>
       <table>
@@ -890,7 +1236,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="records">
       <h2>Cage View</h2>
       <p>Current mouse location is tracked as source-backed cage assignment events.</p>
       <div class="form-grid">
@@ -927,7 +1273,7 @@
       <p class="muted" id="moveCageMessage"></p>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="records">
       <h2>Breeding / Litter View</h2>
       <p>Mating and litter records are source-backed snapshots; durable parent history is written as mouse events.</p>
       <div class="form-grid">
@@ -1028,7 +1374,7 @@
       <p class="muted" id="weanMessage"></p>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="records">
       <h2>Genotyping Worklist</h2>
       <p>Manual MVP path for tail sample collection and result entry.</p>
       <div class="metric-grid" id="genotypingDashboard"></div>
@@ -1096,7 +1442,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="records">
       <h2>Parsed Note Evidence</h2>
       <p>Line-level parsed evidence preserved before mouse state is written.</p>
       <table>
@@ -1117,7 +1463,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="records">
       <h2>Mouse Events</h2>
       <p>Durable mouse history, separate from the latest mouse card state.</p>
       <table>
@@ -1126,7 +1472,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="review">
       <h2>Canonical Candidate Drafts</h2>
       <p>Resolved comparison reviews create drafts first; applying a draft writes canonical mouse state with note-line traceability.</p>
       <table>
@@ -1135,7 +1481,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="review">
       <h2>Correction Log</h2>
       <p>Reviewed user corrections keep before and after values.</p>
       <table>
@@ -1144,7 +1490,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="records">
       <h2>Mouse Audit Trace</h2>
       <p>Source-backed trace for one mouse across note lines, reviews, corrections, events, and genotyping records.</p>
       <div class="form-grid">
@@ -1160,7 +1506,7 @@
       </table>
     </section>
 
-    <section class="full">
+    <section class="full" data-view="exports">
       <h2>Export Readiness</h2>
       <p id="exportPreview"></p>
       <p class="muted" id="exportFilenames"></p>
@@ -1181,12 +1527,13 @@
         <tbody id="exportLogRows"></tbody>
       </table>
     </section>
-  </main>
+      </main>
+    </div>
+  </div>
 
   <script>
     let latestPhotos = [];
     let selectedTranscriptionPhotoId = "";
-
     async function api(path, options) {
       const response = await fetch(path, options);
       if (!response.ok) {
@@ -1228,7 +1575,7 @@
     }
 
     function compactStrainKey(value) {
-      return text(value).toLowerCase().replace(/[^a-z0-9가-힣]/g, "");
+      return text(value).toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
     }
 
     function assignedScopeLookup(assignedStrains) {
@@ -1349,10 +1696,85 @@
     }
 
     let activeSearchQuery = "";
+    let activeView = "photo";
     let selectedAuditMouseId = "";
+    let selectedReviewId = "";
     let reviewStatusFilter = "open";
     let reviewSeverityFilter = "all";
     let reviewEvidenceFilter = "all";
+
+    const viewLabels = {
+      photo: {
+        title: "Photo Review Workbench",
+        subtitle: "Review raw cage-card photos before any canonical state change."
+      },
+      review: {
+        title: "Review Queue",
+        subtitle: "Resolve blockers with source evidence, before/after values, and required notes."
+      },
+      comparison: {
+        title: "Evidence Comparison",
+        subtitle: "Compare manual photo transcriptions against predecessor Excel views without writing canonical state."
+      },
+      exports: {
+        title: "Export Readiness",
+        subtitle: "Preview output files and keep final exports blocked while open reviews remain."
+      },
+      records: {
+        title: "Colony Records",
+        subtitle: "Inspect current source-backed records, cages, matings, litters, genotyping, and events."
+      },
+      dashboard: {
+        title: "Colony Dashboard",
+        subtitle: "Operational summaries remain traceable views over accepted state and review pressure."
+      },
+      "mouse-detail": {
+        title: "Mouse Detail",
+        subtitle: "Source-aware detail for identity, genotype, pedigree, cage, and event history."
+      },
+      "strain-detail": {
+        title: "Strain Detail",
+        subtitle: "Relationship view for configured strain knowledge and source-backed colony links."
+      },
+      settings: {
+        title: "Settings And Masters",
+        subtitle: "Maintain assigned strains, registry entries, and import scope without hard-coded rules."
+      }
+    };
+
+    function inferSectionView(section) {
+      const heading = section.querySelector("h2")?.textContent.trim() || "";
+      if (section.dataset.view) return section.dataset.view;
+      if (heading === "Colony Dashboard") return "dashboard";
+      if (heading === "Mouse Detail") return "mouse-detail";
+      if (heading === "Strain Detail") return "strain-detail";
+      if (["Upload Source Photo", "Fixture Parse Results", "Manual Photo Transcription", "Photo Inbox"].includes(heading)) return "photo";
+      if (["Review Queue", "Source Evidence", "Correction Log"].includes(heading)) return "review";
+      if (["Legacy Workbook Import", "Evidence Reconciliation", "Evidence Comparison", "Canonical Candidate Drafts"].includes(heading)) return "comparison";
+      if (["Search & CSV Export", "Export Readiness"].includes(heading)) return "exports";
+      if (["My Assigned Strains", "Strain Registry", "Distribution Assignment Import"].includes(heading)) return "settings";
+      return "records";
+    }
+
+    function configureSectionViews() {
+      document.querySelectorAll("#appContent > section").forEach((section) => {
+        section.dataset.view = inferSectionView(section);
+      });
+    }
+
+    function setActiveView(view) {
+      activeView = viewLabels[view] ? view : "photo";
+      document.getElementById("appContent").dataset.activeView = activeView;
+      document.querySelectorAll("#appContent > section").forEach((section) => {
+        const sectionViews = (section.dataset.view || "").split(/\s+/);
+        section.classList.toggle("active-view", sectionViews.includes(activeView));
+      });
+      document.querySelectorAll(".nav-button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.viewTarget === activeView);
+      });
+      document.getElementById("viewTitle").textContent = viewLabels[activeView].title;
+      document.getElementById("viewSubtitle").textContent = viewLabels[activeView].subtitle;
+    }
 
     function searchResultRows(results) {
       if (!results || !results.query) return row(["No search yet", "", "", ""]);
@@ -1383,6 +1805,49 @@
           (reviewEvidenceFilter === "missing_evidence" && !hasEvidence);
         return statusMatch && severityMatch && evidenceMatch;
       });
+    }
+
+    function reviewResolutionControls(item) {
+      if (!item || item.status !== "open") return escapeHtml(item?.resolution_note || "Resolved");
+      return `
+        <div class="review-actions">
+          <select class="review-legacy-decision" aria-label="Legacy decision">
+            <option value="resolve">Resolve only</option>
+            <option value="accept_legacy_candidate">Accept legacy as reviewed context</option>
+            <option value="reject_legacy_candidate">Reject legacy candidate</option>
+            <option value="map_to_canonical_candidate">Map candidate draft</option>
+          </select>
+          <input class="review-resolved-value" type="text" value="${escapeHtml(item.suggested_value || "")}" aria-label="Resolved value">
+          <input class="review-resolution-note" type="text" placeholder="Resolution note required" aria-label="Resolution note">
+          <button class="resolve-review" type="button"
+            data-review-id="${escapeHtml(item.review_id)}"
+            data-current-value="${escapeHtml(item.current_value || "")}">Resolve</button>
+        </div>
+      `;
+    }
+
+    function renderReviewDetail(item) {
+      const panel = document.getElementById("reviewDetailPanel");
+      if (!item) {
+        panel.innerHTML = `
+          <h3>No review selected</h3>
+          <p class="muted">Select a review item to inspect source evidence and resolve it with a note.</p>
+        `;
+        return;
+      }
+      panel.innerHTML = `
+        <h3>${escapeHtml(item.issue)}</h3>
+        <p class="muted">${escapeHtml(item.review_reason || "Review source evidence before accepting a value.")}</p>
+        <div class="detail-stack">
+          <div class="detail-row"><span>Status</span><strong>${escapeHtml(item.status)} / ${escapeHtml(item.severity)}</strong></div>
+          <div class="detail-row"><span>Source</span><strong>${escapeHtml(item.original_filename || item.source_name || item.photo_id || item.parse_id || "--")}</strong></div>
+          <div class="detail-row"><span>Evidence</span><strong>${escapeHtml(item.evidence_preview || "--")}</strong></div>
+          <div class="detail-row"><span>Current</span><strong>${escapeHtml(item.current_value || "--")}</strong></div>
+          <div class="detail-row"><span>Suggested</span><strong>${escapeHtml(item.suggested_value || "--")}</strong></div>
+          <div class="detail-row"><span>Note lines</span><strong>${escapeHtml(item.note_line_count ? `${item.note_line_count} note lines` : "No note lines")}</strong></div>
+        </div>
+        <div class="detail-stack">${reviewResolutionControls(item)}</div>
+      `;
     }
 
     async function renderAuditTrace(mice) {
@@ -1440,6 +1905,27 @@
       return Array.from(new Set(items.map((item) => String(item || "").trim()).filter(Boolean)));
     }
 
+    function renderShellStatus({ health, photoWorkbench, photos, reviews, mice, evidenceComparison, preview }) {
+      const openReviewCount = reviews.filter((item) => item.status === "open").length;
+      const pendingPhotoCount = photoWorkbench.pending_transcription_count || 0;
+      const comparisons = evidenceComparison.comparisons || [];
+      const comparisonReviewCount = comparisons.filter((item) => item.review_required || item.review_status === "open").length;
+      document.getElementById("navPhotoCount").textContent = String(pendingPhotoCount || photos.length);
+      document.getElementById("navReviewCount").textContent = String(openReviewCount);
+      document.getElementById("navComparisonCount").textContent = String(comparisonReviewCount);
+      document.getElementById("navExportCount").textContent = preview.ready ? "ready" : String(preview.blocked_review_items || 0);
+      document.getElementById("navMouseCount").textContent = String(mice.length);
+      document.getElementById("navDashboardCount").textContent = String(openReviewCount);
+      document.getElementById("heroPhotoCount").textContent = String(photos.length);
+      document.getElementById("heroPendingPhotos").textContent = String(pendingPhotoCount);
+      document.getElementById("heroOpenReviews").textContent = String(openReviewCount);
+      document.getElementById("topOpenReviews").textContent = `${openReviewCount} open reviews`;
+      document.getElementById("topExportStatus").textContent = preview.ready ? "Export ready" : `${preview.blocked_review_items || 0} export blockers`;
+      document.getElementById("topExportStatus").classList.toggle("warn", !preview.ready);
+      const aiStatus = health.ai_draft || {};
+      document.getElementById("health").textContent = aiStatus.available ? "local + AI draft ready" : "local-only";
+    }
+
     function firstMouse(mice) {
       return mice[0] || null;
     }
@@ -1494,6 +1980,9 @@
       const position = index >= 0 ? `${index + 1}/${queue.length}` : "not pending";
       document.getElementById("photoQueueSummary").textContent =
         `${position} - ${selected?.original_filename || photoId} - ${selected?.next_action || "ready"}`;
+      document.querySelectorAll(".photo-worklist-card").forEach((button) => {
+        button.classList.toggle("active", button.dataset.photoId === photoId);
+      });
     }
 
     function fillTranscriptionDraft(draft) {
@@ -1748,7 +2237,11 @@
         api("/api/export-log")
       ]);
 
-      document.getElementById("health").textContent = health.storage;
+      renderShellStatus({ health, photoWorkbench, photos, reviews, mice, evidenceComparison, preview });
+      const aiStatus = health.ai_draft || {};
+      document.getElementById("aiDraftMessage").textContent = aiStatus.available
+        ? `AI draft ready with ${aiStatus.model}; approval is required for each selected photo.`
+        : "AI draft unavailable: set OPENAI_API_KEY to use draft transcription. Manual transcription remains available.";
       renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview });
       await renderAuditTrace(mice);
       const searchResults = activeSearchQuery
@@ -1825,6 +2318,13 @@
         });
       });
       latestPhotos = photoWorkbench.rows || [];
+      document.getElementById("workbenchPhotoCards").innerHTML = latestPhotos.slice(0, 8).map((photo) => `
+        <button class="photo-worklist-card select-photo-review ${photo.photo_id === selectedTranscriptionPhotoId ? "active" : ""}" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">
+          <strong>${escapeHtml(photo.original_filename)}</strong>
+          <span>${escapeHtml(photo.next_action || photo.status || "--")}</span>
+          <span>${escapeHtml(`${photo.note_line_count || 0} note lines / ${photo.open_review_count || 0} open review(s)`)}</span>
+        </button>
+      `).join("") || '<p class="muted">Upload photos to start review.</p>';
       document.getElementById("photoRows").innerHTML = latestPhotos.map((photo) => `
         <tr>
           <td>${escapeHtml(photo.photo_id)}</td>
@@ -1849,36 +2349,36 @@
       document.querySelectorAll(".select-photo-review").forEach((button) => {
         button.addEventListener("click", () => setTranscriptionPhoto(button.dataset.photoId));
       });
+      document.querySelectorAll(".photo-worklist-card").forEach((button) => {
+        button.addEventListener("click", () => setTranscriptionPhoto(button.dataset.photoId));
+      });
       document.getElementById("reviewStatusFilter").value = reviewStatusFilter;
       document.getElementById("reviewSeverityFilter").value = reviewSeverityFilter;
       document.getElementById("reviewEvidenceFilter").value = reviewEvidenceFilter;
       const visibleReviews = filteredReviews(reviews);
+      if (!selectedReviewId || !visibleReviews.some((item) => item.review_id === selectedReviewId)) {
+        selectedReviewId = visibleReviews[0]?.review_id || "";
+      }
+      const selectedReview = visibleReviews.find((item) => item.review_id === selectedReviewId);
       document.getElementById("reviewRows").innerHTML = visibleReviews.map((item) => `
-        <tr>
+        <tr class="${item.review_id === selectedReviewId ? "selected-row" : ""}">
           <td><strong>${escapeHtml(item.issue)}</strong><br><span class="muted">${escapeHtml(item.review_reason || item.parse_id || "--")}</span></td>
           <td>${escapeHtml(item.severity)}</td>
           <td>${escapeHtml(item.evidence_preview || item.suggested_value || "--")}<br><span class="muted">${escapeHtml(item.note_line_count ? `${item.note_line_count} note lines` : "No note lines")}</span></td>
           <td>${escapeHtml(item.original_filename || item.source_name || item.photo_id || "--")}</td>
           <td>${escapeHtml(item.status)}</td>
-          <td>${
-            item.status === "open"
-              ? `<div class="review-actions">
-                   <select class="review-legacy-decision" aria-label="Legacy decision">
-                     <option value="resolve">Resolve only</option>
-                     <option value="accept_legacy_candidate">Accept legacy</option>
-                     <option value="reject_legacy_candidate">Reject legacy</option>
-                     <option value="map_to_canonical_candidate">Map candidate</option>
-                   </select>
-                   <input class="review-resolved-value" type="text" value="${escapeHtml(item.suggested_value || "")}" aria-label="Resolved value">
-                   <input class="review-resolution-note" type="text" placeholder="Resolution note" aria-label="Resolution note">
-                   <button class="resolve-review" type="button"
-                     data-review-id="${escapeHtml(item.review_id)}"
-                     data-current-value="${escapeHtml(item.current_value || "")}">Resolve</button>
-                 </div>`
-              : escapeHtml(item.resolution_note || "Resolved")
-          }</td>
+          <td><button class="inspect-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Inspect</button></td>
         </tr>
       `).join("") || row(["No review items", "", "", "", "", ""]);
+      renderReviewDetail(selectedReview);
+      document.querySelectorAll(".inspect-review").forEach((button) => {
+        button.addEventListener("click", () => {
+          selectedReviewId = button.dataset.reviewId;
+          renderReviewDetail(visibleReviews.find((item) => item.review_id === selectedReviewId));
+          document.querySelectorAll("#reviewRows tr").forEach((rowElement) => rowElement.classList.remove("selected-row"));
+          button.closest("tr").classList.add("selected-row");
+        });
+      });
       document.querySelectorAll(".resolve-review").forEach((button) => {
         button.addEventListener("click", async () => {
           const container = button.closest(".review-actions");
@@ -2672,6 +3172,24 @@
       selectedAuditMouseId = event.target.value;
       await refresh();
     });
+
+    document.querySelectorAll(".nav-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        setActiveView(button.dataset.viewTarget);
+      });
+    });
+
+    document.getElementById("topbarSearch").addEventListener("keydown", async (event) => {
+      if (event.key === "Enter") {
+        activeSearchQuery = event.target.value.trim();
+        document.getElementById("searchQuery").value = activeSearchQuery;
+        setActiveView("records");
+        await refresh();
+      }
+    });
+
+    configureSectionViews();
+    setActiveView("photo");
 
     refresh().catch((error) => {
       document.getElementById("health").textContent = "error";

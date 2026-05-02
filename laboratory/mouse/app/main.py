@@ -214,8 +214,17 @@ def index() -> FileResponse:
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "storage": "local-only"}
+def health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "storage": "local-only",
+        "ai_draft": {
+            "available": bool(os.environ.get("OPENAI_API_KEY")),
+            "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-4.1-mini"),
+            "approval_required": True,
+            "payload_minimization": "selected photo plus active assigned strain names only",
+        },
+    }
 
 
 @app.get("/api/photos")
