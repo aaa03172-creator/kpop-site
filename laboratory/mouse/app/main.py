@@ -12,6 +12,7 @@ import base64
 import os
 import math
 import sqlite3
+import threading
 from datetime import date
 from urllib.parse import quote
 from collections.abc import AsyncIterator
@@ -36,6 +37,7 @@ STATIC_DIR = ROOT / "static"
 FIXTURE_PATH = ROOT / "fixtures" / "sample_parse_results.json"
 ROI_PRESET_PATH = ROOT / "config" / "roi_presets.json"
 RUNTIME_OPENAI_API_KEY = ""
+ROI_CACHE_LOCK = threading.RLock()
 
 
 @asynccontextmanager
@@ -274,6 +276,90 @@ def review_priority(severity: str = "", issue: str = "", review_reason: str = ""
     if severity_key == "low":
         return "low"
     return "medium"
+
+
+def review_attention_level(item: dict[str, Any], parse_payload: dict[str, Any] | None = None) -> dict[str, str]:
+    payload = parse_payload or {}
+    status = str(item.get("status") or "").strip().lower()
+    issue = str(item.get("issue") or "").strip()
+    issue_key = issue.lower()
+    source_name = str(item.get("source_name") or "").strip()
+    source_key = source_name.lower()
+    priority = str(item.get("priority") or "").strip().lower()
+    severity = str(item.get("severity") or "").strip().lower()
+    uncertain_fields = [
+        normalize_uncertain_field_name(field)
+        for field in (payload.get("uncertainFields") if isinstance(payload.get("uncertainFields"), list) else [])
+        if str(field).strip()
+    ]
+    confidence_source = payload["confidence"] if "confidence" in payload else item.get("confidence", 0)
+    confidence = bounded_float(confidence_source)
+    raw_strain = str(payload.get("rawStrain") or "").strip()
+    sex_raw = str(payload.get("sexRaw") or "").strip()
+    photo_id = str(item.get("photo_id") or "")
+
+    if status and status != "open":
+        return {
+            "attention_level": "trace_only",
+            "attention_reason": "Resolved or non-open review retained for traceability.",
+        }
+    if source_key.startswith("fixtures/"):
+        return {
+            "attention_level": "hidden_default",
+            "attention_reason": "Fixture/sample review is hidden from the default user work queue.",
+        }
+    if priority == "high" or severity == "high" or "duplicate active" in issue_key:
+        return {
+            "attention_level": "must_review",
+            "attention_reason": "High-priority biological or canonical-state risk.",
+        }
+    if issue_key == "unlabeled numeric note needs review":
+        return {
+            "attention_level": "quick_check",
+            "attention_reason": "Numeric note labels should be reviewed in a grouped photo-level pass.",
+        }
+    if issue_key == "ear label needs review":
+        return {
+            "attention_level": "quick_check",
+            "attention_reason": "Ear label normalization needs a quick source-photo check.",
+        }
+    if issue_key == "ai-extracted photo transcription needs review" and photo_id:
+        if confidence <= 55:
+            return {
+                "attention_level": "must_review",
+                "attention_reason": "Low-confidence OCR draft needs focused review.",
+            }
+        if not raw_strain or not sex_raw:
+            return {
+                "attention_level": "must_review",
+                "attention_reason": "Core cage-card field is missing.",
+            }
+        if "matched_strain" in uncertain_fields and confidence < 60:
+            return {
+                "attention_level": "must_review",
+                "attention_reason": "Assigned strain match is uncertain on a lower-confidence card.",
+            }
+        if "mouse_count" in uncertain_fields and ("dob_raw" in uncertain_fields or confidence < 60):
+            return {
+                "attention_level": "must_review",
+                "attention_reason": "Count and date evidence need a focused source-photo check.",
+            }
+        if (
+            confidence < 65
+            or any(field in uncertain_fields for field in ["raw_strain", "matched_strain", "sex_raw", "mouse_count", "notes"])
+        ):
+            return {
+                "attention_level": "quick_check",
+                "attention_reason": "Main evidence is present, but one or more fields need a quick check.",
+            }
+        return {
+            "attention_level": "trace_only",
+            "attention_reason": "Low-risk OCR uncertainty retained as trace evidence.",
+        }
+    return {
+        "attention_level": "quick_check",
+        "attention_reason": "Open review retained outside the focused default queue.",
+    }
 
 
 def ai_draft_status() -> dict[str, Any]:
@@ -733,7 +819,7 @@ def save_jpeg_atomic(image: Image.Image, path: Path, *, quality: int = 92) -> No
             temp_path.unlink()
 
 
-def generate_roi_preview(photo_id: str, template_type: str | None = None) -> dict[str, Any]:
+def _generate_roi_preview(photo_id: str, template_type: str | None = None) -> dict[str, Any]:
     presets = load_roi_presets()
     photo, image_path, media_type = photo_image_path(photo_id)
     if not media_type.startswith("image/"):
@@ -799,6 +885,11 @@ def generate_roi_preview(photo_id: str, template_type: str | None = None) -> dic
     }
 
 
+def generate_roi_preview(photo_id: str, template_type: str | None = None) -> dict[str, Any]:
+    with ROI_CACHE_LOCK:
+        return _generate_roi_preview(photo_id, template_type)
+
+
 @app.get("/api/photos/{photo_id}/roi-preview")
 def get_photo_roi_preview(photo_id: str, template_type: str | None = None) -> dict[str, Any]:
     return generate_roi_preview(photo_id, template_type)
@@ -806,28 +897,30 @@ def get_photo_roi_preview(photo_id: str, template_type: str | None = None) -> di
 
 @app.get("/api/photos/{photo_id}/roi-card/image")
 def get_photo_roi_card_image(photo_id: str, template_type: str | None = None) -> Response:
-    preview = generate_roi_preview(photo_id, template_type)
-    roi_root = safe_roi_root(photo_id, preview["template_type"])
-    return Response(
-        (roi_root / "card.jpg").read_bytes(),
-        media_type="image/jpeg",
-        headers={"Content-Disposition": f'inline; filename="{photo_id}-card.jpg"'},
-    )
+    with ROI_CACHE_LOCK:
+        preview = generate_roi_preview(photo_id, template_type)
+        roi_root = safe_roi_root(photo_id, preview["template_type"])
+        return Response(
+            (roi_root / "card.jpg").read_bytes(),
+            media_type="image/jpeg",
+            headers={"Content-Disposition": f'inline; filename="{photo_id}-card.jpg"'},
+        )
 
 
 @app.get("/api/photos/{photo_id}/roi/{roi_label}/image")
 def get_photo_roi_image(photo_id: str, roi_label: str, template_type: str | None = None) -> Response:
-    preview = generate_roi_preview(photo_id, template_type)
-    labels = {crop["label"] for crop in preview["crops"]}
-    if roi_label not in labels:
-        raise HTTPException(status_code=404, detail="ROI label not found for the selected template.")
-    roi_root = safe_roi_root(photo_id, preview["template_type"])
-    crop_name = re.sub(r"[^A-Za-z0-9_.-]", "_", roi_label)
-    return Response(
-        (roi_root / f"{crop_name}.jpg").read_bytes(),
-        media_type="image/jpeg",
-        headers={"Content-Disposition": f'inline; filename="{photo_id}-{crop_name}.jpg"'},
-    )
+    with ROI_CACHE_LOCK:
+        preview = generate_roi_preview(photo_id, template_type)
+        labels = {crop["label"] for crop in preview["crops"]}
+        if roi_label not in labels:
+            raise HTTPException(status_code=404, detail="ROI label not found for the selected template.")
+        roi_root = safe_roi_root(photo_id, preview["template_type"])
+        crop_name = re.sub(r"[^A-Za-z0-9_.-]", "_", roi_label)
+        return Response(
+            (roi_root / f"{crop_name}.jpg").read_bytes(),
+            media_type="image/jpeg",
+            headers={"Content-Disposition": f'inline; filename="{photo_id}-{crop_name}.jpg"'},
+        )
 
 
 def image_input_from_path(image_path: Path, *, detail: str) -> dict[str, Any]:
@@ -932,6 +1025,8 @@ def bounded_float(value: Any, *, minimum: float = 0, maximum: float = 100) -> fl
         number = float(value)
     except (TypeError, ValueError):
         number = minimum
+    if not math.isfinite(number):
+        number = minimum
     if 0 < number <= 1 and maximum >= 100:
         number *= 100
     return max(minimum, min(maximum, number))
@@ -976,7 +1071,35 @@ def conservative_normalized_date(raw_value: Any, normalized_value: Any, uncertai
         return ""
     if not valid_iso_date_or_range(normalized):
         return ""
+    if not normalized_dates_match_visible_raw_dates(raw, normalized):
+        return ""
     return normalized
+
+
+def normalized_dates_match_visible_raw_dates(raw: str, normalized: str) -> bool:
+    visible_dates = {
+        parsed.isoformat()
+        for parsed in visible_raw_dates(raw)
+    }
+    if not visible_dates:
+        return False
+    return all(part in visible_dates for part in normalized.split("/"))
+
+
+def visible_raw_dates(raw: str) -> list[date]:
+    parsed_dates: list[date] = []
+    for match in re.finditer(r"\d{2,4}\D+\d{1,2}\D+\d{1,2}", raw):
+        numbers = re.findall(r"\d+", match.group(0))
+        if len(numbers) != 3:
+            continue
+        year_text, month_text, day_text = numbers
+        if len(year_text) != 4:
+            continue
+        try:
+            parsed_dates.append(date(int(year_text), int(month_text), int(day_text)))
+        except ValueError:
+            continue
+    return parsed_dates
 
 
 def valid_iso_date_or_range(value: str) -> bool:
@@ -1076,11 +1199,14 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
     card_type = str(draft.get("card_type") or "unknown")
     if card_type not in {"Separated", "Mating", "unknown"}:
         card_type = "unknown"
-    uncertain_fields = [
-        str(item).strip().lower()
-        for item in (draft.get("uncertain_fields") if isinstance(draft.get("uncertain_fields"), list) else [])
-        if str(item).strip()
-    ]
+    uncertain_fields: list[str] = []
+    seen_uncertain_fields: set[str] = set()
+    for item in draft.get("uncertain_fields") if isinstance(draft.get("uncertain_fields"), list) else []:
+        field_name = normalize_uncertain_field_name(item)
+        if not field_name or field_name in seen_uncertain_fields:
+            continue
+        seen_uncertain_fields.add(field_name)
+        uncertain_fields.append(field_name)
     return {
         "card_type": card_type,
         "raw_strain": str(draft.get("raw_strain") or ""),
@@ -1113,6 +1239,22 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
         "uncertain_fields": uncertain_fields,
         "reviewer_note": str(draft.get("reviewer_note") or ""),
     }
+
+
+def normalize_uncertain_field_name(value: Any) -> str:
+    compact = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+    aliases = {
+        "dobnormalized": "dob_normalized",
+        "dateofbirthnormalized": "dob_normalized",
+        "matingdatenormalized": "mating_date_normalized",
+        "rawstrain": "raw_strain",
+        "matchedstrain": "matched_strain",
+        "sexraw": "sex_raw",
+        "mousecount": "mouse_count",
+    }
+    if compact in aliases:
+        return aliases[compact]
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
 
 
 def request_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -> dict[str, Any]:
@@ -4426,7 +4568,8 @@ def list_review_items() -> list[dict[str, Any]]:
                    review.current_value, review.suggested_value, review.review_reason,
                    review.assigned_role, review.assigned_to, review.priority,
                    review.status, review.created_at, review.resolved_at, review.resolution_note,
-                   parse.source_name, parse.photo_id, photo.original_filename,
+                   parse.source_name, parse.photo_id, parse.raw_payload AS parse_raw_payload,
+                   parse.confidence AS parse_confidence, photo.original_filename,
                    review_note.note_item_id, review_note.raw_line_text AS review_note_raw_line,
                    review_note.parsed_type AS review_note_parsed_type,
                    review_note.interpreted_status AS review_note_interpreted_status,
@@ -4481,8 +4624,12 @@ def list_review_items() -> list[dict[str, Any]]:
             payload.get("issue", ""),
             payload.get("review_reason", ""),
         )
+        payload["confidence"] = payload.get("parse_confidence")
         payload["image_url"] = f"/api/photos/{quote(payload['photo_id'])}/image" if payload.get("photo_id") else ""
         payload["review_note_summary"] = json_object(payload.pop("review_note_summary_json", "{}"))
+        parse_payload = json_object(payload.pop("parse_raw_payload", "{}"))
+        payload.update(review_attention_level(payload, parse_payload))
+        payload.pop("parse_confidence", None)
         result.append(payload)
     return result
 
@@ -6344,7 +6491,7 @@ def log_workbook_export(
     status: str,
 ) -> None:
     note = (
-        "Blocked final XLSX export because open review items remain."
+        "Blocked final XLSX export because Focus Review blockers remain."
         if status == "blocked"
         else "XLSX generated from workbook preview."
     )
@@ -6658,14 +6805,40 @@ def order_by_ids(rows: list[Any], id_column: str, ordered_ids: list[str]) -> lis
     return sorted([dict(row) for row in rows], key=lambda row: order.get(str(row[id_column]), len(order)))
 
 
+def open_review_attention_counts(conn: Any) -> dict[str, int]:
+    rows = conn.execute(
+        """
+        SELECT review.review_id, review.parse_id, review.severity, review.issue,
+               review.current_value, review.suggested_value, review.review_reason,
+               review.assigned_role, review.assigned_to, review.priority,
+               review.status, review.created_at,
+               parse.source_name, parse.photo_id, parse.raw_payload AS parse_raw_payload,
+               parse.confidence AS parse_confidence
+        FROM review_queue review
+        LEFT JOIN parse_result parse ON parse.parse_id = review.parse_id
+        WHERE review.status = 'open'
+        """
+    ).fetchall()
+    counts = {"must_review": 0, "quick_check": 0, "trace_only": 0, "hidden_default": 0}
+    for row in rows:
+        payload = dict(row)
+        payload["confidence"] = payload.get("parse_confidence")
+        parse_payload = json_object(payload.pop("parse_raw_payload", "{}"))
+        payload.pop("parse_confidence", None)
+        attention = review_attention_level(payload, parse_payload)["attention_level"]
+        counts[attention] = counts.get(attention, 0) + 1
+    return counts
+
+
 def open_review_blockers(conn: Any, limit: int = 10) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT review.review_id, review.parse_id, review.severity, review.issue,
-               review.suggested_value, review.review_reason,
+               review.current_value, review.suggested_value, review.review_reason,
                review.assigned_role, review.assigned_to, review.priority,
-               review.created_at,
-               parse.source_name, parse.photo_id, photo.original_filename,
+               review.status, review.created_at,
+               parse.source_name, parse.photo_id, parse.raw_payload AS parse_raw_payload,
+               parse.confidence AS parse_confidence, photo.original_filename,
                (
                    SELECT COUNT(*)
                    FROM card_note_item_log note
@@ -6681,11 +6854,25 @@ def open_review_blockers(conn: Any, limit: int = 10) -> list[dict[str, Any]]:
         LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
         WHERE review.status = 'open'
         ORDER BY review.severity DESC, review.created_at DESC
-        LIMIT ?
-        """,
-        (limit,),
+        """
     ).fetchall()
-    return [dict(row) for row in rows]
+    blockers: list[dict[str, Any]] = []
+    for row in rows:
+        payload = dict(row)
+        payload["confidence"] = payload.get("parse_confidence")
+        parse_payload = json_object(payload.pop("parse_raw_payload", "{}"))
+        payload.pop("parse_confidence", None)
+        attention = review_attention_level(payload, parse_payload)
+        payload.update(attention)
+        if payload["attention_level"] == "must_review":
+            blockers.append(payload)
+        if len(blockers) >= limit:
+            break
+    return blockers
+
+
+def export_review_blocker_count(conn: Any) -> int:
+    return open_review_attention_counts(conn).get("must_review", 0)
 
 
 def genotype_export_blockers(conn: Any, limit: int = 25) -> list[dict[str, Any]]:
@@ -7241,6 +7428,8 @@ def evidence_reconciliation() -> dict[str, Any]:
         open_reviews = conn.execute(
             "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
         ).fetchone()["count"]
+        review_attention_counts = open_review_attention_counts(conn)
+        export_blockers = review_attention_counts.get("must_review", 0)
 
     total_photos = int(photo_summary["total_photos"] or 0)
     photo_review_candidates = int(photo_review_summary["photo_review_candidates"] or 0)
@@ -7264,6 +7453,8 @@ def evidence_reconciliation() -> dict[str, Any]:
         "accepted_mice": accepted_mice,
         "mice_with_evidence": mice_with_evidence,
         "open_reviews": int(open_reviews or 0),
+        "export_review_blockers": export_blockers,
+        "open_review_attention_counts": review_attention_counts,
         "latest_photo_uploaded_at": photo_summary["latest_photo_uploaded_at"] or "",
         "latest_legacy_imported_at": legacy_summary["latest_legacy_imported_at"] or "",
         "ready_for_comparison": total_photos > 0 and legacy_rows > 0,
@@ -7285,14 +7476,14 @@ def evidence_reconciliation() -> dict[str, Any]:
             },
             {
                 "check": "Canonical acceptance",
-                "status": "blocked" if open_reviews else "ready",
-                "detail": f"{accepted_mice} accepted mouse row(s), {mice_with_evidence} with source evidence",
+                "status": "blocked" if export_blockers else "ready",
+                "detail": f"{accepted_mice} accepted mouse row(s), {mice_with_evidence} with source evidence, {export_blockers} focus blocker(s)",
             },
         ],
         "next_action": (
-            "Review latest photo cards and resolve blockers before treating Excel differences as accepted state."
-            if open_reviews
-            else "Comparison view is clear of open review blockers."
+            "Review latest photo cards and resolve Focus Review blockers before final acceptance/export."
+            if export_blockers
+            else "Comparison view is clear of Focus Review export blockers."
         ),
     }
 
@@ -7443,14 +7634,12 @@ def export_mice_csv(query: str = "", require_ready: bool = False) -> Response:
             payload = dict(row)
             writer.writerow({field: payload.get(field, "") for field in fieldnames})
             row_count += 1
-        blocked_review_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
-        ).fetchone()["count"]
+        blocked_review_count = export_review_blocker_count(conn)
         suffix = "_filtered" if query.strip() else ""
         filename = f"mouse_records{suffix}.csv"
         export_status = "blocked" if require_ready and blocked_review_count else "generated"
         note = (
-            "Blocked final CSV export because open review items remain."
+            "Blocked final CSV export because Focus Review blockers remain."
             if export_status == "blocked"
             else "Generated from local mouse records CSV endpoint."
         )
@@ -7486,7 +7675,7 @@ def export_mice_csv(query: str = "", require_ready: bool = False) -> Response:
         raise HTTPException(
             status_code=409,
             detail={
-                "message": "Resolve open review items before final export.",
+                "message": "Resolve Focus Review blockers before final export.",
                 **blocked_error,
             },
         )
@@ -7544,9 +7733,7 @@ def export_genotyping_worklist_csv(query: str = "") -> Response:
                 }
             )
             row_count += 1
-        blocked_review_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
-        ).fetchone()["count"]
+        blocked_review_count = export_review_blocker_count(conn)
         suffix = "_filtered" if query.strip() else ""
         filename = f"genotyping_worklist{suffix}.csv"
         conn.execute(
@@ -7621,7 +7808,7 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
         raise HTTPException(
             status_code=409,
             detail={
-                "message": "Resolve open review items before final separation workbook export.",
+                "message": "Resolve Focus Review blockers before final separation workbook export.",
                 "blocked_review_count": blocked_count,
                 "review_blockers": preview["review_blockers"],
                 "filename": filename,
@@ -7673,7 +7860,7 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
         raise HTTPException(
             status_code=409,
             detail={
-                "message": "Resolve open review items before final animal sheet workbook export.",
+                "message": "Resolve Focus Review blockers before final animal sheet workbook export.",
                 "blocked_review_count": blocked_count,
                 "review_blockers": preview["review_blockers"],
                 "filename": filename,
@@ -7743,6 +7930,8 @@ def export_preview() -> dict[str, Any]:
         open_reviews = conn.execute(
             "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
         ).fetchone()["count"]
+        review_attention_counts = open_review_attention_counts(conn)
+        blocked_reviews = review_attention_counts.get("must_review", 0)
         genotype_blocker_rows = genotype_export_blockers(conn)
         genotype_blocker_count = len(genotype_blocker_rows)
         parsed = conn.execute("SELECT COUNT(*) AS count FROM parse_result").fetchone()["count"]
@@ -7979,11 +8168,12 @@ def export_preview() -> dict[str, Any]:
         "animal_sheet_columns": ["Cage No.", "Strain", "Sex", "I.D", "genotype", "DOB", "Mating date", "Pubs", "Status", "Source"],
         "photos": photos,
         "parsed_results": parsed,
-        "blocked_review_items": open_reviews,
+        "blocked_review_items": blocked_reviews,
         "open_review_items": open_reviews,
+        "open_review_attention_counts": review_attention_counts,
         "genotype_blocker_items": genotype_blocker_count,
         "experiment_ready": genotype_blocker_count == 0 and bool(rows),
-        "ready": open_reviews == 0 and bool(rows),
+        "ready": blocked_reviews == 0 and bool(rows),
         "preview_rows": rows,
         "separation_rows": separation_rows,
         "animal_sheet_rows": animal_rows,

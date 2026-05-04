@@ -448,7 +448,7 @@
     }
     .review-actions {
       display: grid;
-      grid-template-columns: minmax(130px, 0.8fr) minmax(120px, 1fr) minmax(120px, 1fr) auto;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
       gap: 6px;
       align-items: center;
       min-width: 560px;
@@ -456,6 +456,19 @@
     .review-actions input[type="text"],
     .review-actions select {
       margin: 0;
+    }
+    .review-queue-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .review-card-actions {
+      display: grid;
+      gap: 8px;
+      justify-items: end;
     }
     .review-workbench {
       display: grid;
@@ -559,6 +572,10 @@
       word-break: break-word;
     }
     .review-card .inspect-review {
+      white-space: nowrap;
+    }
+    .quick-resolve-review,
+    .prepare-correction-review {
       white-space: nowrap;
     }
     .comparison-list-panel td,
@@ -2476,7 +2493,10 @@
         <label>
           Status
           <select id="reviewStatusFilter">
-            <option value="open">Open export blockers</option>
+            <option value="focus">Focus Review</option>
+            <option value="quick">Quick Check</option>
+            <option value="trace">Trace Only</option>
+            <option value="open">All Open Reviews</option>
             <option value="all">All reviews</option>
             <option value="resolved">Resolved</option>
           </select>
@@ -2525,6 +2545,7 @@
       </div>
       <div class="review-workbench">
         <div class="review-list-panel">
+          <div class="review-queue-summary" id="reviewQueueSummary"></div>
           <div class="review-card-list" id="reviewRows" aria-label="Review items"></div>
         </div>
         <aside class="review-detail-panel" id="reviewDetailPanel" aria-label="Selected review detail">
@@ -2937,7 +2958,7 @@
           <article class="export-action-panel">
             <div>
               <h3>Final export actions</h3>
-              <p id="exportActionSummary">Resolve open review blockers before generating final lab files.</p>
+              <p id="exportActionSummary">Resolve Focus Review blockers before generating final lab files.</p>
             </div>
             <div class="export-action-buttons">
               <button id="exportReadyMouseCsvButton" type="button">Download Ready CSV</button>
@@ -2953,7 +2974,7 @@
             <div class="export-file-list" id="exportExpectedFiles"></div>
           </article>
           <article class="export-blocker-panel">
-            <h3>Open review blockers</h3>
+            <h3>Focus Review blockers</h3>
             <p class="muted" id="exportBlockerSummary">Review items that can change exported mouse or workbook values stay blocking.</p>
             <div class="export-blocker-list" id="exportBlockerList"></div>
           </article>
@@ -3236,7 +3257,7 @@
     let selectedAuditMouseId = "";
     let selectedReviewId = "";
     let selectedComparisonKey = "";
-    let reviewStatusFilter = "open";
+    let reviewStatusFilter = "focus";
     let reviewSeverityFilter = "all";
     let reviewEvidenceFilter = "all";
     let reviewRoleFilter = "all";
@@ -3256,7 +3277,7 @@
       },
       exports: {
         title: "Export Readiness",
-        subtitle: "Preview output files and keep final exports blocked while open reviews remain."
+        subtitle: "Preview output files and keep final exports blocked while Focus Review items remain."
       },
       records: {
         title: "Colony Records",
@@ -3334,7 +3355,14 @@
 
     function filteredReviews(reviews) {
       return reviews.filter((item) => {
-        const statusMatch = reviewStatusFilter === "all" || item.status === reviewStatusFilter;
+        const statusMatch =
+          reviewStatusFilter === "focus"
+            ? item.status === "open" && item.attention_level === "must_review"
+            : reviewStatusFilter === "quick"
+              ? item.status === "open" && item.attention_level === "quick_check"
+              : reviewStatusFilter === "trace"
+                ? item.status === "open" && item.attention_level === "trace_only"
+            : reviewStatusFilter === "all" || item.status === reviewStatusFilter;
         const severityMatch = reviewSeverityFilter === "all" || item.severity === reviewSeverityFilter;
         const roleMatch = reviewRoleFilter === "all" || item.assigned_role === reviewRoleFilter;
         const hasEvidence = Boolean(item.evidence_preview || Number(item.note_line_count || 0) > 0);
@@ -3344,6 +3372,26 @@
           (reviewEvidenceFilter === "missing_evidence" && !hasEvidence);
         return statusMatch && severityMatch && roleMatch && evidenceMatch;
       });
+    }
+
+    function reviewAttentionCounts(reviews) {
+      return reviews.reduce((counts, item) => {
+        if (item.status !== "open") return counts;
+        const level = item.attention_level || "quick_check";
+        counts[level] = (counts[level] || 0) + 1;
+        return counts;
+      }, {});
+    }
+
+    function reviewStatusLabel(value) {
+      return {
+        focus: "Focus Review",
+        quick: "Quick Check",
+        trace: "Trace Only",
+        open: "Open",
+        all: "All",
+        resolved: "Resolved"
+      }[value] || value;
     }
 
     function renderReviewVocabulary(vocabulary) {
@@ -3378,6 +3426,8 @@
 
     function reviewResolutionControls(item) {
       if (!item || item.status !== "open") return escapeHtml(item?.resolution_note || "Resolved");
+      const quickLabel = item.attention_level === "must_review" ? "Accept after check" : "Looks OK";
+      const allowQuickResolve = item.issue !== "Unlabeled numeric note needs review";
       const noteLabelControls = item.issue === "Unlabeled numeric note needs review"
         ? `
           <select class="note-label-decision" aria-label="Note label decision">
@@ -3402,12 +3452,83 @@
           <input class="review-resolved-value" type="text" value="${escapeHtml(item.suggested_value || "")}" aria-label="Resolved value">
           <input class="review-resolution-note" type="text" placeholder="Resolution note required" aria-label="Resolution note">
           ${noteLabelControls}
+          ${allowQuickResolve ? `<button class="quick-resolve-review" type="button"
+            data-review-id="${escapeHtml(item.review_id)}"
+            data-current-value="${escapeHtml(item.current_value || "")}"
+            data-note-item-id="${escapeHtml(item.note_item_id || "")}">${escapeHtml(quickLabel)}</button>` : ""}
+          <button class="prepare-correction-review" type="button">Correct</button>
           <button class="resolve-review" type="button"
             data-review-id="${escapeHtml(item.review_id)}"
             data-current-value="${escapeHtml(item.current_value || "")}"
-            data-note-item-id="${escapeHtml(item.note_item_id || "")}">Resolve</button>
+            data-note-item-id="${escapeHtml(item.note_item_id || "")}">Resolve with note</button>
         </div>
       `;
+    }
+
+    function reviewAutoResolutionNote(item) {
+      const level = item?.attention_level || "quick_check";
+      if (level === "must_review") {
+        return "Focus Review: source evidence checked in detail view; accepted suggested value.";
+      }
+      if (level === "trace_only") {
+        return "Trace-only review: raw evidence retained; accepted suggested value without canonical write.";
+      }
+      return "Quick Check: looks OK; accepted suggested value with raw evidence retained.";
+    }
+
+    function reviewResolutionPayload(button, item, allowAutoNote) {
+      const container = button.closest(".review-actions");
+      if (!container) {
+        return {
+          resolution_note: reviewAutoResolutionNote(item),
+          resolved_value: item?.suggested_value || "",
+          legacy_decision: "resolve",
+          correction_entity_type: "review_item",
+          correction_entity_id: button.dataset.reviewId,
+          correction_field_name: "reviewed_value",
+          correction_before_value: button.dataset.currentValue || item?.current_value || "",
+          correction_after_value: item?.suggested_value || "",
+          note_item_id: button.dataset.noteItemId || item?.note_item_id || "",
+          note_label_decision: "",
+          note_label_mouse_id: "",
+          note_label_count: null
+        };
+      }
+      const noteInput = container.querySelector(".review-resolution-note");
+      const resolvedValueInput = container.querySelector(".review-resolved-value");
+      const note = noteInput.value.trim() || (allowAutoNote ? reviewAutoResolutionNote(item) : "");
+      if (!note) {
+        noteInput.focus();
+        return null;
+      }
+      noteInput.value = note;
+      const resolvedValue = resolvedValueInput.value;
+      const noteLabelCountValue = container.querySelector(".note-label-count")?.value || "";
+      return {
+        resolution_note: note,
+        resolved_value: resolvedValue || "",
+        legacy_decision: container.querySelector(".review-legacy-decision").value,
+        correction_entity_type: "review_item",
+        correction_entity_id: button.dataset.reviewId,
+        correction_field_name: "reviewed_value",
+        correction_before_value: button.dataset.currentValue || "",
+        correction_after_value: resolvedValue || "",
+        note_item_id: button.dataset.noteItemId || "",
+        note_label_decision: container.querySelector(".note-label-decision")?.value || "",
+        note_label_mouse_id: container.querySelector(".note-label-mouse-id")?.value || "",
+        note_label_count: noteLabelCountValue ? Number(noteLabelCountValue) : null
+      };
+    }
+
+    async function submitReviewResolution(button, item, allowAutoNote) {
+      const payload = reviewResolutionPayload(button, item, allowAutoNote);
+      if (!payload) return;
+      await api(`/api/review-items/${button.dataset.reviewId}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      await refresh();
     }
 
     function reviewSourceEvidencePanel(item) {
@@ -3520,6 +3641,7 @@
         ${reviewSourceEvidencePanel(item)}
         <div class="detail-stack">
           <div class="detail-row"><span>Status</span><strong>${escapeHtml(item.status)} / ${escapeHtml(item.severity)}</strong></div>
+          <div class="detail-row"><span>Attention</span><strong>${escapeHtml([(item.attention_level || "review").replaceAll("_", " "), item.attention_reason].filter(Boolean).join(" / "))}</strong></div>
           <div class="detail-row"><span>Persona</span><strong>${escapeHtml([item.assigned_role || "Colony Reviewer", item.priority || "medium", item.assigned_to].filter(Boolean).join(" / "))}</strong></div>
           <div class="detail-row"><span>Source</span><strong>${escapeHtml(item.original_filename || item.source_name || item.photo_id || item.parse_id || "--")}</strong></div>
           <div class="detail-row"><span>Evidence</span><strong>${escapeHtml(item.evidence_preview || "--")}</strong></div>
@@ -4210,6 +4332,18 @@
     }
 
     function reviewVisual(item) {
+      if (item.attention_level === "must_review") {
+        return { label: "Focus review", tone: "warn" };
+      }
+      if (item.attention_level === "quick_check") {
+        return { label: "Quick check", tone: "source" };
+      }
+      if (item.attention_level === "trace_only") {
+        return { label: "Trace only", tone: "record" };
+      }
+      if (item.attention_level === "hidden_default") {
+        return { label: "Hidden default", tone: "record" };
+      }
       const combined = [
         item.issue,
         item.review_reason,
@@ -4319,10 +4453,10 @@
           evidenceCount === mice.length ? "Export views can cite mouse evidence." : "Link missing records to source photo, note line, or manual source record."
         ],
         [
-          "Open review blockers",
+          "Open review pressure",
           reviewCount,
           "review item",
-          reviewCount ? "Resolve before final Excel export." : "No review blockers for exports."
+          reviewCount ? "Focus Review items block export; quick/trace items stay visible." : "No open review pressure."
         ],
         [
           "Export preview rows",
@@ -4464,21 +4598,22 @@
       document.getElementById("exportPreview").textContent =
         preview.ready
           ? `Final exports can be generated from ${rowCount} source-backed mouse row(s).`
-          : `Resolve open review items before final exports; genotype readiness warnings remain visible for experiment planning.`;
+          : `Resolve Focus Review blockers before final exports; quick checks and trace-only items remain visible without blocking the file.`;
       document.getElementById("exportReadinessMetrics").innerHTML = [
         ["Photos", preview.photos || 0],
         ["Parsed", preview.parsed_results || 0],
         ["Preview rows", rowCount],
         ["Separation rows", preview.separation_row_count || 0],
         ["Animal rows", preview.animal_sheet_row_count || 0],
-        ["Open blockers", preview.blocked_review_items || 0],
+        ["Focus blockers", preview.blocked_review_items || 0],
+        ["Open reviews", preview.open_review_items || 0],
         ["Genotype blockers", preview.genotype_blocker_items || 0]
       ].map(([label, value]) => `
         <div class="readiness-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>
       `).join("");
       document.getElementById("exportActionSummary").textContent = preview.ready
         ? "Final CSV and workbook downloads are ready. Generated files will be recorded in the export log."
-        : `${preview.blocked_review_items || 0} review blocker(s) can still change exported values; genotype readiness warnings are shown separately.`;
+        : `${preview.blocked_review_items || 0} Focus Review blocker(s) can still change exported values; quick checks stay reviewable without blocking export.`;
       document.getElementById("exportFilenames").textContent =
         `Last export: ${preview.latest_generated_export_at || "none"}; ` +
         `Latest data change: ${preview.latest_data_change_at || "none"}; ` +
@@ -4494,8 +4629,8 @@
         </div>
       `).join("");
       document.getElementById("exportBlockerSummary").textContent = readinessItems.length
-        ? `${blockers.length} review blocker(s) and ${readinessWarnings.length} genotype readiness warning(s) are shown here.`
-        : "No open review blockers or genotype readiness warnings are shown.";
+        ? `${blockers.length} Focus Review blocker(s) and ${readinessWarnings.length} genotype readiness warning(s) are shown here.`
+        : "No Focus Review blockers or genotype readiness warnings are shown.";
       document.getElementById("exportBlockerList").innerHTML = readinessItems.slice(0, 5).map((item) => `
         <div class="export-blocker-row">
           <strong>${escapeHtml(item.issue || "Review blocker")}</strong>
@@ -4546,7 +4681,7 @@
           item.suggested_value || "--",
           item.review_reason || item.display_id || item.parse_id || "--"
         ])
-      ).join("") || row(["No open review blockers", "", "", ""]);
+      ).join("") || row(["No Focus Review blockers", "", "", ""]);
       document.getElementById("exportLogRows").innerHTML = exportLog.map((item) =>
         row([
           item.filename,
@@ -4730,6 +4865,14 @@
       document.getElementById("reviewEvidenceFilter").value = reviewEvidenceFilter;
       document.getElementById("reviewRoleFilter").value = reviewRoleFilter;
       const visibleReviews = filteredReviews(reviews);
+      const attentionCounts = reviewAttentionCounts(reviews);
+      document.getElementById("reviewQueueSummary").innerHTML = [
+        `${reviewStatusLabel(reviewStatusFilter)}: ${visibleReviews.length}`,
+        `Focus ${attentionCounts.must_review || 0}`,
+        `Quick ${attentionCounts.quick_check || 0}`,
+        `Trace ${attentionCounts.trace_only || 0}`,
+        `Hidden ${attentionCounts.hidden_default || 0}`
+      ].map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("");
       if (!selectedReviewId || !visibleReviews.some((item) => item.review_id === selectedReviewId)) {
         selectedReviewId = visibleReviews[0]?.review_id || "";
       }
@@ -4746,13 +4889,22 @@
               <span class="chip">${escapeHtml(item.severity)}</span>
               <span class="chip">${escapeHtml(item.assigned_role || "Colony Reviewer")}</span>
               <span class="chip">${escapeHtml(item.priority || "medium")}</span>
+              <span class="chip">${escapeHtml((item.attention_level || "review").replaceAll("_", " "))}</span>
               <span class="chip">${escapeHtml(item.status)}</span>
               <span class="chip">${escapeHtml(item.original_filename || item.source_name || item.photo_id || "source pending")}</span>
               <span class="chip">${escapeHtml(item.note_line_count ? `${item.note_line_count} note lines` : "no note lines")}</span>
             </div>
             <div class="review-evidence">${escapeHtml(item.evidence_preview || item.suggested_value || "No evidence preview")}</div>
           </div>
-          <button class="inspect-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Inspect</button>
+          <div class="review-card-actions">
+            <button class="inspect-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Inspect</button>
+            ${item.status === "open" && item.attention_level === "quick_check" && item.issue !== "Unlabeled numeric note needs review" ? `
+              <button class="quick-resolve-review" type="button"
+                data-review-id="${escapeHtml(item.review_id)}"
+                data-current-value="${escapeHtml(item.current_value || "")}"
+                data-note-item-id="${escapeHtml(item.note_item_id || "")}">Looks OK</button>
+            ` : ""}
+          </div>
         </article>
       `;
       }).join("") || '<p class="muted">No review items match the current filters.</p>';
@@ -4769,33 +4921,24 @@
       });
       document.querySelectorAll(".resolve-review").forEach((button) => {
         button.addEventListener("click", async () => {
+          const item = reviews.find((entry) => entry.review_id === button.dataset.reviewId);
+          await submitReviewResolution(button, item, false);
+        });
+      });
+      document.querySelectorAll(".quick-resolve-review").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const item = reviews.find((entry) => entry.review_id === button.dataset.reviewId);
+          await submitReviewResolution(button, item, true);
+        });
+      });
+      document.querySelectorAll(".prepare-correction-review").forEach((button) => {
+        button.addEventListener("click", () => {
           const container = button.closest(".review-actions");
-          const note = container.querySelector(".review-resolution-note").value;
-          const resolvedValue = container.querySelector(".review-resolved-value").value;
-          const legacyDecision = container.querySelector(".review-legacy-decision").value;
-          const noteLabelDecision = container.querySelector(".note-label-decision")?.value || "";
-          const noteLabelMouseId = container.querySelector(".note-label-mouse-id")?.value || "";
-          const noteLabelCountValue = container.querySelector(".note-label-count")?.value || "";
-          if (!note || !note.trim()) return;
-          await api(`/api/review-items/${button.dataset.reviewId}/resolve`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              resolution_note: note.trim(),
-              resolved_value: resolvedValue || "",
-              legacy_decision: legacyDecision,
-              correction_entity_type: "review_item",
-              correction_entity_id: button.dataset.reviewId,
-              correction_field_name: "reviewed_value",
-              correction_before_value: button.dataset.currentValue || "",
-              correction_after_value: resolvedValue || "",
-              note_item_id: button.dataset.noteItemId || "",
-              note_label_decision: noteLabelDecision,
-              note_label_mouse_id: noteLabelMouseId,
-              note_label_count: noteLabelCountValue ? Number(noteLabelCountValue) : null
-            })
-          });
-          await refresh();
+          const valueInput = container.querySelector(".review-resolved-value");
+          const noteInput = container.querySelector(".review-resolution-note");
+          valueInput.focus();
+          valueInput.select();
+          noteInput.placeholder = "Describe the correction before resolving";
         });
       });
       document.getElementById("sourceRows").innerHTML = sourceRecords.map((source) =>
@@ -5428,7 +5571,7 @@
         const payload = await response.json().catch(() => ({}));
         const detail = payload.detail || {};
         document.getElementById("exportDownloadMessage").textContent =
-          blockedExportMessage(detail, "Export blocked by open review items.");
+          blockedExportMessage(detail, "Export blocked by Focus Review items.");
         await refresh();
         return;
       }
@@ -5452,7 +5595,7 @@
         const payload = await response.json().catch(() => ({}));
         const detail = payload.detail || {};
         document.getElementById("exportDownloadMessage").textContent =
-          blockedExportMessage(detail, "Workbook export blocked by open review items.");
+          blockedExportMessage(detail, "Workbook export blocked by Focus Review items.");
         await refresh();
         return;
       }
