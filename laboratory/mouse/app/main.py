@@ -3581,6 +3581,7 @@ def write_note_items_and_mouse_candidates(
     raw_strain_text = str(record.get("matchedStrain") or record.get("rawStrain") or "")
     photo_id = str(record.get("sourcePhotoId") or "")
     snapshot_id = card_snapshot_id or str(record.get("cardSnapshotId") or "")
+    numeric_note_review_items: list[dict[str, Any]] = []
 
     for index, note in enumerate(notes, start=1):
         raw_line = str(note.get("raw") if isinstance(note, dict) else note)
@@ -3651,25 +3652,14 @@ def write_note_items_and_mouse_candidates(
             ear_review_count += 1
 
         if parsed["parsed_type"] == "unlabeled_numeric_note":
-            review_id = f"review_unlabeled_numeric_{note_item_id}"
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO review_queue
-                    (review_id, parse_id, severity, issue, current_value, suggested_value,
-                     review_reason, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    review_id,
-                    parse_id,
-                    "Medium",
-                    "Unlabeled numeric note needs review",
-                    raw_line,
-                    parsed.get("parsed_metadata", {}).get("display_ko") or "라벨 미정",
-                    f"Note item {note_item_id} contains only numbers. Treat it as temporary unlabeled cage evidence until labels are assigned.",
-                    "open",
-                    utc_now(),
-                ),
+            metadata = parsed.get("parsed_metadata", {}) if isinstance(parsed.get("parsed_metadata"), dict) else {}
+            numeric_note_review_items.append(
+                {
+                    "note_item_id": note_item_id,
+                    "raw_line": raw_line,
+                    "display": metadata.get("display_ko") or raw_line,
+                    "labels": metadata.get("labels") if isinstance(metadata.get("labels"), list) else [],
+                }
             )
 
         if write_mouse and parsed["parsed_type"] == "mouse_item" and parsed["parsed_mouse_display_id"]:
@@ -3732,6 +3722,40 @@ def write_note_items_and_mouse_candidates(
                 ),
             )
             mouse_count += 1
+    if numeric_note_review_items:
+        labels: list[str] = []
+        display_values: list[str] = []
+        note_item_ids: list[str] = []
+        for item in numeric_note_review_items:
+            note_item_ids.append(str(item["note_item_id"]))
+            item_labels = [str(label).strip() for label in item["labels"] if str(label).strip()]
+            labels.extend(item_labels or [str(item["raw_line"]).strip()])
+            display_values.append(str(item["display"]).strip() or str(item["raw_line"]).strip())
+        line_count = len(numeric_note_review_items)
+        label_text = ", ".join(label for label in labels if label)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO review_queue
+                (review_id, parse_id, severity, issue, current_value, suggested_value,
+                 review_reason, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"review_unlabeled_numeric_{parse_id}",
+                parse_id,
+                "Medium",
+                "Unlabeled numeric note needs review",
+                label_text,
+                "Confirm as temporary labels, ignore, or map to mouse IDs.",
+                (
+                    f"Parse {parse_id} has {line_count} numeric-only note lines "
+                    f"({'; '.join(display_values)}). Treat them as grouped temporary cage evidence "
+                    f"until labels are assigned. Source note items: {', '.join(note_item_ids)}."
+                ),
+                "open",
+                utc_now(),
+            ),
+        )
     return note_count, mouse_count, ear_review_count
 
 

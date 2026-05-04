@@ -10,6 +10,7 @@ from app.main import (
     open_review_attention_counts,
     open_review_blockers,
     review_attention_level,
+    write_note_items_and_mouse_candidates,
 )
 
 
@@ -402,5 +403,81 @@ def test_export_blockers_include_only_focus_review_items(tmp_path: Path) -> None
         assert counts["must_review"] == 1
         assert counts["quick_check"] == 1
         assert blocker_count == 1
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_numeric_note_reviews_are_grouped_by_parse(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_numeric_group",
+                    "numeric-card.jpg",
+                    "data/photos/test/numeric-card.jpg",
+                    "2026-05-04T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_numeric_group",
+                    "photo_numeric_group",
+                    "ai_photo_extraction",
+                    json.dumps({"notes": [{"raw": "1"}, {"raw": "2"}, {"raw": "3"}]}, ensure_ascii=False),
+                    "2026-05-04T00:00:00Z",
+                    "review",
+                    70,
+                    1,
+                ),
+            )
+            write_note_items_and_mouse_candidates(
+                conn,
+                "parse_numeric_group",
+                {
+                    "type": "Separated",
+                    "sourcePhotoId": "photo_numeric_group",
+                    "notes": [{"raw": "1"}, {"raw": "2"}, {"raw": "3"}],
+                },
+                "review",
+            )
+            reviews = conn.execute(
+                """
+                SELECT review_id, current_value, suggested_value, review_reason
+                FROM review_queue
+                WHERE issue = 'Unlabeled numeric note needs review'
+                ORDER BY review_id
+                """
+            ).fetchall()
+            note_items = conn.execute(
+                """
+                SELECT raw_line_text, parsed_type
+                FROM card_note_item_log
+                WHERE parse_id = ?
+                ORDER BY line_number
+                """,
+                ("parse_numeric_group",),
+            ).fetchall()
+
+        assert len(reviews) == 1
+        assert reviews[0]["review_id"] == "review_unlabeled_numeric_parse_numeric_group"
+        assert reviews[0]["current_value"] == "1, 2, 3"
+        assert "3 numeric-only note lines" in reviews[0]["review_reason"]
+        assert [row["raw_line_text"] for row in note_items] == ["1", "2", "3"]
+        assert {row["parsed_type"] for row in note_items} == {"unlabeled_numeric_note"}
     finally:
         db.DB_PATH = old_db_path
