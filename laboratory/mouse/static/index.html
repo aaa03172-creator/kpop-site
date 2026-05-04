@@ -814,6 +814,10 @@
       padding: 14px;
       align-items: center;
     }
+    .visual-board.export-visual-board {
+      min-height: 190px;
+      padding: 12px;
+    }
     .visual-board-item {
       display: grid;
       gap: 8px;
@@ -828,6 +832,10 @@
       max-height: 96px;
       object-fit: contain;
     }
+    .export-visual-board .visual-board-item img {
+      width: min(88px, 100%);
+      max-height: 80px;
+    }
     .visual-board-arrow {
       position: relative;
     }
@@ -839,6 +847,9 @@
       width: 28px;
       height: 2px;
       background: #b9cbc5;
+    }
+    .export-visual-board .visual-board-arrow::after {
+      top: 38px;
     }
     .visual-guide-panel {
       display: grid;
@@ -1206,11 +1217,18 @@
       text-align: center;
       font-size: 12px;
     }
-    .pedigree-node img {
-      width: 36px;
-      height: 36px;
+    .pedigree-node strong,
+    .pedigree-node span {
       display: block;
-      margin: 0 auto 4px;
+      overflow-wrap: anywhere;
+    }
+    .pedigree-node strong {
+      color: var(--primary-dark);
+      margin-bottom: 4px;
+    }
+    .pedigree-node span {
+      color: var(--muted);
+      font-size: 11px;
     }
     .timeline-list {
       display: grid;
@@ -2880,7 +2898,7 @@
     <section class="full" data-view="exports">
       <h2>Export Readiness</h2>
       <div class="visual-guide">
-        <div class="visual-board" aria-label="Export readiness illustration">
+        <div class="visual-board export-visual-board" aria-label="Export readiness illustration">
           <div class="visual-board-item visual-board-arrow">
             <img src="/static/assets/review-marker-art.png" alt="">
             <span>Blockers</span>
@@ -3972,10 +3990,10 @@
       return `
         <div class="pedigree-mini" aria-label="Pedigree illustration">
           <div class="pedigree-parents">
-            <div class="pedigree-node"><img src="/static/assets/mouse-avatar-art.png" alt=""><strong>Father</strong><span>${escapeHtml(mouse.father_id || "--")}</span></div>
-            <div class="pedigree-node"><img src="/static/assets/mouse-avatar-art.png" alt=""><strong>Mother</strong><span>${escapeHtml(mouse.mother_id || "--")}</span></div>
+            <div class="pedigree-node"><strong>Father</strong><span>${escapeHtml(mouse.father_id || "--")}</span></div>
+            <div class="pedigree-node"><strong>Mother</strong><span>${escapeHtml(mouse.mother_id || "--")}</span></div>
           </div>
-          <div class="pedigree-node"><img src="/static/assets/mouse-avatar-art.png" alt=""><strong>${escapeHtml(mouse.display_id || "Mouse")}</strong><span>${escapeHtml(mouse.litter_id || "litter pending")}</span></div>
+          <div class="pedigree-node"><strong>${escapeHtml(mouse.display_id || "Mouse")}</strong><span>${escapeHtml(mouse.litter_id || "litter pending")}</span></div>
         </div>
       `;
     }

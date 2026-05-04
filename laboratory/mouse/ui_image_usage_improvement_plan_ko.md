@@ -182,3 +182,15 @@ The first implementation patch should be intentionally small:
 4. Re-run automated and browser checks.
 
 This gives the largest readability improvement while minimizing risk to the MVP workflow.
+
+## Implementation Status
+
+- Phase 1 row-level image cleanup: implemented.
+- Review Queue card illustrations were replaced by compact classification badges.
+- Repeated cage, breeding, genotyping, and note-evidence row illustrations were removed.
+- Section-level and detail-level illustrations remain in place.
+- Browser check after the patch showed Review Queue generated images reduced to 0 and Records generated images reduced to 10 visible section/detail images.
+- Phase 2 detail cleanup: implemented for Mouse Detail pedigree; repeated mouse illustrations were replaced with text relationship nodes.
+- Export Readiness visual board was reduced in height and image scale so it reads as supporting context rather than a dominant panel.
+- Phase 3 asset optimization: implemented for current PNG assets; kept generated PNGs are resized/compressed and each representative PNG is now under 250 KB.
+- Unused SVG backup assets were removed after confirming the UI no longer references them.

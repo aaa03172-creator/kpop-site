@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title desc">
-  <title id="title">Sample tube</title>
-  <desc id="desc">Tail sample tube icon for genotyping requests.</desc>
-  <circle cx="60" cy="60" r="48" fill="#f7fbff" stroke="#d6e0dc" stroke-width="4"/>
-  <path d="M45 25h30v12H45z" fill="#1b72d8" rx="3"/>
-  <path d="M49 37h22v52c0 8-5 13-11 13s-11-5-11-13V37Z" fill="#ffffff" stroke="#8aa4b5" stroke-width="4"/>
-  <path d="M51 70h18v19c0 6-4 10-9 10s-9-4-9-10V70Z" fill="#8bd8cf"/>
-  <path d="M54 49h12M54 58h12" stroke="#b9c6d3" stroke-width="3" stroke-linecap="round"/>
-</svg>
