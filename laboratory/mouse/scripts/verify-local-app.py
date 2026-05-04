@@ -1166,10 +1166,11 @@ def main() -> None:
                 assert_true(
                     any(
                         item["issue"] == "Unlabeled numeric note needs review"
-                        and item["current_value"] == "1 2 3"
+                        and item["current_value"] == "1, 2, 3"
+                        and "numeric-only note lines" in item["review_reason"]
                         for item in manual_review_items
                     ),
-                    "Numeric-only manual note lines should open a review item instead of becoming mouse IDs.",
+                    "Numeric-only manual note lines should open one grouped review item instead of becoming mouse IDs.",
                 )
                 assert_true(
                     transcription_payload["resolved_photo_review_items"] >= 1,

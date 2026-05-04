@@ -481,3 +481,66 @@ def test_numeric_note_reviews_are_grouped_by_parse(tmp_path: Path) -> None:
         assert {row["parsed_type"] for row in note_items} == {"unlabeled_numeric_note"}
     finally:
         db.DB_PATH = old_db_path
+
+
+def test_multi_label_numeric_note_line_uses_grouped_review_contract(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_numeric_line",
+                    "numeric-line-card.jpg",
+                    "data/photos/test/numeric-line-card.jpg",
+                    "2026-05-04T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_numeric_line",
+                    "photo_numeric_line",
+                    "manual_photo_transcription",
+                    json.dumps({"notes": [{"raw": "1 2 3"}]}, ensure_ascii=False),
+                    "2026-05-04T00:00:00Z",
+                    "review",
+                    70,
+                    1,
+                ),
+            )
+            write_note_items_and_mouse_candidates(
+                conn,
+                "parse_numeric_line",
+                {
+                    "type": "Separated",
+                    "sourcePhotoId": "photo_numeric_line",
+                    "notes": [{"raw": "1 2 3"}],
+                },
+                "review",
+            )
+            [review] = conn.execute(
+                """
+                SELECT review_id, current_value, review_reason
+                FROM review_queue
+                WHERE issue = 'Unlabeled numeric note needs review'
+                """
+            ).fetchall()
+
+        assert review["review_id"] == "review_unlabeled_numeric_parse_numeric_line"
+        assert review["current_value"] == "1, 2, 3"
+        assert "numeric-only note lines" in review["review_reason"]
+    finally:
+        db.DB_PATH = old_db_path

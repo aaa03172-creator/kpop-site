@@ -3732,7 +3732,14 @@ def write_note_items_and_mouse_candidates(
             labels.extend(item_labels or [str(item["raw_line"]).strip()])
             display_values.append(str(item["display"]).strip() or str(item["raw_line"]).strip())
         line_count = len(numeric_note_review_items)
-        label_text = ", ".join(label for label in labels if label)
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+        current_value = ", ".join(label for label in labels if label)
+        suggested_value = "Confirm as temporary labels, ignore, or map to mouse IDs."
+        review_reason = (
+            f"Parse {parse_id} has {line_count} numeric-only note lines "
+            f"({'; '.join(display_values)}). Treat them as grouped temporary cage evidence "
+            f"until labels are assigned. Source note items: {', '.join(note_item_ids)}."
+        )
         conn.execute(
             """
             INSERT OR REPLACE INTO review_queue
@@ -3741,17 +3748,13 @@ def write_note_items_and_mouse_candidates(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                f"review_unlabeled_numeric_{parse_id}",
+                review_id,
                 parse_id,
                 "Medium",
                 "Unlabeled numeric note needs review",
-                label_text,
-                "Confirm as temporary labels, ignore, or map to mouse IDs.",
-                (
-                    f"Parse {parse_id} has {line_count} numeric-only note lines "
-                    f"({'; '.join(display_values)}). Treat them as grouped temporary cage evidence "
-                    f"until labels are assigned. Source note items: {', '.join(note_item_ids)}."
-                ),
+                current_value,
+                suggested_value,
+                review_reason,
                 "open",
                 utc_now(),
             ),
@@ -4630,13 +4633,27 @@ def list_review_items() -> list[dict[str, Any]]:
             LEFT JOIN parse_result parse ON parse.parse_id = review.parse_id
             LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
             LEFT JOIN card_note_item_log review_note
-                ON review_note.note_item_id = CASE
-                    WHEN review.review_id LIKE 'review_unlabeled_numeric_note_%'
-                        THEN SUBSTR(review.review_id, LENGTH('review_unlabeled_numeric_') + 1)
-                    WHEN review.review_id LIKE 'review_ear_note_%'
-                        THEN SUBSTR(review.review_id, LENGTH('review_ear_') + 1)
-                    ELSE ''
-                END
+                ON (
+                    review_note.note_item_id = CASE
+                        WHEN review.review_id LIKE 'review_unlabeled_numeric_note_%'
+                            THEN SUBSTR(review.review_id, LENGTH('review_unlabeled_numeric_') + 1)
+                        WHEN review.review_id LIKE 'review_ear_note_%'
+                            THEN SUBSTR(review.review_id, LENGTH('review_ear_') + 1)
+                        ELSE ''
+                    END
+                    OR review_note.note_item_id = CASE
+                        WHEN review.review_id = 'review_unlabeled_numeric_' || review.parse_id
+                            THEN (
+                                SELECT note.note_item_id
+                                FROM card_note_item_log note
+                                WHERE note.parse_id = review.parse_id
+                                  AND note.parsed_type = 'unlabeled_numeric_note'
+                                ORDER BY note.line_number
+                                LIMIT 1
+                            )
+                        ELSE ''
+                    END
+                )
             LEFT JOIN card_snapshot review_snapshot
                 ON review_snapshot.card_snapshot_id = review_note.card_snapshot_id
             ORDER BY review.created_at DESC
