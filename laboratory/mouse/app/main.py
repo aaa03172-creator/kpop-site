@@ -498,10 +498,11 @@ def detect_card_bbox(image: Image.Image) -> dict[str, Any]:
     if template_hint == "blue_structured_card":
         component_width = max(1, right - left)
         component_height = max(1, bottom - top)
-        left = max(0, left - int(component_width * 0.75))
-        top = max(0, top - int(component_height * 0.4))
-        right = min(width, right + int(component_width * 1.25))
-        bottom = min(height, bottom + int(component_height * 0.15))
+        if component_width < width * 0.55 or component_height < height * 0.35:
+            left = max(0, left - int(component_width * 0.75))
+            top = max(0, top - int(component_height * 0.4))
+            right = min(width, right + int(component_width * 1.25))
+            bottom = min(height, bottom + int(component_height * 0.15))
     return {
         "x": left,
         "y": top,
@@ -726,6 +727,7 @@ def generate_roi_preview(photo_id: str, template_type: str | None = None) -> dic
                 "display_name": roi.get("display_name") or label,
                 "target_fields": roi.get("target_fields") or [],
                 "mode": roi.get("mode") or "field_crop",
+                "artifact_layer": "cache",
                 "bbox": {"x": rect[0], "y": rect[1], "w": rect[2] - rect[0], "h": rect[3] - rect[1]},
                 "image_url": f"/api/photos/{quote(photo_id)}/roi/{quote(label)}/image?template_type={quote(selected_template)}",
             }
@@ -735,6 +737,7 @@ def generate_roi_preview(photo_id: str, template_type: str | None = None) -> dic
         "boundary": "parsed or intermediate result",
         "source_layer": "raw source photo",
         "derived_layer": "parsed or intermediate result",
+        "artifact_layer": "cache",
         "photo_id": photo_id,
         "photo_filename": photo["original_filename"],
         "template_type": selected_template,

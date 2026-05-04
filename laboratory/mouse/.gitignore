@@ -4,6 +4,7 @@ playwright-screenshots/
 tmp-review-icons*.png
 tmp-note-evidence*.png
 tmp-critical-*.png
+tmp-image-cleanup-*.png
 data/
 .venv/
 .env
