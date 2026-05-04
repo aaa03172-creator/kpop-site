@@ -481,7 +481,7 @@
     }
     .review-card {
       display: grid;
-      grid-template-columns: 54px minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 12px;
       align-items: start;
       border: 1px solid var(--line);
@@ -490,44 +490,38 @@
       padding: 13px;
       box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
     }
-    .review-card-visual {
-      display: grid;
-      place-items: center;
-      width: 54px;
-      height: 54px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #f8fbfa;
-    }
-    .review-card-visual img {
-      width: 38px;
-      height: 38px;
-      object-fit: contain;
-    }
-    .review-card-visual.warn {
-      background: #fff8e6;
-      border-color: #f2d28d;
-    }
-    .review-card-visual.source {
-      background: #eef7f4;
-      border-color: #c4ddd6;
-    }
-    .review-card-visual.record {
-      background: #f2f7ff;
-      border-color: #c8dcff;
-    }
     .review-card-content {
       min-width: 0;
     }
     .review-card-kind {
       display: inline-flex;
       align-items: center;
+      width: fit-content;
       margin-bottom: 5px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8fbfa;
       color: var(--muted);
+      padding: 3px 8px;
       font-size: 11px;
       font-weight: 900;
       text-transform: uppercase;
       letter-spacing: 0.04em;
+    }
+    .review-card-kind.warn {
+      background: #fff8e6;
+      border-color: #f2d28d;
+      color: #8a5a04;
+    }
+    .review-card-kind.source {
+      background: #eef7f4;
+      border-color: #c4ddd6;
+      color: var(--primary-dark);
+    }
+    .review-card-kind.record {
+      background: #f2f7ff;
+      border-color: #c8dcff;
+      color: #1d4f91;
     }
     .review-card.selected-card,
     .review-card:hover {
@@ -985,16 +979,7 @@
       margin-bottom: 4px;
     }
     .cage-cell {
-      display: grid;
-      grid-template-columns: 54px minmax(0, 1fr);
-      gap: 10px;
-      align-items: center;
       min-width: 180px;
-    }
-    .cage-cell img {
-      width: 48px;
-      max-height: 36px;
-      object-fit: contain;
     }
     .cage-cell strong,
     .cage-cell span {
@@ -1057,16 +1042,7 @@
       line-height: 1.35;
     }
     .breeding-cell {
-      display: grid;
-      grid-template-columns: 42px minmax(0, 1fr);
-      gap: 9px;
-      align-items: center;
       min-width: 170px;
-    }
-    .breeding-cell img {
-      width: 36px;
-      height: 36px;
-      object-fit: contain;
     }
     .breeding-cell strong,
     .breeding-cell span {
@@ -1138,28 +1114,8 @@
       font-size: 12px;
       line-height: 1.35;
     }
-    .genotyping-metric {
-      display: grid;
-      grid-template-columns: 42px minmax(0, 1fr);
-      gap: 9px;
-      align-items: center;
-    }
-    .genotyping-metric img {
-      width: 36px;
-      height: 36px;
-      object-fit: contain;
-    }
     .genotyping-row-cell {
-      display: grid;
-      grid-template-columns: 42px minmax(0, 1fr);
-      gap: 9px;
-      align-items: center;
       min-width: 150px;
-    }
-    .genotyping-row-cell img {
-      width: 34px;
-      height: 34px;
-      object-fit: contain;
     }
     .genotyping-row-cell strong,
     .genotyping-row-cell span {
@@ -1217,17 +1173,7 @@
     }
     .note-source-cell,
     .note-review-cell {
-      display: grid;
-      grid-template-columns: 34px minmax(0, 1fr);
-      gap: 8px;
-      align-items: center;
       min-width: 150px;
-    }
-    .note-source-cell img,
-    .note-review-cell img {
-      width: 28px;
-      height: 28px;
-      object-fit: contain;
     }
     .note-source-cell strong,
     .note-source-cell span,
@@ -1907,16 +1853,8 @@
       .view-hero-panel,
       .visual-guide,
       .section-kicker { grid-template-columns: 1fr; }
-      .review-card { grid-template-columns: 44px minmax(0, 1fr); }
-      .review-card .inspect-review { grid-column: 2; justify-self: start; }
-      .review-card-visual {
-        width: 44px;
-        height: 44px;
-      }
-      .review-card-visual img {
-        width: 32px;
-        height: 32px;
-      }
+      .review-card { grid-template-columns: 1fr; }
+      .review-card .inspect-review { justify-self: start; }
       .hero-illustration,
       .visual-board,
       .mouse-profile-card,
@@ -4089,8 +4027,8 @@
         <tr>
           <td>
             <div class="cage-cell">
-              <img src="/static/assets/cage-ivc-art.png" alt="">
-              <div><strong>${escapeHtml(cage.cage_label)}</strong><span>${escapeHtml(cage.cage_id || "cage")}</span></div>
+              <strong>${escapeHtml(cage.cage_label)}</strong>
+              <span>${escapeHtml(cage.cage_id || "cage")}</span>
             </div>
           </td>
           <td>${escapeHtml(cage.location || "--")}</td>
@@ -4122,8 +4060,8 @@
         <tr>
           <td>
             <div class="breeding-cell">
-              <img src="/static/assets/mouse-avatar-art.png" alt="">
-              <div><strong>${escapeHtml(mating.mating_label)}</strong><span>${escapeHtml(mating.status || "--")}</span></div>
+              <strong>${escapeHtml(mating.mating_label)}</strong>
+              <span>${escapeHtml(mating.status || "--")}</span>
             </div>
           </td>
           <td>${escapeHtml([mating.male_mice || "", mating.female_mice || ""].filter(Boolean).join(" / ") || "--")}</td>
@@ -4140,8 +4078,8 @@
         <tr>
           <td>
             <div class="breeding-cell">
-              <img src="/static/assets/cage-ivc-art.png" alt="">
-              <div><strong>${escapeHtml(litter.litter_label)}</strong><span>${escapeHtml(litter.status || "--")}</span></div>
+              <strong>${escapeHtml(litter.litter_label)}</strong>
+              <span>${escapeHtml(litter.status || "--")}</span>
             </div>
           </td>
           <td>${escapeHtml(litter.mating_label || "--")}</td>
@@ -4153,13 +4091,6 @@
           <td>${escapeHtml(litter.status || "--")}</td>
         </tr>
       `;
-    }
-
-    function genotypingIcon(value) {
-      const key = text(value).toLowerCase();
-      if (key.includes("result") || key.includes("confirmed") || key.includes("match") || key.includes("positive") || key.includes("negative")) return "result-check-art.png";
-      if (key.includes("sample") || key.includes("tail") || key.includes("request") || key.includes("await")) return "sample-tube-art.png";
-      return "dna-genotype-art.png";
     }
 
     function renderGenotypingOverview(genotypingDashboard, targets) {
@@ -4183,13 +4114,8 @@
     function genotypingMetricCard(card) {
       return `
         <div class="metric">
-          <div class="genotyping-metric">
-            <img src="/static/assets/${escapeHtml(genotypingIcon(card.key || card.label))}" alt="">
-            <div>
-              <strong>${escapeHtml(card.count)}</strong>
-              <span>${escapeHtml(card.label)}</span>
-            </div>
-          </div>
+          <strong>${escapeHtml(card.count)}</strong>
+          <span>${escapeHtml(card.label)}</span>
           <small>${escapeHtml(card.meaning)}</small>
         </div>
       `;
@@ -4200,8 +4126,8 @@
         <tr>
           <td>
             <div class="genotyping-row-cell">
-              <img src="/static/assets/${escapeHtml(genotypingIcon(mouse.genotyping_status || mouse.next_action))}" alt="">
-              <div><strong>${escapeHtml(mouse.display_id)}</strong><span>${escapeHtml(mouse.next_action || "--")}</span></div>
+              <strong>${escapeHtml(mouse.display_id)}</strong>
+              <span>${escapeHtml(mouse.next_action || "--")}</span>
             </div>
           </td>
           <td>${escapeHtml(mouse.sample_id || "--")}</td>
@@ -4234,18 +4160,17 @@
     function noteSourceCell(item) {
       return `
         <div class="note-source-cell">
-          <img src="/static/assets/cage-card-evidence-art.png" alt="">
-          <div><strong>${escapeHtml(item.parse_id || item.photo_id || "--")}</strong><span>line ${escapeHtml(item.line_number ?? "--")}</span></div>
+          <strong>${escapeHtml(item.parse_id || item.photo_id || "--")}</strong>
+          <span>line ${escapeHtml(item.line_number ?? "--")}</span>
         </div>
       `;
     }
 
     function noteReviewCell(item) {
-      const asset = item.needs_review ? "review-marker-art.png" : "result-check-art.png";
       return `
         <div class="note-review-cell">
-          <img src="/static/assets/${asset}" alt="">
-          <div><strong>${escapeHtml(item.needs_review ? "Needs review" : "No")}</strong><span>${escapeHtml(item.confidence ?? "--")} confidence</span></div>
+          <strong>${escapeHtml(item.needs_review ? "Needs review" : "No")}</strong>
+          <span>${escapeHtml(item.confidence ?? "--")} confidence</span>
         </div>
       `;
     }
@@ -4276,15 +4201,15 @@
         item.suggested_value
       ].map((value) => text(value).toLowerCase()).join(" ");
       if (combined.includes("legacy") || combined.includes("excel") || combined.includes("workbook") || combined.includes("comparison")) {
-        return { asset: "workbook-export-art.png", label: "Workbook mismatch", tone: "record" };
+        return { label: "Workbook mismatch", tone: "record" };
       }
       if (combined.includes("duplicate") || combined.includes("mouse") || combined.includes("biological") || combined.includes("canonical")) {
-        return { asset: "mouse-avatar-art.png", label: "Mouse record risk", tone: "record" };
+        return { label: "Mouse record risk", tone: "record" };
       }
       if (combined.includes("photo") || combined.includes("ocr") || combined.includes("transcription") || combined.includes("note") || combined.includes("source")) {
-        return { asset: "cage-card-evidence-art.png", label: "Photo evidence", tone: "source" };
+        return { label: "Photo evidence", tone: "source" };
       }
-      return { asset: "review-marker-art.png", label: "Needs review", tone: "warn" };
+      return { label: "Needs review", tone: "warn" };
     }
 
     function renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview }) {
@@ -4795,11 +4720,8 @@
         const visual = reviewVisual(item);
         return `
         <article class="review-card ${item.review_id === selectedReviewId ? "selected-card" : ""}">
-          <div class="review-card-visual ${escapeHtml(visual.tone)}">
-            <img src="/static/assets/${escapeHtml(visual.asset)}" alt="">
-          </div>
           <div class="review-card-content">
-            <span class="review-card-kind">${escapeHtml(visual.label)}</span>
+            <span class="review-card-kind ${escapeHtml(visual.tone)}">${escapeHtml(visual.label)}</span>
             <h3>${escapeHtml(item.issue)}</h3>
             <p>${escapeHtml(item.review_reason || item.parse_id || "--")}</p>
             <div class="review-meta">

@@ -888,6 +888,23 @@ def bounded_float(value: Any, *, minimum: float = 0, maximum: float = 100) -> fl
     return max(minimum, min(maximum, number))
 
 
+def repair_known_ocr_symbol_mojibake(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    replacements = {
+        "\u00a1\u00ce": "\u2642",
+        "\u00a1\u00cf": "\u2640",
+        "\u00e2\u2122\u201a": "\u2642",
+        "\u00e2\u2122\u20ac": "\u2640",
+        "\u0432\u2122\u201a": "\u2642",
+        "\u0432\u2122\u0402": "\u2640",
+    }
+    for broken, symbol in replacements.items():
+        text = text.replace(broken, symbol)
+    return text
+
+
 def conservative_normalized_date(raw_value: Any, normalized_value: Any, uncertain_fields: list[str], field_name: str) -> str:
     normalized = str(normalized_value or "").strip()
     raw = str(raw_value or "").strip()
@@ -970,7 +987,7 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
     for note in notes[:25]:
         if not isinstance(note, dict):
             continue
-        raw = str(note.get("raw") or "").strip()
+        raw = repair_known_ocr_symbol_mojibake(note.get("raw")).strip()
         if not raw:
             continue
         strike = str(note.get("strike") or "unclear")
@@ -996,7 +1013,7 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
         "card_type": card_type,
         "raw_strain": str(draft.get("raw_strain") or ""),
         "matched_strain": str(draft.get("matched_strain") or ""),
-        "sex_raw": str(draft.get("sex_raw") or ""),
+        "sex_raw": repair_known_ocr_symbol_mojibake(draft.get("sex_raw")),
         "id_raw": str(draft.get("id_raw") or ""),
         "dob_raw": str(draft.get("dob_raw") or ""),
         "dob_normalized": conservative_normalized_date(draft.get("dob_raw"), draft.get("dob_normalized"), uncertain_fields, "dob_normalized"),
@@ -1008,12 +1025,12 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
             "mating_date_normalized",
         ),
         "lmo_raw": str(draft.get("lmo_raw") or ""),
-        "mouse_count": str(draft.get("mouse_count") or ""),
+        "mouse_count": repair_known_ocr_symbol_mojibake(draft.get("mouse_count")),
         "notes": normalized_notes,
         "raw_visible_text_lines": [
-            str(item).strip()
+            repair_known_ocr_symbol_mojibake(item).strip()
             for item in (draft.get("raw_visible_text_lines") if isinstance(draft.get("raw_visible_text_lines"), list) else [])
-            if str(item).strip()
+            if repair_known_ocr_symbol_mojibake(item).strip()
         ][:60],
         "symbol_confusions": [
             str(item).strip()
@@ -2953,7 +2970,7 @@ def split_dob_range(raw: Any, normalized: Any) -> tuple[str, str | None, str | N
 
 
 def normalize_sex_raw(raw: Any) -> str:
-    text = str(raw or "").strip()
+    text = repair_known_ocr_symbol_mojibake(raw).strip()
     lowered = text.lower()
     if "\u2642" in text or lowered in {"m", "male", "man"}:
         return "male"
@@ -4135,7 +4152,7 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
         parse_id = new_id("parse")
         notes = [
             {
-                "raw": str(note.get("raw") or "").strip(),
+                "raw": repair_known_ocr_symbol_mojibake(note.get("raw")).strip(),
                 "meaning": str(note.get("meaning") or ""),
                 "strike": str(note.get("strike") or "none"),
             }
@@ -4148,20 +4165,20 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             "type": payload.card_type or "Separated",
             "rawStrain": payload.raw_strain,
             "matchedStrain": payload.matched_strain or payload.raw_strain,
-            "sexRaw": payload.sex_raw,
+            "sexRaw": repair_known_ocr_symbol_mojibake(payload.sex_raw),
             "idRaw": payload.id_raw,
             "dobRaw": payload.dob_raw,
             "dobNormalized": payload.dob_normalized,
             "matingDateRaw": payload.mating_date_raw,
             "matingDateNormalized": payload.mating_date_normalized,
             "lmoRaw": payload.lmo_raw,
-            "mouseCount": payload.mouse_count,
+            "mouseCount": repair_known_ocr_symbol_mojibake(payload.mouse_count),
             "confidence": payload.confidence,
             "status": "review",
             "issue": issue,
             "severity": "Medium",
             "reviewField": "manualTranscription",
-            "currentValue": payload.mouse_count or payload.raw_strain or photo["original_filename"],
+            "currentValue": repair_known_ocr_symbol_mojibake(payload.mouse_count) or payload.raw_strain or photo["original_filename"],
             "suggestedValue": "Compare against latest cage-card photo and predecessor Excel candidate rows.",
             "reviewReason": review_reason,
             "notes": notes,
@@ -4175,9 +4192,9 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             "reviewerNote": payload.reviewer_note,
             "extractionMethod": payload.extraction_method,
             "rawVisibleTextLines": [
-                str(item).strip()
+                repair_known_ocr_symbol_mojibake(item).strip()
                 for item in payload.raw_visible_text_lines
-                if str(item).strip()
+                if repair_known_ocr_symbol_mojibake(item).strip()
             ][:60],
             "symbolConfusions": [
                 str(item).strip()
