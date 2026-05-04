@@ -68,6 +68,19 @@ def test_ai_draft_strips_uncertain_field_names_before_date_guard() -> None:
     assert draft["uncertain_fields"] == ["dob_normalized"]
 
 
+def test_ai_draft_normalizes_uncertain_field_name_case() -> None:
+    draft = normalize_ai_draft_payload(
+        base_draft(
+            dob_raw="2026.03.01",
+            dob_normalized="2026-03-01",
+            uncertain_fields=["DOB_NORMALIZED"],
+        )
+    )
+
+    assert draft["dob_normalized"] == ""
+    assert draft["uncertain_fields"] == ["dob_normalized"]
+
+
 def test_ai_draft_drops_non_iso_normalized_date() -> None:
     draft = normalize_ai_draft_payload(
         base_draft(dob_raw="2026.03.01", dob_normalized="03/01/2026")

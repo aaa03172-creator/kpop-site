@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 
 from app import db
 from app import main as app_main
-from app.main import ROOT, detect_card_bbox, generate_roi_preview
+from app.main import ROOT, detect_card_bbox, generate_roi_preview, save_jpeg_atomic
 
 
 def blue_card_bytes() -> bytes:
@@ -111,3 +111,21 @@ def test_roi_preset_loader_rejects_invalid_coordinates(tmp_path: Path, monkeypat
 
     assert error.value.status_code == 500
     assert "ROI preset configuration is invalid" in str(error.value.detail)
+
+
+def test_save_jpeg_atomic_cleans_temp_file_on_save_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    image = Image.new("RGB", (20, 20), "#ffffff")
+    target = tmp_path / "crop.jpg"
+    target.write_bytes(b"previous-good-crop")
+
+    def fail_save(path: Path, *args, **kwargs) -> None:
+        Path(path).write_bytes(b"partial-crop")
+        raise OSError("forced image save failure")
+
+    monkeypatch.setattr(image, "save", fail_save)
+
+    with pytest.raises(OSError):
+        save_jpeg_atomic(image, target)
+
+    assert target.read_bytes() == b"previous-good-crop"
+    assert list(tmp_path.glob(".crop-*.jpg")) == []

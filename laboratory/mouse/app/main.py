@@ -1077,7 +1077,7 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
     if card_type not in {"Separated", "Mating", "unknown"}:
         card_type = "unknown"
     uncertain_fields = [
-        str(item).strip()
+        str(item).strip().lower()
         for item in (draft.get("uncertain_fields") if isinstance(draft.get("uncertain_fields"), list) else [])
         if str(item).strip()
     ]
