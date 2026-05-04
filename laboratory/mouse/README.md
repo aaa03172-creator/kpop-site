@@ -146,7 +146,7 @@ AI cage-card extraction requires `OPENAI_API_KEY`, sends only the selected sourc
 
 ```text
 OPENAI_API_KEY=sk-...
-OPENAI_PARSE_ASSIST_MODEL=gpt-4.1
+OPENAI_PARSE_ASSIST_MODEL=gpt-5.2
 ```
 
 `.env.local` is ignored by Git. Alternatively, set `OPENAI_API_KEY` in your shell or Windows user environment before starting the server.

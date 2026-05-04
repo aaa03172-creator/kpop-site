@@ -1,0 +1,96 @@
+{
+  "blue_structured_card": {
+    "label": "Blue structured cage card",
+    "boundary": "parsed or intermediate result",
+    "description": "Fixed-form blue cage card ROI preset. Coordinates are normalized within the detected card bounding box and are used for reviewable extraction crops, not canonical state.",
+    "rois": [
+      {
+        "label": "raw_strain",
+        "display_name": "Strain",
+        "target_fields": ["raw_strain", "matched_strain"],
+        "mode": "single_line_field",
+        "x": 0.06,
+        "y": 0.07,
+        "w": 0.72,
+        "h": 0.14
+      },
+      {
+        "label": "sex_raw",
+        "display_name": "Sex",
+        "target_fields": ["sex_raw", "mouse_count"],
+        "mode": "symbol_and_count_field",
+        "x": 0.07,
+        "y": 0.20,
+        "w": 0.25,
+        "h": 0.14
+      },
+      {
+        "label": "id_raw",
+        "display_name": "I.D",
+        "target_fields": ["id_raw"],
+        "mode": "short_code_field",
+        "x": 0.07,
+        "y": 0.34,
+        "w": 0.48,
+        "h": 0.14
+      },
+      {
+        "label": "dob_raw",
+        "display_name": "DOB",
+        "target_fields": ["dob_raw", "dob_normalized"],
+        "mode": "date_range_field",
+        "x": 0.32,
+        "y": 0.20,
+        "w": 0.62,
+        "h": 0.14
+      },
+      {
+        "label": "notes",
+        "display_name": "NOTE",
+        "target_fields": ["notes", "raw_visible_text_lines"],
+        "mode": "multi_line_evidence",
+        "x": 0.05,
+        "y": 0.60,
+        "w": 0.90,
+        "h": 0.35
+      },
+      {
+        "label": "lmo_raw",
+        "display_name": "LMO / flags",
+        "target_fields": ["lmo_raw"],
+        "mode": "checkbox_or_short_mark",
+        "x": 0.62,
+        "y": 0.47,
+        "w": 0.33,
+        "h": 0.13
+      }
+    ]
+  },
+  "yellow_note_dense_card": {
+    "label": "Yellow note-dense cage card",
+    "boundary": "parsed or intermediate result",
+    "description": "Yellow card preset that treats the note area as open evidence. Coordinates are normalized within the detected card bounding box.",
+    "rois": [
+      {
+        "label": "header",
+        "display_name": "Header",
+        "target_fields": ["raw_strain", "id_raw", "dob_raw", "sex_raw"],
+        "mode": "header_cluster",
+        "x": 0.06,
+        "y": 0.04,
+        "w": 0.88,
+        "h": 0.24
+      },
+      {
+        "label": "notes",
+        "display_name": "NOTE",
+        "target_fields": ["notes", "raw_visible_text_lines"],
+        "mode": "multi_line_evidence",
+        "x": 0.05,
+        "y": 0.26,
+        "w": 0.90,
+        "h": 0.66
+      }
+    ]
+  }
+}

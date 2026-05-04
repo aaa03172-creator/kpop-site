@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title desc">
+  <title id="title">Review marker</title>
+  <desc id="desc">Small review marker icon.</desc>
+  <circle cx="60" cy="60" r="48" fill="#fff7df" stroke="#f2c56d" stroke-width="4"/>
+  <path d="M60 28v38" stroke="#a66a00" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="60" cy="84" r="6" fill="#a66a00"/>
+</svg>

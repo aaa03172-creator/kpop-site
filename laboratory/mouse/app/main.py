@@ -10,6 +10,8 @@ import zipfile
 import mimetypes
 import base64
 import os
+import math
+import sqlite3
 from urllib.parse import quote
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -19,16 +21,19 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
 import httpx
 
 from .db import ROOT, connection, init_db
+from .matching import MatchCandidate, match_candidate
 from .storage import new_id, save_legacy_workbook, save_upload, utc_now
 from scripts.parse_legacy_workbooks import parse_workbook
 
 
 STATIC_DIR = ROOT / "static"
 FIXTURE_PATH = ROOT / "fixtures" / "sample_parse_results.json"
+ROI_PRESET_PATH = ROOT / "config" / "roi_presets.json"
 RUNTIME_OPENAI_API_KEY = ""
 
 
@@ -132,6 +137,12 @@ class PhotoManualTranscriptionCreate(BaseModel):
     notes: list[dict[str, Any]] = Field(default_factory=list)
     reviewer_note: str = ""
     extraction_method: str = "manual_entry"
+    raw_visible_text_lines: list[str] = Field(default_factory=list)
+    symbol_confusions: list[str] = Field(default_factory=list)
+    uncertain_fields: list[str] = Field(default_factory=list)
+    extraction_image_mode: str = ""
+    roi_template_type: str = ""
+    extraction_regions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PhotoAiDraftCreate(BaseModel):
@@ -233,14 +244,45 @@ def current_openai_api_key() -> str:
     return RUNTIME_OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY", "")
 
 
+def review_assigned_role(issue: str = "", review_reason: str = "", source_name: str = "") -> str:
+    haystack = " ".join([issue, review_reason, source_name]).lower()
+    if any(token in haystack for token in ["strain", "allele", "genotype protocol", "assigned strain"]):
+        return "Strain Curator"
+    if any(token in haystack for token in ["experiment", "sample", "genotyping worklist"]):
+        return "Experiment Planner"
+    if any(token in haystack for token in ["export", "excel", "workbook", "legacy", "comparison"]):
+        return "Data / Export Manager"
+    return "Colony Reviewer"
+
+
+def review_priority(severity: str = "", issue: str = "", review_reason: str = "") -> str:
+    severity_key = severity.strip().lower()
+    haystack = " ".join([issue, review_reason]).lower()
+    if severity_key == "high" or any(
+        token in haystack
+        for token in [
+            "duplicate active",
+            "dead",
+            "sacrificed",
+            "genotype conflict",
+            "canonical",
+            "no source evidence",
+        ]
+    ):
+        return "high"
+    if severity_key == "low":
+        return "low"
+    return "medium"
+
+
 def ai_draft_status() -> dict[str, Any]:
     key_source = "session" if RUNTIME_OPENAI_API_KEY else ("environment" if os.environ.get("OPENAI_API_KEY") else "missing")
     return {
         "available": bool(current_openai_api_key()),
         "key_source": key_source,
-        "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-4.1"),
+        "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-5.2"),
         "approval_required": True,
-        "payload_minimization": "selected photo plus active assigned strain names only",
+        "payload_minimization": "selected photo is locally reduced to card/field ROI crops plus active assigned strain names only",
     }
 
 
@@ -321,6 +363,501 @@ def photo_image_path(photo_id: str) -> tuple[Any, Path, str]:
     return photo, image_path, media_type
 
 
+def load_roi_presets() -> dict[str, Any]:
+    if not ROI_PRESET_PATH.exists():
+        raise HTTPException(status_code=500, detail="ROI preset configuration is missing.")
+    with ROI_PRESET_PATH.open("r", encoding="utf-8") as file:
+        presets = json.load(file)
+    if not isinstance(presets, dict) or not presets:
+        raise HTTPException(status_code=500, detail="ROI preset configuration is invalid.")
+    return presets
+
+
+def normalized_roi_rect(roi: dict[str, Any], card_width: int, card_height: int) -> tuple[int, int, int, int]:
+    left = int(round(float(roi.get("x", 0)) * card_width))
+    top = int(round(float(roi.get("y", 0)) * card_height))
+    width = max(1, int(round(float(roi.get("w", 0)) * card_width)))
+    height = max(1, int(round(float(roi.get("h", 0)) * card_height)))
+    right = min(card_width, max(left + 1, left + width))
+    bottom = min(card_height, max(top + 1, top + height))
+    left = max(0, min(left, right - 1))
+    top = max(0, min(top, bottom - 1))
+    return left, top, right, bottom
+
+
+def detect_card_bbox(image: Image.Image) -> dict[str, Any]:
+    width, height = image.size
+    if width <= 1 or height <= 1:
+        return {"x": 0, "y": 0, "w": width, "h": height, "source": "tiny_image_full_frame", "template_hint": "blue_structured_card"}
+
+    sample = image.convert("RGB")
+    sample.thumbnail((900, 900))
+    sample_width, sample_height = sample.size
+    hsv = sample.convert("HSV")
+    pixels = hsv.load()
+    masks = {
+        "blue_structured_card": [[False for _ in range(sample_width)] for _ in range(sample_height)],
+        "yellow_note_dense_card": [[False for _ in range(sample_width)] for _ in range(sample_height)],
+    }
+    mask_counts = {"blue_structured_card": 0, "yellow_note_dense_card": 0}
+    for y in range(sample_height):
+        for x in range(sample_width):
+            hue, saturation, value = pixels[x, y]
+            if saturation < 35 or value < 45:
+                continue
+            if 105 <= hue <= 175:
+                masks["blue_structured_card"][y][x] = True
+                mask_counts["blue_structured_card"] += 1
+            elif 22 <= hue <= 62:
+                masks["yellow_note_dense_card"][y][x] = True
+                mask_counts["yellow_note_dense_card"] += 1
+
+    template_hint = "blue_structured_card"
+    if mask_counts["yellow_note_dense_card"] > mask_counts[template_hint]:
+        template_hint = "yellow_note_dense_card"
+
+    min_required = max(80, int(sample_width * sample_height * 0.015))
+    if mask_counts[template_hint] < min_required:
+        fallback_y = int(height * 0.18)
+        return {
+            "x": 0,
+            "y": fallback_y,
+            "w": width,
+            "h": max(1, height - fallback_y),
+            "source": "heuristic_lower_frame",
+            "template_hint": template_hint,
+        }
+
+    mask = masks[template_hint]
+    visited = [[False for _ in range(sample_width)] for _ in range(sample_height)]
+    components: list[dict[str, Any]] = []
+    for start_y in range(sample_height):
+        for start_x in range(sample_width):
+            if visited[start_y][start_x] or not mask[start_y][start_x]:
+                continue
+            stack = [(start_x, start_y)]
+            visited[start_y][start_x] = True
+            min_x = max_x = start_x
+            min_y = max_y = start_y
+            area = 0
+            while stack:
+                x, y = stack.pop()
+                area += 1
+                min_x = min(min_x, x)
+                max_x = max(max_x, x)
+                min_y = min(min_y, y)
+                max_y = max(max_y, y)
+                for next_x, next_y in (
+                    (x - 1, y),
+                    (x + 1, y),
+                    (x, y - 1),
+                    (x, y + 1),
+                    (x - 1, y - 1),
+                    (x - 1, y + 1),
+                    (x + 1, y - 1),
+                    (x + 1, y + 1),
+                ):
+                    if 0 <= next_x < sample_width and 0 <= next_y < sample_height and not visited[next_y][next_x] and mask[next_y][next_x]:
+                        visited[next_y][next_x] = True
+                        stack.append((next_x, next_y))
+            if area >= min_required:
+                bbox_area = max(1, (max_x - min_x + 1) * (max_y - min_y + 1))
+                fill_ratio = area / bbox_area
+                components.append(
+                    {
+                        "area": area,
+                        "bbox_area": bbox_area,
+                        "fill_ratio": fill_ratio,
+                        "min_x": min_x,
+                        "max_x": max_x,
+                        "min_y": min_y,
+                        "max_y": max_y,
+                    }
+                )
+
+    if not components:
+        fallback_y = int(height * 0.18)
+        return {
+            "x": 0,
+            "y": fallback_y,
+            "w": width,
+            "h": max(1, height - fallback_y),
+            "source": "heuristic_lower_frame",
+            "template_hint": template_hint,
+        }
+
+    component = max(components, key=lambda item: (item["area"], item["bbox_area"] * item["fill_ratio"]))
+    scale_x = width / sample_width
+    scale_y = height / sample_height
+    pad_x = max(8, int((component["max_x"] - component["min_x"] + 1) * scale_x * 0.04))
+    pad_y = max(8, int((component["max_y"] - component["min_y"] + 1) * scale_y * 0.04))
+    left = max(0, int(component["min_x"] * scale_x) - pad_x)
+    top = max(0, int(component["min_y"] * scale_y) - pad_y)
+    right = min(width, int((component["max_x"] + 1) * scale_x) + pad_x)
+    bottom = min(height, int((component["max_y"] + 1) * scale_y) + pad_y)
+    if template_hint == "blue_structured_card":
+        component_width = max(1, right - left)
+        component_height = max(1, bottom - top)
+        left = max(0, left - int(component_width * 0.75))
+        top = max(0, top - int(component_height * 0.4))
+        right = min(width, right + int(component_width * 1.25))
+        bottom = min(height, bottom + int(component_height * 0.15))
+    return {
+        "x": left,
+        "y": top,
+        "w": max(1, right - left),
+        "h": max(1, bottom - top),
+        "source": "color_card_connected_component_expanded" if template_hint == "blue_structured_card" else "color_card_connected_component",
+        "template_hint": template_hint,
+    }
+
+
+def card_color_mask_match(hue: int, saturation: int, value: int, template_type: str) -> bool:
+    if saturation < 35 or value < 45:
+        return False
+    if template_type == "blue_structured_card":
+        return 105 <= hue <= 175
+    if template_type == "yellow_note_dense_card":
+        return 22 <= hue <= 62
+    return False
+
+
+def estimate_card_color_axis_angle(card_image: Image.Image, template_type: str) -> float | None:
+    sample = card_image.convert("RGB")
+    sample.thumbnail((700, 700))
+    hsv = sample.convert("HSV")
+    pixels = hsv.load()
+    points: list[tuple[float, float]] = []
+    for y in range(sample.height):
+        for x in range(sample.width):
+            hue, saturation, value = pixels[x, y]
+            if card_color_mask_match(hue, saturation, value, template_type):
+                points.append((float(x), float(y)))
+    if len(points) < max(80, int(sample.width * sample.height * 0.015)):
+        return None
+    mean_x = sum(point[0] for point in points) / len(points)
+    mean_y = sum(point[1] for point in points) / len(points)
+    cov_xx = sum((point[0] - mean_x) ** 2 for point in points) / len(points)
+    cov_yy = sum((point[1] - mean_y) ** 2 for point in points) / len(points)
+    cov_xy = sum((point[0] - mean_x) * (point[1] - mean_y) for point in points) / len(points)
+    if cov_xx == 0 and cov_yy == 0:
+        return None
+    angle = math.degrees(0.5 * math.atan2(2 * cov_xy, cov_xx - cov_yy))
+    if angle <= -90:
+        angle += 180
+    if angle > 90:
+        angle -= 180
+    return angle
+
+
+def normalize_card_orientation(card_image: Image.Image, template_type: str) -> tuple[Image.Image, str]:
+    angle = estimate_card_color_axis_angle(card_image, template_type)
+    if angle is not None and 6 < abs(angle) <= 15:
+        corrected = card_image.rotate(-angle, expand=True, resample=Image.Resampling.BICUBIC)
+        return corrected, f"deskewed_{round(angle, 1)}_degrees"
+    if angle is not None and abs(angle) > 15:
+        return card_image, f"as_detected_ignored_axis_{round(angle, 1)}"
+    return card_image, "as_detected"
+
+
+def longest_true_run(values: list[bool]) -> tuple[int, int] | None:
+    best_start = -1
+    best_end = -1
+    start = -1
+    for index, value in enumerate(values + [False]):
+        if value and start < 0:
+            start = index
+        elif not value and start >= 0:
+            if index - start > best_end - best_start:
+                best_start = start
+                best_end = index
+            start = -1
+    if best_start < 0:
+        return None
+    return best_start, best_end
+
+
+def trim_card_color_body(card_image: Image.Image, template_type: str) -> tuple[Image.Image, str]:
+    if template_type not in {"blue_structured_card", "yellow_note_dense_card"}:
+        return card_image, "not_applied"
+    sample = card_image.convert("RGB")
+    hsv = sample.convert("HSV")
+    pixels = hsv.load()
+    width, height = sample.size
+    blue_template = template_type == "blue_structured_card"
+    row_hits: list[int] = []
+    col_hits = [0 for _ in range(width)]
+    for y in range(height):
+        row_count = 0
+        for x in range(width):
+            hue, saturation, value = pixels[x, y]
+            if saturation < 35 or value < 45:
+                continue
+            is_card_color = 105 <= hue <= 175 if blue_template else 22 <= hue <= 62
+            if is_card_color:
+                row_count += 1
+                col_hits[x] += 1
+        row_hits.append(row_count)
+
+    min_row_hits = int(width * 0.55)
+    row_run = longest_true_run([count >= min_row_hits for count in row_hits])
+    if row_run is None or row_run[1] - row_run[0] < height * 0.25:
+        fallback_image, fallback_source = trim_card_paper_body(card_image, template_type)
+        if fallback_source != "paper_body_trim_not_confident":
+            return fallback_image, fallback_source
+        return card_image, "color_body_trim_not_confident"
+
+    row_top, row_bottom = row_run
+    min_col_hits = int((row_bottom - row_top) * 0.45)
+    col_run = longest_true_run([count >= min_col_hits for count in col_hits])
+    if col_run is None or col_run[1] - col_run[0] < width * 0.35:
+        left, right = 0, width
+    else:
+        left, right = col_run
+
+    pad_x = max(8, int((right - left) * 0.025))
+    pad_y = max(8, int((row_bottom - row_top) * 0.025))
+    crop_box = (
+        max(0, left - pad_x),
+        max(0, row_top - pad_y),
+        min(width, right + pad_x),
+        min(height, row_bottom + pad_y),
+    )
+    return card_image.crop(crop_box), "color_body_trimmed"
+
+
+def trim_card_paper_body(card_image: Image.Image, template_type: str) -> tuple[Image.Image, str]:
+    sample = card_image.convert("RGB")
+    hsv = sample.convert("HSV")
+    pixels = hsv.load()
+    width, height = sample.size
+    blue_template = template_type == "blue_structured_card"
+    row_hits: list[int] = []
+    col_hits = [0 for _ in range(width)]
+
+    for y in range(height):
+        row_count = 0
+        for x in range(width):
+            hue, saturation, value = pixels[x, y]
+            is_light_paper = value >= 130 and saturation <= 70
+            is_tinted_card = (
+                value >= 85
+                and saturation >= 25
+                and (95 <= hue <= 180 if blue_template else 18 <= hue <= 70)
+            )
+            if is_light_paper or is_tinted_card:
+                row_count += 1
+                col_hits[x] += 1
+        row_hits.append(row_count)
+
+    min_row_hits = int(width * 0.42)
+    row_run = longest_true_run([count >= min_row_hits for count in row_hits])
+    if row_run is None or row_run[1] - row_run[0] < height * 0.22:
+        return card_image, "paper_body_trim_not_confident"
+
+    row_top, row_bottom = row_run
+    min_col_hits = int((row_bottom - row_top) * 0.38)
+    col_run = longest_true_run([count >= min_col_hits for count in col_hits])
+    if col_run is None or col_run[1] - col_run[0] < width * 0.35:
+        left, right = 0, width
+    else:
+        left, right = col_run
+
+    pad_x = max(8, int((right - left) * 0.02))
+    pad_y = max(8, int((row_bottom - row_top) * 0.02))
+    crop_box = (
+        max(0, left - pad_x),
+        max(0, row_top - pad_y),
+        min(width, right + pad_x),
+        min(height, row_bottom + pad_y),
+    )
+    return card_image.crop(crop_box), "paper_body_trimmed"
+
+
+def safe_roi_root(photo_id: str, template_type: str) -> Path:
+    safe_photo_id = re.sub(r"[^A-Za-z0-9_.-]", "_", photo_id)
+    safe_template = re.sub(r"[^A-Za-z0-9_.-]", "_", template_type)
+    roi_root = (ROOT / "data" / "roi" / safe_photo_id / safe_template).resolve()
+    allowed_root = (ROOT / "data" / "roi").resolve()
+    if allowed_root != roi_root and allowed_root not in roi_root.parents:
+        raise HTTPException(status_code=400, detail="ROI crop path is outside the derived ROI directory.")
+    roi_root.mkdir(parents=True, exist_ok=True)
+    return roi_root
+
+
+def generate_roi_preview(photo_id: str, template_type: str | None = None) -> dict[str, Any]:
+    presets = load_roi_presets()
+    photo, image_path, media_type = photo_image_path(photo_id)
+    if not media_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="ROI preview requires an image source photo.")
+    try:
+        with Image.open(image_path) as raw_image:
+            image = ImageOps.exif_transpose(raw_image).convert("RGB")
+    except (UnidentifiedImageError, OSError) as error:
+        raise HTTPException(status_code=415, detail="ROI preview requires a readable image source photo.") from error
+
+    bbox = detect_card_bbox(image)
+    selected_template = template_type or bbox["template_hint"]
+    if selected_template not in presets:
+        raise HTTPException(status_code=400, detail=f"Unknown ROI template: {selected_template}")
+    preset = presets[selected_template]
+    left = int(bbox["x"])
+    top = int(bbox["y"])
+    right = min(image.width, left + int(bbox["w"]))
+    bottom = min(image.height, top + int(bbox["h"]))
+    card_image = image.crop((left, top, max(left + 1, right), max(top + 1, bottom)))
+    card_image, orientation_source = normalize_card_orientation(card_image, selected_template)
+    card_image, trim_source = trim_card_color_body(card_image, selected_template)
+    roi_root = safe_roi_root(photo_id, selected_template)
+    card_path = roi_root / "card.jpg"
+    card_image.save(card_path, "JPEG", quality=92)
+
+    crops: list[dict[str, Any]] = []
+    for roi in preset.get("rois", []):
+        label = str(roi.get("label") or "").strip()
+        if not label:
+            continue
+        rect = normalized_roi_rect(roi, card_image.width, card_image.height)
+        crop_path = roi_root / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', label)}.jpg"
+        card_image.crop(rect).save(crop_path, "JPEG", quality=92)
+        crops.append(
+            {
+                "label": label,
+                "display_name": roi.get("display_name") or label,
+                "target_fields": roi.get("target_fields") or [],
+                "mode": roi.get("mode") or "field_crop",
+                "bbox": {"x": rect[0], "y": rect[1], "w": rect[2] - rect[0], "h": rect[3] - rect[1]},
+                "image_url": f"/api/photos/{quote(photo_id)}/roi/{quote(label)}/image?template_type={quote(selected_template)}",
+            }
+        )
+
+    return {
+        "boundary": "parsed or intermediate result",
+        "source_layer": "raw source photo",
+        "derived_layer": "parsed or intermediate result",
+        "photo_id": photo_id,
+        "photo_filename": photo["original_filename"],
+        "template_type": selected_template,
+        "template_label": preset.get("label") or selected_template,
+        "template_source": "config/roi_presets.json",
+        "card_bbox": bbox,
+        "card_orientation": orientation_source,
+        "card_trim": trim_source,
+        "card_image_url": f"/api/photos/{quote(photo_id)}/roi-card/image?template_type={quote(selected_template)}",
+        "crops": crops,
+        "review_note": "ROI crops are derived review aids. The original uploaded photo remains the raw evidence.",
+    }
+
+
+@app.get("/api/photos/{photo_id}/roi-preview")
+def get_photo_roi_preview(photo_id: str, template_type: str | None = None) -> dict[str, Any]:
+    return generate_roi_preview(photo_id, template_type)
+
+
+@app.get("/api/photos/{photo_id}/roi-card/image")
+def get_photo_roi_card_image(photo_id: str, template_type: str | None = None) -> FileResponse:
+    preview = generate_roi_preview(photo_id, template_type)
+    roi_root = safe_roi_root(photo_id, preview["template_type"])
+    return FileResponse(roi_root / "card.jpg", media_type="image/jpeg", filename=f"{photo_id}-card.jpg")
+
+
+@app.get("/api/photos/{photo_id}/roi/{roi_label}/image")
+def get_photo_roi_image(photo_id: str, roi_label: str, template_type: str | None = None) -> FileResponse:
+    preview = generate_roi_preview(photo_id, template_type)
+    labels = {crop["label"] for crop in preview["crops"]}
+    if roi_label not in labels:
+        raise HTTPException(status_code=404, detail="ROI label not found for the selected template.")
+    roi_root = safe_roi_root(photo_id, preview["template_type"])
+    crop_name = re.sub(r"[^A-Za-z0-9_.-]", "_", roi_label)
+    return FileResponse(roi_root / f"{crop_name}.jpg", media_type="image/jpeg", filename=f"{photo_id}-{crop_name}.jpg")
+
+
+def image_input_from_path(image_path: Path, *, detail: str) -> dict[str, Any]:
+    media_type = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
+    image_bytes = image_path.read_bytes()
+    if len(image_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="AI draft image payload is too large.")
+    data_url = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    return {"type": "input_image", "image_url": data_url, "detail": detail}
+
+
+def ai_transcription_image_content(photo_id: str, image_path: Path, media_type: str, detail: str) -> dict[str, Any]:
+    try:
+        preview = generate_roi_preview(photo_id)
+    except HTTPException:
+        image_bytes = image_path.read_bytes()
+        if len(image_bytes) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Photo is too large for AI draft transcription.")
+        data_url = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        return {
+            "mode": "full_photo_fallback",
+            "payload_minimization": "Selected source photo only; ROI crop generation was unavailable for this image; no colony records or Excel rows sent.",
+            "extraction_regions": [],
+            "content": [
+                {"type": "input_text", "text": "Image 1: full selected source photo fallback. Use only visible card text."},
+                {"type": "input_image", "image_url": data_url, "detail": detail},
+            ],
+        }
+
+    roi_root = safe_roi_root(photo_id, preview["template_type"])
+    content: list[dict[str, Any]] = [
+        {
+            "type": "input_text",
+                "text": (
+                    "Images are minimized ROI evidence derived from the selected source photo. "
+                    "Image 1 is the normalized card crop. Later images are fixed field crops. "
+                    "Use each field crop as a reading aid for its target fields, but cross-check against the full card crop. "
+                    "If a field crop appears shifted, blank, or inconsistent with the same region on the card crop, prefer the visible full card crop and mark the field uncertain."
+                ),
+            },
+        image_input_from_path(roi_root / "card.jpg", detail=detail),
+    ]
+    extraction_regions = [
+        {
+            "label": "card",
+            "display_name": "Normalized card",
+            "target_fields": ["raw_visible_text_lines", "card_type"],
+            "mode": "context_card_crop",
+        }
+    ]
+    for index, crop in enumerate(preview["crops"], start=2):
+        label = str(crop["label"])
+        crop_name = re.sub(r"[^A-Za-z0-9_.-]", "_", label)
+        target_fields = crop.get("target_fields") or []
+        content.append(
+            {
+                "type": "input_text",
+                "text": (
+                    f"Image {index}: ROI label={label}; display={crop.get('display_name') or label}; "
+                    f"target_fields={', '.join(target_fields)}; mode={crop.get('mode') or 'field_crop'}."
+                ),
+            }
+        )
+        content.append(image_input_from_path(roi_root / f"{crop_name}.jpg", detail=detail))
+        extraction_regions.append(
+            {
+                "label": label,
+                "display_name": crop.get("display_name") or label,
+                "target_fields": target_fields,
+                "mode": crop.get("mode") or "field_crop",
+            }
+        )
+
+    return {
+        "mode": "roi_field_crops",
+        "payload_minimization": (
+            "Selected source photo was processed locally into a normalized card crop plus fixed field ROI crops; "
+            "only those derived crops and active assigned strain names/aliases were sent; no colony records or Excel rows sent."
+        ),
+        "extraction_regions": extraction_regions,
+        "roi_template_type": preview["template_type"],
+        "roi_card_bbox": preview["card_bbox"],
+        "roi_card_orientation": preview["card_orientation"],
+        "roi_card_trim": preview["card_trim"],
+        "content": content,
+    }
+
+
 def assigned_strain_scope_for_prompt() -> list[dict[str, Any]]:
     with connection() as conn:
         rows = conn.execute(
@@ -346,7 +883,26 @@ def bounded_float(value: Any, *, minimum: float = 0, maximum: float = 100) -> fl
         number = float(value)
     except (TypeError, ValueError):
         number = minimum
+    if 0 < number <= 1 and maximum >= 100:
+        number *= 100
     return max(minimum, min(maximum, number))
+
+
+def conservative_normalized_date(raw_value: Any, normalized_value: Any, uncertain_fields: list[str], field_name: str) -> str:
+    normalized = str(normalized_value or "").strip()
+    raw = str(raw_value or "").strip()
+    if not normalized:
+        return ""
+    if field_name in uncertain_fields:
+        return ""
+    if "?" in raw or "?" in normalized:
+        return ""
+    if re.search(r"[~–—]|\\.\\s*$", raw):
+        return ""
+    # Preserve normalized values only when the raw text visibly contains a full date-like sequence.
+    if not re.search(r"\\d{2,4}\\D+\\d{1,2}\\D+\\d{1,2}", raw):
+        return ""
+    return normalized
 
 
 def ai_draft_schema() -> dict[str, Any]:
@@ -379,6 +935,8 @@ def ai_draft_schema() -> dict[str, Any]:
                     "required": ["raw", "meaning", "strike", "confidence"],
                 },
             },
+            "raw_visible_text_lines": {"type": "array", "items": {"type": "string"}},
+            "symbol_confusions": {"type": "array", "items": {"type": "string"}},
             "confidence": {"type": "number"},
             "uncertain_fields": {"type": "array", "items": {"type": "string"}},
             "reviewer_note": {"type": "string"},
@@ -396,6 +954,8 @@ def ai_draft_schema() -> dict[str, Any]:
             "lmo_raw",
             "mouse_count",
             "notes",
+            "raw_visible_text_lines",
+            "symbol_confusions",
             "confidence",
             "uncertain_fields",
             "reviewer_note",
@@ -427,6 +987,11 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
     card_type = str(draft.get("card_type") or "unknown")
     if card_type not in {"Separated", "Mating", "unknown"}:
         card_type = "unknown"
+    uncertain_fields = [
+        str(item)
+        for item in (draft.get("uncertain_fields") if isinstance(draft.get("uncertain_fields"), list) else [])
+        if str(item).strip()
+    ]
     return {
         "card_type": card_type,
         "raw_strain": str(draft.get("raw_strain") or ""),
@@ -434,18 +999,29 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
         "sex_raw": str(draft.get("sex_raw") or ""),
         "id_raw": str(draft.get("id_raw") or ""),
         "dob_raw": str(draft.get("dob_raw") or ""),
-        "dob_normalized": str(draft.get("dob_normalized") or ""),
+        "dob_normalized": conservative_normalized_date(draft.get("dob_raw"), draft.get("dob_normalized"), uncertain_fields, "dob_normalized"),
         "mating_date_raw": str(draft.get("mating_date_raw") or ""),
-        "mating_date_normalized": str(draft.get("mating_date_normalized") or ""),
+        "mating_date_normalized": conservative_normalized_date(
+            draft.get("mating_date_raw"),
+            draft.get("mating_date_normalized"),
+            uncertain_fields,
+            "mating_date_normalized",
+        ),
         "lmo_raw": str(draft.get("lmo_raw") or ""),
         "mouse_count": str(draft.get("mouse_count") or ""),
         "notes": normalized_notes,
-        "confidence": bounded_float(draft.get("confidence")),
-        "uncertain_fields": [
-            str(item)
-            for item in (draft.get("uncertain_fields") if isinstance(draft.get("uncertain_fields"), list) else [])
+        "raw_visible_text_lines": [
+            str(item).strip()
+            for item in (draft.get("raw_visible_text_lines") if isinstance(draft.get("raw_visible_text_lines"), list) else [])
             if str(item).strip()
-        ],
+        ][:60],
+        "symbol_confusions": [
+            str(item).strip()
+            for item in (draft.get("symbol_confusions") if isinstance(draft.get("symbol_confusions"), list) else [])
+            if str(item).strip()
+        ][:30],
+        "confidence": bounded_float(draft.get("confidence")),
+        "uncertain_fields": uncertain_fields,
         "reviewer_note": str(draft.get("reviewer_note") or ""),
     }
 
@@ -468,20 +1044,20 @@ def request_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -
     photo, image_path, media_type = photo_image_path(photo_id)
     if not media_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="AI draft transcription requires an image source photo.")
-    image_bytes = image_path.read_bytes()
-    if len(image_bytes) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Photo is too large for AI draft transcription.")
 
-    data_url = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    image_content = ai_transcription_image_content(photo_id, image_path, media_type, payload.detail)
     assigned_scope = assigned_strain_scope_for_prompt()
     request_payload = {
-        "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-4.1"),
+        "model": os.environ.get("OPENAI_PARSE_ASSIST_MODEL", "gpt-5.2"),
         "store": False,
         "instructions": (
-            "You draft cage-card transcription fields for review. "
-            "Never invent hidden text. Preserve visible raw text. "
-            "Use unknown/empty values when uncertain. "
+            "You are a careful OCR transcription assistant for handwritten mouse cage cards. "
+            "Work in two steps internally: first transcribe visible text exactly from the supplied card/ROI images, then extract fields from that transcription. "
+            "Never invent hidden text. Preserve visible raw text, including punctuation, primes, circles, sex symbols, and line breaks. "
+            "Use unknown/empty values when uncertain, and list uncertainty explicitly. "
             "Prioritize exact transcription of symbols, letters, and digits over normalization. "
+            "When ROI field crops are supplied, use them as target-field reading aids and cross-check them against the normalized card crop. "
+            "Do not let an obviously shifted ROI crop override clearer text visible on the card crop. "
             "Classify all output as draft parsed evidence, not canonical state."
         ),
         "input": [
@@ -492,24 +1068,34 @@ def request_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -
                         "type": "input_text",
                         "text": (
                             "Read this mouse cage card photo. Return only JSON matching the schema. "
+                            f"Extraction image mode: {image_content['mode']}. "
+                            f"Extraction regions: {json.dumps(image_content.get('extraction_regions', []), ensure_ascii=False)}. "
                             "Fields: card_type, raw_strain, matched_strain, sex_raw, id_raw, dob_raw, "
                             "dob_normalized, mating_date_raw, mating_date_normalized, lmo_raw, mouse_count, "
-                            "notes. sex_raw is the visible Sex field: preserve the exact symbol/text. "
+                            "notes, raw_visible_text_lines, symbol_confusions. "
+                            "First fill raw_visible_text_lines with the visible card text line-by-line before field extraction. "
+                            "Then extract fields only from those visible lines. "
+                            "sex_raw is the visible Sex field: preserve the exact symbol/text. "
+                            "Use the sex_raw ROI as a reading aid for sex_raw and mouse_count, but compare it with the Sex row on the card crop. "
+                            "Do not copy Strain, D.O.B, I.D, LMO/Y/N checkbox text, or other neighboring-row text into sex_raw; if the sex ROI is shifted, blank, obstructed, or contains neighboring-row text, read from the card crop if visible and list sex_raw in uncertain_fields. "
                             "The symbol \u2642 means male and \u2640 means female; do not leave these blank when visible. "
+                            "If the card shows the Korean sex labels \uc218/\uc218\ucef7 or \uc554/\uc554\ucef7, preserve that raw text and map only in reviewer_note. "
                             "mouse_count should preserve count text such as \u2642 2p, \u2640 6p, 2 total, or mixed. "
                             "id_raw is the visible I.D field, not the internal database id. lmo_raw preserves visible "
                             "LMO/O/N or similar checkbox marks without interpretation. Notes should preserve each "
                             "visible mouse ID, date/event line, or numeric-only temporary label line. "
                             "Mouse IDs commonly combine letters and digits, such as MT318 or Atg021. "
                             "Be careful with ambiguous characters: O vs 0, I/l vs 1, S vs 5, Z vs 2, B vs 8, G vs 6. "
-                            "If a character is uncertain, keep the best raw visible guess and list the field in uncertain_fields. "
+                            "If a character is uncertain, keep the best raw visible guess, add the ambiguity to symbol_confusions, "
+                            "and list the field in uncertain_fields. "
+                            "For dob_normalized and mating_date_normalized, only emit ISO dates or ISO ranges when the full date order and year are unambiguous from the visible crop. "
+                            "Do not guess the century or reorder ambiguous handwritten two-digit dates. Leave normalized date fields empty when uncertain. "
                             "For numeric-only post-separation labels, keep the raw numbers as notes and mark "
                             "meaning as unlabeled_numeric_note rather than inventing mouse IDs. "
                             "Strike marks: none, single, double, unclear. "
                             f"Assigned strain scope for matching only: {json.dumps(assigned_scope, ensure_ascii=False)}"
                         ),
-                    },
-                    {"type": "input_image", "image_url": data_url, "detail": payload.detail},
+                    }
                 ],
             }
         ],
@@ -522,6 +1108,7 @@ def request_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -
             }
         },
     }
+    request_payload["input"][0]["content"].extend(image_content["content"])
     try:
         with httpx.Client(timeout=60) as client:
             response = client.post(
@@ -559,7 +1146,10 @@ def request_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -
         "photo_id": photo_id,
         "photo_filename": photo["original_filename"],
         "external_inference_used": True,
-        "payload_minimization": "Selected source photo only; active assigned strain names/aliases only; no colony records or Excel rows sent.",
+        "payload_minimization": image_content["payload_minimization"],
+        "extraction_image_mode": image_content["mode"],
+        "extraction_regions": image_content.get("extraction_regions", []),
+        "roi_template_type": image_content.get("roi_template_type", ""),
         "stored": False,
         "draft": draft,
     }
@@ -591,10 +1181,18 @@ def create_photo_ai_extracted_transcription(photo_id: str, payload: PhotoAiDraft
             confidence=draft["confidence"],
             notes=draft["notes"],
             reviewer_note=(
-                "AI-extracted cage-card draft. Reviewer must compare against the raw photo before canonical writes. "
-                f"Uncertain fields: {', '.join(draft['uncertain_fields']) or 'none listed'}."
+                f"AI-extracted cage-card draft using {extraction['extraction_image_mode']}. "
+                "Reviewer must compare against the raw photo before canonical writes. "
+                f"Uncertain fields: {', '.join(draft['uncertain_fields']) or 'none listed'}. "
+                f"Symbol confusions: {', '.join(draft['symbol_confusions']) or 'none listed'}."
             ),
             extraction_method="ai_photo_extraction",
+            raw_visible_text_lines=draft["raw_visible_text_lines"],
+            symbol_confusions=draft["symbol_confusions"],
+            uncertain_fields=draft["uncertain_fields"],
+            extraction_image_mode=extraction["extraction_image_mode"],
+            roi_template_type=extraction.get("roi_template_type", ""),
+            extraction_regions=extraction.get("extraction_regions", []),
         ),
     )
     return {
@@ -602,6 +1200,9 @@ def create_photo_ai_extracted_transcription(photo_id: str, payload: PhotoAiDraft
         "extraction_method": "ai_photo_extraction",
         "external_inference_used": True,
         "payload_minimization": extraction["payload_minimization"],
+        "extraction_image_mode": extraction["extraction_image_mode"],
+        "extraction_regions": extraction["extraction_regions"],
+        "roi_template_type": extraction.get("roi_template_type", ""),
         "draft_confidence": draft["confidence"],
         "uncertain_fields": draft["uncertain_fields"],
     }
@@ -621,7 +1222,7 @@ def photo_review_workbench() -> dict[str, Any]:
         for photo in photos:
             manual = conn.execute(
                 """
-                SELECT parse_id, parsed_at, status
+                SELECT parse_id, parsed_at, status, raw_payload, source_name
                 FROM parse_result
                 WHERE photo_id = ?
                   AND source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
@@ -631,6 +1232,7 @@ def photo_review_workbench() -> dict[str, Any]:
                 (photo["photo_id"],),
             ).fetchone()
             manual_parse_id = manual["parse_id"] if manual is not None else ""
+            manual_payload = json_object(manual["raw_payload"]) if manual is not None else {}
             note_counts = {"note_lines": 0, "mouse_note_lines": 0}
             if manual_parse_id:
                 note_row = conn.execute(
@@ -696,6 +1298,8 @@ def photo_review_workbench() -> dict[str, Any]:
                     "image_url": f"/api/photos/{quote(photo['photo_id'])}/image",
                     "manual_parse_id": manual_parse_id,
                     "manual_transcribed_at": manual["parsed_at"] if manual is not None else "",
+                    "manual_source_name": manual["source_name"] if manual is not None else "",
+                    "manual_payload": manual_payload,
                     "note_line_count": note_counts["note_lines"],
                     "mouse_note_line_count": note_counts["mouse_note_lines"],
                     "total_review_count": int(review_counts["total_reviews"] or 0),
@@ -1013,6 +1617,7 @@ def review_source_context(conn: Any, review_id: str) -> dict[str, Any]:
         """
         SELECT review.review_id, review.parse_id, review.severity, review.issue,
                review.current_value, review.suggested_value, review.review_reason,
+               review.assigned_role, review.assigned_to, review.priority,
                review.status, review.created_at, review.resolved_at, review.resolution_note,
                parse.source_name, parse.photo_id, photo.original_filename,
                snapshot.card_snapshot_id, snapshot.card_type, snapshot.card_id_raw,
@@ -1061,7 +1666,8 @@ def review_item_audit_view(conn: Any, review_id: str) -> dict[str, Any]:
     ).fetchall()
     action_rows = conn.execute(
         """
-        SELECT action_id, action_type, target_id, before_value, after_value, created_at
+        SELECT action_id, action_type, target_id, before_value, after_value,
+               performed_by, performed_role, created_at
         FROM action_log
         WHERE target_id = ?
            OR after_value LIKE ?
@@ -1695,8 +2301,9 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
                     INSERT INTO mouse_master
                         (mouse_id, display_id, id_prefix, raw_strain_text, dob_raw, dob_start, dob_end,
                          ear_label_raw, ear_label_code, ear_label_confidence, ear_label_review_status,
-                         source_note_item_id, status, source_photo_id, current_card_snapshot_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         source_note_item_id, status, source_photo_id, current_card_snapshot_id,
+                         last_verified_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         mouse_id,
@@ -1714,6 +2321,7 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
                         note["interpreted_status"] or "active",
                         note["photo_id"],
                         note["card_snapshot_id"],
+                        applied_at,
                         applied_at,
                     ),
                 )
@@ -1843,10 +2451,11 @@ def void_canonical_candidate(candidate_id: str) -> dict[str, Any]:
                     """
                     UPDATE mouse_master
                     SET status = 'voided',
+                        last_verified_at = ?,
                         updated_at = ?
                     WHERE mouse_id = ?
                     """,
-                    (voided_at, mouse_id),
+                    (voided_at, voided_at, mouse_id),
                 )
                 updated_mice += 1
 
@@ -2018,12 +2627,62 @@ def assigned_scope_map(conn: Any) -> dict[str, str]:
     return scope
 
 
+def assigned_scope_candidates(conn: Any) -> list[MatchCandidate]:
+    rows = conn.execute(
+        """
+        SELECT display_name, aliases_json
+        FROM my_assigned_strain
+        WHERE active = 1
+        """
+    ).fetchall()
+    candidates: list[MatchCandidate] = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        canonical = str(row["display_name"] or "").strip()
+        names = [canonical, *json.loads(row["aliases_json"] or "[]")]
+        for name in names:
+            alias = str(name or "").strip()
+            key = (canonical, alias.lower())
+            if canonical and alias and key not in seen:
+                candidates.append(MatchCandidate(canonical=canonical, alias=alias))
+                seen.add(key)
+    return candidates
+
+
 def assigned_scope_match(scope: dict[str, str], record: dict[str, Any]) -> str:
     for value in [record.get("matchedStrain"), record.get("rawStrain")]:
         key = compact_strain_key(str(value or ""))
         if key in scope:
             return scope[key]
     return ""
+
+
+def assigned_scope_suggestion(conn: Any, record: dict[str, Any]) -> dict[str, Any]:
+    suggestion = match_candidate(
+        [str(record.get("matchedStrain") or ""), str(record.get("rawStrain") or "")],
+        assigned_scope_candidates(conn),
+    )
+    return suggestion.as_dict()
+
+
+def strain_match_review_reason(match_info: dict[str, Any], base_reason: str) -> str:
+    canonical = str(match_info.get("canonical") or "")
+    alias = str(match_info.get("matched_alias") or "")
+    score = float(match_info.get("score") or 0)
+    decision = str(match_info.get("decision") or "needs_review")
+    alternatives = match_info.get("alternatives") if isinstance(match_info.get("alternatives"), list) else []
+    alt_text = ", ".join(
+        f"{item.get('canonical')} via {item.get('alias')} ({item.get('score')})"
+        for item in alternatives
+        if isinstance(item, dict) and item.get("canonical")
+    )
+    suggestion_text = (
+        f" RapidFuzz suggestion: {canonical or '--'} via {alias or '--'} "
+        f"score {score:.2f}, decision {decision}."
+    )
+    if alt_text:
+        suggestion_text += f" Alternatives: {alt_text}."
+    return f"{base_reason}{suggestion_text}"
 
 
 def compact_genotype(value: str) -> str:
@@ -2788,8 +3447,8 @@ def write_note_items_and_mouse_candidates(
                 INSERT OR REPLACE INTO mouse_master
                     (mouse_id, display_id, id_prefix, raw_strain_text, dob_raw, dob_start, dob_end,
                      ear_label_raw, ear_label_code, ear_label_confidence, ear_label_review_status,
-                     source_note_item_id, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     source_note_item_id, status, last_verified_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     mouse_id,
@@ -2805,6 +3464,7 @@ def write_note_items_and_mouse_candidates(
                     parsed["parsed_ear_label_review_status"],
                     note_item_id,
                     status_from_strike,
+                    utc_now(),
                 ),
             )
             conn.execute(
@@ -3384,6 +4044,66 @@ def create_missing_photo_review_candidates() -> dict[str, Any]:
     }
 
 
+def supersede_open_ai_photo_reviews(conn: Any, photo_id: str, now: str) -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        SELECT parse.parse_id, review.review_id, parse.raw_payload
+        FROM parse_result parse
+        LEFT JOIN review_queue review
+            ON review.parse_id = parse.parse_id
+           AND review.status = 'open'
+        WHERE parse.photo_id = ?
+          AND parse.source_name = 'ai_photo_extraction'
+          AND parse.status = 'review'
+        """,
+        (photo_id,),
+    ).fetchall()
+    parse_ids = sorted({row["parse_id"] for row in rows})
+    review_ids = sorted({row["review_id"] for row in rows if row["review_id"]})
+    if not parse_ids:
+        return {"superseded_parse_ids": [], "superseded_review_ids": []}
+
+    for row in rows:
+        raw_payload = json_object(row["raw_payload"])
+        if not raw_payload:
+            continue
+        raw_payload["status"] = "superseded"
+        raw_payload["supersededAt"] = now
+        raw_payload["supersededReason"] = "A newer AI ROI extraction was created for the same source photo."
+        conn.execute(
+            "UPDATE parse_result SET raw_payload = ? WHERE parse_id = ?",
+            (json.dumps(raw_payload, ensure_ascii=False), row["parse_id"]),
+        )
+
+    parse_placeholders = ",".join("?" for _ in parse_ids)
+    conn.execute(
+        f"""
+        UPDATE parse_result
+        SET status = 'superseded',
+            needs_review = 0
+        WHERE parse_id IN ({parse_placeholders})
+        """,
+        parse_ids,
+    )
+    if review_ids:
+        review_placeholders = ",".join("?" for _ in review_ids)
+        conn.execute(
+            f"""
+            UPDATE review_queue
+            SET status = 'superseded',
+                resolved_at = ?,
+                resolution_note = ?
+            WHERE review_id IN ({review_placeholders})
+            """,
+            [
+                now,
+                "Superseded by a newer AI ROI extraction for the same source photo.",
+                *review_ids,
+            ],
+        )
+    return {"superseded_parse_ids": parse_ids, "superseded_review_ids": review_ids}
+
+
 @app.post("/api/photos/{photo_id}/manual-transcription")
 def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscriptionCreate) -> dict[str, Any]:
     now = utc_now()
@@ -3407,6 +4127,11 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
         if photo is None:
             raise HTTPException(status_code=404, detail="Photo not found.")
 
+        superseded_ai = (
+            supersede_open_ai_photo_reviews(conn, photo_id, now)
+            if source_name == "ai_photo_extraction"
+            else {"superseded_parse_ids": [], "superseded_review_ids": []}
+        )
         parse_id = new_id("parse")
         notes = [
             {
@@ -3449,6 +4174,37 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             "sourceLayer": "parsed or intermediate result",
             "reviewerNote": payload.reviewer_note,
             "extractionMethod": payload.extraction_method,
+            "rawVisibleTextLines": [
+                str(item).strip()
+                for item in payload.raw_visible_text_lines
+                if str(item).strip()
+            ][:60],
+            "symbolConfusions": [
+                str(item).strip()
+                for item in payload.symbol_confusions
+                if str(item).strip()
+            ][:30],
+            "uncertainFields": [
+                str(item).strip()
+                for item in payload.uncertain_fields
+                if str(item).strip()
+            ][:30],
+            "extractionImageMode": payload.extraction_image_mode,
+            "roiTemplateType": payload.roi_template_type,
+            "extractionRegions": [
+                {
+                    "label": str(region.get("label") or ""),
+                    "displayName": str(region.get("display_name") or region.get("label") or ""),
+                    "targetFields": [
+                        str(field)
+                        for field in (region.get("target_fields") if isinstance(region.get("target_fields"), list) else [])
+                        if str(field).strip()
+                    ],
+                    "mode": str(region.get("mode") or ""),
+                }
+                for region in payload.extraction_regions
+                if isinstance(region, dict)
+            ][:20],
         }
         conn.execute(
             """
@@ -3547,6 +4303,8 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                     "note_count": note_count,
                     "source_name": source_name,
                     "resolved_photo_review_items": len(resolved_photo_review_ids),
+                    "superseded_ai_parse_ids": superseded_ai["superseded_parse_ids"],
+                    "superseded_ai_review_ids": superseded_ai["superseded_review_ids"],
                 },
                 ensure_ascii=False,
                 ),
@@ -3563,6 +4321,8 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
         "created_mouse_candidates": mouse_count,
         "created_ear_review_items": ear_review_count,
         "resolved_photo_review_items": len(resolved_photo_review_ids),
+        "superseded_ai_parse_ids": superseded_ai["superseded_parse_ids"],
+        "superseded_ai_review_ids": superseded_ai["superseded_review_ids"],
         "boundary": "parsed or intermediate result",
         "source_name": source_name,
     }
@@ -3575,6 +4335,7 @@ def list_review_items() -> list[dict[str, Any]]:
             """
             SELECT review.review_id, review.parse_id, review.severity, review.issue,
                    review.current_value, review.suggested_value, review.review_reason,
+                   review.assigned_role, review.assigned_to, review.priority,
                    review.status, review.created_at, review.resolved_at, review.resolution_note,
                    parse.source_name, parse.photo_id, photo.original_filename,
                    review_note.note_item_id, review_note.raw_line_text AS review_note_raw_line,
@@ -3621,6 +4382,16 @@ def list_review_items() -> list[dict[str, Any]]:
     result = []
     for row in rows:
         payload = dict(row)
+        payload["assigned_role"] = payload.get("assigned_role") or review_assigned_role(
+            payload.get("issue", ""),
+            payload.get("review_reason", ""),
+            payload.get("source_name", ""),
+        )
+        payload["priority"] = payload.get("priority") or review_priority(
+            payload.get("severity", ""),
+            payload.get("issue", ""),
+            payload.get("review_reason", ""),
+        )
         payload["image_url"] = f"/api/photos/{quote(payload['photo_id'])}/image" if payload.get("photo_id") else ""
         payload["review_note_summary"] = json_object(payload.pop("review_note_summary_json", "{}"))
         result.append(payload)
@@ -3654,7 +4425,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         existing = conn.execute(
             """
             SELECT review_id, parse_id, severity, issue, current_value, suggested_value,
-                   review_reason, status, resolution_note
+                   review_reason, assigned_role, assigned_to, priority, status, resolution_note
             FROM review_queue
             WHERE review_id = ?
             """,
@@ -3916,6 +4687,7 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
                 target_match_status = ?,
                 use_category = ?,
                 next_action = ?,
+                last_verified_at = ?,
                 updated_at = ?
             WHERE mouse_id = ?
             """,
@@ -3930,6 +4702,7 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
                 suggestions["target_match_status"],
                 suggestions["use_category"],
                 suggestions["next_action"],
+                updated_at,
                 updated_at,
                 payload.mouse_id,
             ),
@@ -4023,10 +4796,11 @@ def request_genotyping(payload: GenotypingRequestCreate) -> dict[str, Any]:
                 genotyping_status = 'submitted',
                 genotype_status = 'pending',
                 next_action = 'awaiting_result',
+                last_verified_at = ?,
                 updated_at = ?
             WHERE mouse_id = ?
             """,
-            (sample_id, sample_date, requested_at, payload.mouse_id),
+            (sample_id, sample_date, requested_at, requested_at, payload.mouse_id),
         )
         record_id = new_id("genotyping")
         conn.execute(
@@ -4166,6 +4940,137 @@ def create_strain_target_genotype(payload: StrainTargetGenotypeCreate) -> dict[s
         "purpose": payload.purpose,
         "active": True,
         "created_at": created_at,
+    }
+
+
+@app.get("/api/genotype-status-vocabulary")
+def list_genotype_status_vocabulary() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT status_key, display_label, meaning, workflow_stage,
+                   blocks_experiment, export_warning, legacy_genotyping_status,
+                   active, sort_order
+            FROM genotype_status_master
+            ORDER BY active DESC, sort_order, status_key
+            """
+        ).fetchall()
+    result = []
+    for row in rows:
+        payload = dict(row)
+        payload["blocks_experiment"] = bool(payload["blocks_experiment"])
+        payload["export_warning"] = bool(payload["export_warning"])
+        payload["active"] = bool(payload["active"])
+        payload["boundary"] = "canonical structured state"
+        result.append(payload)
+    return result
+
+
+@app.get("/api/review-vocabulary")
+def review_vocabulary() -> dict[str, Any]:
+    with connection() as conn:
+        role_rows = conn.execute(
+            """
+            SELECT role_key, display_label, responsibility, default_priority,
+                   active, sort_order
+            FROM review_role_master
+            ORDER BY active DESC, sort_order, role_key
+            """
+        ).fetchall()
+        priority_rows = conn.execute(
+            """
+            SELECT priority_key, display_label, severity_rank,
+                   export_blocking_hint, response_expectation,
+                   active, sort_order
+            FROM review_priority_master
+            ORDER BY active DESC, sort_order, priority_key
+            """
+        ).fetchall()
+    roles = []
+    for row in role_rows:
+        payload = dict(row)
+        payload["active"] = bool(payload["active"])
+        roles.append(payload)
+    priorities = []
+    for row in priority_rows:
+        payload = dict(row)
+        payload["export_blocking_hint"] = bool(payload["export_blocking_hint"])
+        payload["active"] = bool(payload["active"])
+        priorities.append(payload)
+    return {
+        "boundary": "canonical structured state",
+        "source_layer": "configured master",
+        "roles": roles,
+        "priorities": priorities,
+    }
+
+
+def genotype_status_context(mouse: Any, vocabulary: list[dict[str, Any]]) -> dict[str, Any]:
+    by_key = {item["status_key"]: item for item in vocabulary}
+    by_legacy = {
+        item["legacy_genotyping_status"]: item
+        for item in vocabulary
+        if item["legacy_genotyping_status"]
+    }
+    key = str(mouse["genotype_status"] or "").strip()
+    legacy = str(mouse["genotyping_status"] or "").strip()
+    if key in {"", "unknown", "pending"} and legacy in by_legacy:
+        return by_legacy[legacy]
+    return by_key.get(key) or by_legacy.get(legacy) or by_key["not_requested"]
+
+
+@app.get("/api/experiment-readiness")
+def experiment_readiness(query: str = "") -> dict[str, Any]:
+    with connection() as conn:
+        vocabulary = list_genotype_status_vocabulary()
+        rows = []
+        for mouse in mouse_rows(conn, query):
+            if mouse["status"] != "active":
+                continue
+            status = genotype_status_context(mouse, vocabulary)
+            reasons = []
+            if status["blocks_experiment"]:
+                reasons.append(f"Genotype status: {status['display_label']}")
+            if mouse["use_category"] != "experimental_candidate":
+                reasons.append(f"Use category: {mouse['use_category'] or 'unknown'}")
+            if mouse["next_action"] not in {"available_for_experiment", "consider_for_mating"} and mouse["use_category"] == "experimental_candidate":
+                reasons.append(f"Next action: {mouse['next_action'] or 'unknown'}")
+            ready = not status["blocks_experiment"] and mouse["use_category"] == "experimental_candidate"
+            readiness_status = "ready" if ready else ("blocked" if status["blocks_experiment"] else "warning")
+            rows.append(
+                {
+                    "mouse_id": mouse["mouse_id"],
+                    "display_id": mouse["display_id"],
+                    "strain": mouse["raw_strain_text"] or "",
+                    "sex": mouse["sex"] or "",
+                    "dob": mouse["dob_raw"] or mouse["dob_start"] or "",
+                    "cage": mouse["current_cage_label"] or "",
+                    "genotype_result": mouse["genotype_result"] or mouse["genotype"] or "",
+                    "genotype_status": status["status_key"],
+                    "genotype_status_label": status["display_label"],
+                    "blocks_experiment": status["blocks_experiment"],
+                    "target_match_status": mouse["target_match_status"] or "",
+                    "use_category": mouse["use_category"] or "",
+                    "next_action": mouse["next_action"] or "",
+                    "last_verified_at": mouse["last_verified_at"] or "",
+                    "readiness_status": readiness_status,
+                    "readiness_reason": "; ".join(reasons) if reasons else "Ready for experiment planning.",
+                    "source_note_item_id": mouse["source_note_item_id"] or "",
+                    "source_record_id": mouse["source_record_id"] or "",
+                }
+            )
+    ready_count = sum(1 for row in rows if row["readiness_status"] == "ready")
+    blocked_count = sum(1 for row in rows if row["readiness_status"] == "blocked")
+    warning_count = sum(1 for row in rows if row["readiness_status"] == "warning")
+    return {
+        "source_layer": "export or view",
+        "boundary": "export or view",
+        "query": query,
+        "ready_count": ready_count,
+        "blocked_count": blocked_count,
+        "warning_count": warning_count,
+        "total_count": len(rows),
+        "rows": rows,
     }
 
 
@@ -4334,6 +5239,15 @@ def move_mouse_to_cage(mouse_id: str, payload: MouseCageMove) -> dict[str, Any]:
                 json.dumps(details, ensure_ascii=False),
                 moved_at,
             ),
+        )
+        conn.execute(
+            """
+            UPDATE mouse_master
+            SET last_verified_at = ?,
+                updated_at = ?
+            WHERE mouse_id = ?
+            """,
+            (moved_at, moved_at, mouse_id),
         )
         conn.execute(
             """
@@ -4783,8 +5697,8 @@ def create_litter_offspring(litter_id: str, payload: LitterOffspringCreate) -> d
                 INSERT INTO mouse_master
                     (mouse_id, display_id, id_prefix, father_id, mother_id, litter_id,
                      raw_strain_text, sex, dob_raw, dob_start, status, use_category,
-                     next_action, source_record_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     next_action, source_record_id, last_verified_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     mouse_id,
@@ -4801,6 +5715,7 @@ def create_litter_offspring(litter_id: str, payload: LitterOffspringCreate) -> d
                     "stock",
                     "weaning_due" if payload.status == "weaning_pending" else "sample_needed",
                     source_record_id,
+                    now,
                     now,
                     now,
                 ),
@@ -4958,10 +5873,11 @@ def wean_litter(litter_id: str, payload: LitterWeanCreate) -> dict[str, Any]:
                 UPDATE mouse_master
                 SET status = CASE WHEN status IN ('weaning_pending', 'pre_weaning') THEN 'active' ELSE status END,
                     next_action = CASE WHEN next_action = 'weaning_due' THEN 'sample_needed' ELSE next_action END,
+                    last_verified_at = ?,
                     updated_at = ?
                 WHERE mouse_id = ?
                 """,
-                (now, offspring["mouse_id"]),
+                (now, now, offspring["mouse_id"]),
             )
             conn.execute(
                 """
@@ -5094,6 +6010,7 @@ MOUSE_SELECT = """
            genotype_result, genotype_result_date, target_match_status,
            use_category, next_action, source_note_item_id,
            current_card_snapshot_id, status, source_photo_id, source_record_id,
+           last_verified_at,
            created_at, updated_at,
            (
                SELECT a.cage_id
@@ -5403,11 +6320,262 @@ def export_staleness(conn: Any) -> dict[str, Any]:
     }
 
 
+def search_index_available(conn: Any) -> bool:
+    try:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'search_index'"
+        ).fetchone()
+        return row is not None
+    except Exception:
+        return False
+
+
+def latest_search_data_change(conn: Any) -> str:
+    return export_staleness(conn)["latest_data_change_at"]
+
+
+def search_text(*values: Any) -> str:
+    return " ".join(str(value or "").strip() for value in values if str(value or "").strip())
+
+
+def insert_search_document(
+    conn: Any,
+    entity_type: str,
+    entity_id: str,
+    title: str,
+    body: str,
+    source_layer: str,
+    updated_at: str,
+) -> None:
+    if not entity_id:
+        return
+    conn.execute(
+        """
+        INSERT INTO search_index
+            (entity_type, entity_id, title, body, source_layer, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (entity_type, entity_id, title, body, source_layer, updated_at),
+    )
+
+
+def rebuild_search_index(conn: Any) -> bool:
+    if not search_index_available(conn):
+        return False
+    conn.execute("DELETE FROM search_index")
+
+    for row in conn.execute(
+        """
+        SELECT mouse_id, display_id, raw_strain_text, sex, genotype,
+               genotype_status, genotype_result, sample_id, next_action,
+               status, source_note_item_id, source_record_id, updated_at
+        FROM mouse_master
+        """
+    ).fetchall():
+        insert_search_document(
+            conn,
+            "mouse",
+            row["mouse_id"],
+            row["display_id"],
+            search_text(
+                row["display_id"],
+                row["raw_strain_text"],
+                row["sex"],
+                row["genotype"],
+                row["genotype_status"],
+                row["genotype_result"],
+                row["sample_id"],
+                row["next_action"],
+                row["status"],
+                row["source_note_item_id"],
+                row["source_record_id"],
+            ),
+            "canonical structured state",
+            row["updated_at"] or "",
+        )
+
+    for row in conn.execute(
+        """
+        SELECT strain_id, strain_name, common_name, official_name, gene,
+               allele, background, source, status, owner, updated_at
+        FROM strain_registry
+        """
+    ).fetchall():
+        insert_search_document(
+            conn,
+            "strain",
+            row["strain_id"],
+            row["strain_name"],
+            search_text(*dict(row).values()),
+            "canonical structured state",
+            row["updated_at"] or "",
+        )
+
+    for row in conn.execute(
+        """
+        SELECT review_id, parse_id, severity, issue, current_value,
+               suggested_value, review_reason, status, assigned_role,
+               priority, created_at
+        FROM review_queue
+        """
+    ).fetchall():
+        insert_search_document(
+            conn,
+            "review",
+            row["review_id"],
+            row["issue"],
+            search_text(*dict(row).values()),
+            "review item",
+            row["created_at"] or "",
+        )
+
+    for row in conn.execute(
+        """
+        SELECT source_record_id, source_type, source_uri, source_label,
+               raw_payload, checksum, note, imported_at
+        FROM source_record
+        """
+    ).fetchall():
+        insert_search_document(
+            conn,
+            "source",
+            row["source_record_id"],
+            row["source_label"] or row["source_type"],
+            search_text(*dict(row).values()),
+            "raw source",
+            row["imported_at"] or "",
+        )
+
+    for row in conn.execute(
+        """
+        SELECT photo_id, original_filename, stored_path, status,
+               raw_source_kind, uploaded_at
+        FROM photo_log
+        """
+    ).fetchall():
+        insert_search_document(
+            conn,
+            "photo",
+            row["photo_id"],
+            row["original_filename"],
+            search_text(*dict(row).values()),
+            "raw source",
+            row["uploaded_at"] or "",
+        )
+
+    for row in conn.execute(
+        """
+        SELECT note_item_id, photo_id, parse_id, card_type, line_number,
+               raw_line_text, strike_status, parsed_type, interpreted_status,
+               parsed_mouse_display_id, parsed_ear_label_raw,
+               parsed_ear_label_code, parsed_ear_label_review_status,
+               parsed_metadata_json, created_at
+        FROM card_note_item_log
+        """
+    ).fetchall():
+        insert_search_document(
+            conn,
+            "note_line",
+            row["note_item_id"],
+            row["raw_line_text"],
+            search_text(*dict(row).values()),
+            "parsed or intermediate result",
+            row["created_at"] or "",
+        )
+
+    for row in conn.execute(
+        """
+        SELECT genotyping_id, mouse_id, sample_id, sample_date,
+               submitted_date, result_date, target_name, raw_result,
+               normalized_result, result_status, notes, updated_at
+        FROM genotyping_record
+        """
+    ).fetchall():
+        insert_search_document(
+            conn,
+            "genotyping",
+            row["genotyping_id"],
+            row["sample_id"] or row["target_name"] or row["genotyping_id"],
+            search_text(*dict(row).values()),
+            "event/history record",
+            row["updated_at"] or "",
+        )
+
+    latest = latest_search_data_change(conn)
+    conn.execute(
+        """
+        INSERT INTO search_index_meta (key, value)
+        VALUES ('latest_data_change_at', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (latest,),
+    )
+    return True
+
+
+def ensure_search_index_current(conn: Any) -> bool:
+    if not search_index_available(conn):
+        return False
+    latest = latest_search_data_change(conn)
+    indexed = conn.execute(
+        "SELECT value FROM search_index_meta WHERE key = 'latest_data_change_at'"
+    ).fetchone()
+    if indexed is None or indexed["value"] != latest:
+        return rebuild_search_index(conn)
+    return True
+
+
+def fts_query(term: str) -> str:
+    tokens = re.findall(r"\w+", term, flags=re.UNICODE)
+    return " ".join(token.replace('"', '""') for token in tokens[:8])
+
+
+def search_index_hits(conn: Any, term: str, limit: int = 50) -> list[dict[str, Any]]:
+    if not ensure_search_index_current(conn):
+        return []
+    query = fts_query(term)
+    if not query:
+        return []
+    try:
+        rows = conn.execute(
+            """
+            SELECT entity_type, entity_id, title,
+                   snippet(search_index, 3, '[', ']', '...', 12) AS snippet,
+                   source_layer, updated_at, rank
+            FROM search_index
+            WHERE search_index MATCH ?
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (query, limit),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [dict(row) for row in rows]
+
+
+def ids_from_hits(hits: list[dict[str, Any]], entity_type: str) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for hit in hits:
+        if hit["entity_type"] == entity_type and hit["entity_id"] not in seen:
+            result.append(str(hit["entity_id"]))
+            seen.add(str(hit["entity_id"]))
+    return result
+
+
+def order_by_ids(rows: list[Any], id_column: str, ordered_ids: list[str]) -> list[dict[str, Any]]:
+    order = {value: index for index, value in enumerate(ordered_ids)}
+    return sorted([dict(row) for row in rows], key=lambda row: order.get(str(row[id_column]), len(order)))
+
+
 def open_review_blockers(conn: Any, limit: int = 10) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT review.review_id, review.parse_id, review.severity, review.issue,
-               review.suggested_value, review.review_reason, review.created_at,
+               review.suggested_value, review.review_reason,
+               review.assigned_role, review.assigned_to, review.priority,
+               review.created_at,
                parse.source_name, parse.photo_id, photo.original_filename,
                (
                    SELECT COUNT(*)
@@ -5429,6 +6597,75 @@ def open_review_blockers(conn: Any, limit: int = 10) -> list[dict[str, Any]]:
         (limit,),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def genotype_export_blockers(conn: Any, limit: int = 25) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT mouse.mouse_id, mouse.display_id, mouse.raw_strain_text,
+               mouse.genotype_status, mouse.genotyping_status,
+               mouse.genotype_result, mouse.next_action,
+               status.status_key, status.display_label, status.meaning,
+               status.workflow_stage, status.blocks_experiment,
+               status.export_warning, status.legacy_genotyping_status
+        FROM mouse_master mouse
+        JOIN genotype_status_master status
+          ON (
+              status.status_key = mouse.genotype_status
+              OR (
+                  status.legacy_genotyping_status = mouse.genotyping_status
+                  AND mouse.genotype_status IN ('', 'unknown', 'pending', 'confirmed')
+              )
+          )
+        WHERE mouse.status = 'active'
+          AND status.active = 1
+          AND (status.blocks_experiment = 1 OR status.export_warning = 1)
+        ORDER BY status.blocks_experiment DESC,
+                 status.export_warning DESC,
+                 status.sort_order,
+                 mouse.display_id COLLATE NOCASE
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    blockers = []
+    for row in rows:
+        payload = dict(row)
+        issue = (
+            f"Genotype status blocks experiment: {payload['display_label']}"
+            if payload["blocks_experiment"]
+            else f"Genotype status export warning: {payload['display_label']}"
+        )
+        blockers.append(
+            {
+                "review_id": "",
+                "parse_id": "",
+                "severity": "High" if payload["blocks_experiment"] else "Medium",
+                "issue": issue,
+                "suggested_value": payload["genotype_result"] or payload["genotyping_status"] or payload["genotype_status"],
+                "review_reason": (
+                    f"Mouse {payload['display_id']} is {payload['display_label']} "
+                    f"({payload['status_key']}). {payload['meaning']}"
+                ),
+                "created_at": "",
+                "source_name": "genotype_status_master",
+                "photo_id": "",
+                "original_filename": "",
+                "note_line_count": 0,
+                "evidence_preview": f"{payload['display_id']} / {payload['raw_strain_text'] or '--'} / {payload['next_action'] or '--'}",
+                "assigned_role": "Experiment Planner",
+                "assigned_to": "",
+                "priority": "high" if payload["blocks_experiment"] else "medium",
+                "mouse_id": payload["mouse_id"],
+                "display_id": payload["display_id"],
+                "blocker_type": "genotype_status",
+                "status_key": payload["status_key"],
+                "workflow_stage": payload["workflow_stage"],
+                "blocks_experiment": bool(payload["blocks_experiment"]),
+                "export_warning": bool(payload["export_warning"]),
+            }
+        )
+    return blockers
 
 
 @app.get("/api/mice")
@@ -5744,59 +6981,125 @@ def mouse_audit_trace(mouse_id: str) -> dict[str, Any]:
 def search_records(query: str = "") -> dict[str, Any]:
     term = query.strip()
     if not term:
-        return {"query": "", "mice": [], "strains": [], "reviews": [], "sources": []}
+        return {"query": "", "mice": [], "strains": [], "reviews": [], "sources": [], "hits": []}
 
     with connection() as conn:
-        mouse_matches = [dict(row) for row in mouse_rows(conn, term)[:25]]
-        strain_clause, strain_params = contains_filter(
-            ["strain_name", "common_name", "official_name", "gene", "allele", "background", "source", "status", "owner"],
-            term,
-        )
-        strains = conn.execute(
-            f"""
-            SELECT strain_id, strain_name, gene, allele, background, source, status, owner
-            FROM strain_registry
-            WHERE {strain_clause}
-            ORDER BY strain_name COLLATE NOCASE
-            LIMIT 25
-            """,
-            strain_params,
-        ).fetchall()
-        review_clause, review_params = contains_filter(
-            ["parse_id", "severity", "issue", "current_value", "suggested_value", "review_reason", "status"],
-            term,
-        )
-        reviews = conn.execute(
-            f"""
-            SELECT review_id, parse_id, severity, issue, suggested_value, status
-            FROM review_queue
-            WHERE {review_clause}
-            ORDER BY created_at DESC
-            LIMIT 25
-            """,
-            review_params,
-        ).fetchall()
-        source_clause, source_params = contains_filter(
-            ["source_type", "source_uri", "source_label", "raw_payload", "note"],
-            term,
-        )
-        sources = conn.execute(
-            f"""
-            SELECT source_record_id, source_type, source_label, source_uri, note, imported_at
-            FROM source_record
-            WHERE {source_clause}
-            ORDER BY imported_at DESC
-            LIMIT 25
-            """,
-            source_params,
-        ).fetchall()
+        hits = search_index_hits(conn, term)
+        mouse_ids = ids_from_hits(hits, "mouse")
+        strain_ids = ids_from_hits(hits, "strain")
+        review_ids = ids_from_hits(hits, "review")
+        source_ids = ids_from_hits(hits, "source")
+
+        if mouse_ids:
+            placeholders = ", ".join("?" for _ in mouse_ids)
+            mouse_rows_by_hit = conn.execute(
+                f"""
+                {MOUSE_SELECT}
+                WHERE mouse_id IN ({placeholders})
+                """,
+                mouse_ids,
+            ).fetchall()
+            mouse_matches = order_by_ids(mouse_rows_by_hit, "mouse_id", mouse_ids)[:25]
+        else:
+            mouse_matches = [dict(row) for row in mouse_rows(conn, term)[:25]]
+
+        if strain_ids:
+            placeholders = ", ".join("?" for _ in strain_ids)
+            strain_rows = conn.execute(
+                f"""
+                SELECT strain_id, strain_name, gene, allele, background, source, status, owner
+                FROM strain_registry
+                WHERE strain_id IN ({placeholders})
+                """,
+                strain_ids,
+            ).fetchall()
+            strains = order_by_ids(strain_rows, "strain_id", strain_ids)[:25]
+        else:
+            strain_clause, strain_params = contains_filter(
+                ["strain_name", "common_name", "official_name", "gene", "allele", "background", "source", "status", "owner"],
+                term,
+            )
+            strains = [
+                dict(row)
+                for row in conn.execute(
+                    f"""
+                    SELECT strain_id, strain_name, gene, allele, background, source, status, owner
+                    FROM strain_registry
+                    WHERE {strain_clause}
+                    ORDER BY strain_name COLLATE NOCASE
+                    LIMIT 25
+                    """,
+                    strain_params,
+                ).fetchall()
+            ]
+
+        if review_ids:
+            placeholders = ", ".join("?" for _ in review_ids)
+            review_rows = conn.execute(
+                f"""
+                SELECT review_id, parse_id, severity, issue, suggested_value, status
+                FROM review_queue
+                WHERE review_id IN ({placeholders})
+                """,
+                review_ids,
+            ).fetchall()
+            reviews = order_by_ids(review_rows, "review_id", review_ids)[:25]
+        else:
+            review_clause, review_params = contains_filter(
+                ["parse_id", "severity", "issue", "current_value", "suggested_value", "review_reason", "status"],
+                term,
+            )
+            reviews = [
+                dict(row)
+                for row in conn.execute(
+                    f"""
+                    SELECT review_id, parse_id, severity, issue, suggested_value, status
+                    FROM review_queue
+                    WHERE {review_clause}
+                    ORDER BY created_at DESC
+                    LIMIT 25
+                    """,
+                    review_params,
+                ).fetchall()
+            ]
+
+        if source_ids:
+            placeholders = ", ".join("?" for _ in source_ids)
+            source_rows = conn.execute(
+                f"""
+                SELECT source_record_id, source_type, source_label, source_uri, note, imported_at
+                FROM source_record
+                WHERE source_record_id IN ({placeholders})
+                """,
+                source_ids,
+            ).fetchall()
+            sources = order_by_ids(source_rows, "source_record_id", source_ids)[:25]
+        else:
+            source_clause, source_params = contains_filter(
+                ["source_type", "source_uri", "source_label", "raw_payload", "note"],
+                term,
+            )
+            sources = [
+                dict(row)
+                for row in conn.execute(
+                    f"""
+                    SELECT source_record_id, source_type, source_label, source_uri, note, imported_at
+                    FROM source_record
+                    WHERE {source_clause}
+                    ORDER BY imported_at DESC
+                    LIMIT 25
+                    """,
+                    source_params,
+                ).fetchall()
+            ]
 
     return {
         "query": term,
         "mice": mouse_matches,
-        "strains": [dict(row) for row in strains],
-        "reviews": [dict(row) for row in reviews],
-        "sources": [dict(row) for row in sources],
+        "strains": strains,
+        "reviews": reviews,
+        "sources": sources,
+        "hits": hits,
     }
 
 
@@ -6038,6 +7341,7 @@ def export_mice_csv(query: str = "", require_ready: bool = False) -> Response:
         "target_match_status",
         "use_category",
         "next_action",
+        "last_verified_at",
         "source_note_item_id",
         "source_record_id",
     ]
@@ -6084,6 +7388,7 @@ def export_mice_csv(query: str = "", require_ready: bool = False) -> Response:
             blocked_error = {
                 "blocked_review_count": blocked_review_count,
                 "review_blockers": open_review_blockers(conn),
+                "readiness_warnings": genotype_export_blockers(conn),
                 "filename": filename,
                 "source_layer": "export or view",
             }
@@ -6121,6 +7426,7 @@ def export_genotyping_worklist_csv(query: str = "") -> Response:
         "target_match_status",
         "use_category",
         "next_action",
+        "last_verified_at",
         "source_note_item_id",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
@@ -6144,6 +7450,7 @@ def export_genotyping_worklist_csv(query: str = "") -> Response:
                     "target_match_status": payload.get("target_match_status") or "",
                     "use_category": payload.get("use_category") or "",
                     "next_action": payload.get("next_action") or "",
+                    "last_verified_at": payload.get("last_verified_at") or "",
                     "source_note_item_id": payload.get("source_note_item_id") or "",
                 }
             )
@@ -6186,7 +7493,8 @@ def list_export_log() -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT export_id, export_type, filename, query, row_count,
-                   blocked_review_count, status, exported_at, source_layer, note
+                   blocked_review_count, status, exported_at, source_layer,
+                   generated_by, generated_role, note
             FROM export_log
             ORDER BY exported_at DESC, rowid DESC
             LIMIT 25
@@ -6346,6 +7654,8 @@ def export_preview() -> dict[str, Any]:
         open_reviews = conn.execute(
             "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
         ).fetchone()["count"]
+        genotype_blocker_rows = genotype_export_blockers(conn)
+        genotype_blocker_count = len(genotype_blocker_rows)
         parsed = conn.execute("SELECT COUNT(*) AS count FROM parse_result").fetchone()["count"]
         mice = conn.execute(
             f"""
@@ -6581,6 +7891,9 @@ def export_preview() -> dict[str, Any]:
         "photos": photos,
         "parsed_results": parsed,
         "blocked_review_items": open_reviews,
+        "open_review_items": open_reviews,
+        "genotype_blocker_items": genotype_blocker_count,
+        "experiment_ready": genotype_blocker_count == 0 and bool(rows),
         "ready": open_reviews == 0 and bool(rows),
         "preview_rows": rows,
         "separation_rows": separation_rows,
@@ -6589,6 +7902,7 @@ def export_preview() -> dict[str, Any]:
         "separation_row_count": len(separation_rows),
         "animal_sheet_row_count": len(animal_rows),
         "review_blockers": [dict(row) for row in review_rows],
+        "readiness_warnings": genotype_blocker_rows,
         "generated_at": utc_now(),
     }
 
@@ -6612,19 +7926,36 @@ def import_sample_fixture() -> dict[str, Any]:
             parse_id = record.get("id") or new_id("parse")
             status = str(record.get("status") or "review")
             matched_scope = assigned_scope_match(scope, record)
-            if status == "auto" and not matched_scope:
+            match_info = assigned_scope_suggestion(conn, record)
+            if status == "auto" and not matched_scope and match_info.get("decision") == "auto_filled":
+                matched_scope = str(match_info.get("canonical") or "")
+                record = {**record, "matchedStrain": matched_scope, "strainMatch": match_info}
+            elif status == "auto" and not matched_scope:
                 status = "review"
+                suggestion = str(match_info.get("canonical") or "")
                 record = {
                     **record,
                     "status": status,
-                    "issue": "Outside assigned strain scope",
+                    "issue": (
+                        "Assigned strain fuzzy match needs review"
+                        if suggestion
+                        else "Outside assigned strain scope"
+                    ),
                     "severity": "Medium",
                     "currentValue": record.get("matchedStrain") or record.get("rawStrain") or "",
-                    "suggestedValue": "Confirm assigned strain or add to My Assigned Strains",
-                    "reviewReason": "Parsed strain is not in My Assigned Strains. Confirm scope before accepting this cage card.",
+                    "suggestedValue": (
+                        f"Review suggested assigned strain: {suggestion}"
+                        if suggestion
+                        else "Confirm assigned strain or add to My Assigned Strains"
+                    ),
+                    "reviewReason": strain_match_review_reason(
+                        match_info,
+                        "Parsed strain is not an exact match in My Assigned Strains. Confirm scope before accepting this cage card.",
+                    ),
+                    "strainMatch": match_info,
                 }
             elif matched_scope:
-                record = {**record, "matchedStrain": matched_scope}
+                record = {**record, "matchedStrain": matched_scope, "strainMatch": match_info}
             validation_review = validation_review_for_record(conn, record, status)
             if validation_review:
                 status = "review"

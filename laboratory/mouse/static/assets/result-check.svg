@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title desc">
+  <title id="title">Result check</title>
+  <desc id="desc">Genotype result check icon.</desc>
+  <circle cx="60" cy="60" r="48" fill="#edf8f2" stroke="#bfe3cd" stroke-width="4"/>
+  <rect x="33" y="29" width="54" height="66" rx="8" fill="#ffffff" stroke="#9bb5a8" stroke-width="4"/>
+  <path d="M45 52h30M45 66h18" stroke="#c5d2cc" stroke-width="4" stroke-linecap="round"/>
+  <path d="M45 82l10 10 22-29" fill="none" stroke="#10965f" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

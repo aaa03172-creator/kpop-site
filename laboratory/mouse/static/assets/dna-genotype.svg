@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title desc">
+  <title id="title">Genotype DNA</title>
+  <desc id="desc">DNA helix icon for genotype workflow.</desc>
+  <circle cx="60" cy="60" r="48" fill="#eef5ff" stroke="#b8d2ff" stroke-width="4"/>
+  <g fill="none" stroke-linecap="round" stroke-width="6">
+    <path d="M40 26c36 16 36 52 0 68" stroke="#1b72d8"/>
+    <path d="M80 26c-36 16-36 52 0 68" stroke="#0f6b5f"/>
+    <path d="M47 39h26M42 56h36M47 73h26" stroke="#8fb3de" stroke-width="4"/>
+  </g>
+</svg>
