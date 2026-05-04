@@ -51,6 +51,11 @@ If the layer is ambiguous, default to non-canonical until the PRD or another ado
 - Leave unrelated user files and untracked local artifacts untouched.
 - Keep generated folders and verification artifacts such as `node_modules/`, screenshots, logs, and temporary files out of commits unless explicitly adopted as source.
 - Before commit or push, run the relevant verification command and confirm there are no unintended unstaged changes.
+- After any verification, generation, browser check, image processing, or code change, immediately re-check `git status --short` and classify every changed or untracked file as task source, adopted documentation, generated artifact, cache, or unrelated user work.
+- Automatically delete or ignore disposable verification artifacts that match the current task, such as temporary screenshots, logs, cache files, and generated preview files; if a new disposable pattern appears repeatedly, add a narrow `.gitignore` rule in the same cleanup pass.
+- If new source or test files appear during review, inspect them before committing. Include them only when they directly verify or implement the current task; otherwise leave them unstaged and call out why.
+- Prefer small, coherent commits that leave the worktree clean after each completed task slice. Do not leave known task-related modifications unstaged after saying work is complete.
+- Before reporting that the worktree is clean, run `git status --short` once more and remove any ignored temporary files that are safe to delete.
 
 ## UI And Workflow Guidance
 - Do not replace the lab's handwritten cage-card workflow in the initial product direction.
