@@ -723,6 +723,16 @@ def safe_roi_root(photo_id: str, template_type: str) -> Path:
     return roi_root
 
 
+def save_jpeg_atomic(image: Image.Image, path: Path, *, quality: int = 92) -> None:
+    temp_path = path.with_name(f".{path.stem}-{new_id('roi_tmp')}{path.suffix}")
+    try:
+        image.save(temp_path, "JPEG", quality=quality)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
 def generate_roi_preview(photo_id: str, template_type: str | None = None) -> dict[str, Any]:
     presets = load_roi_presets()
     photo, image_path, media_type = photo_image_path(photo_id)
@@ -748,7 +758,7 @@ def generate_roi_preview(photo_id: str, template_type: str | None = None) -> dic
     card_image, trim_source = trim_card_color_body(card_image, selected_template)
     roi_root = safe_roi_root(photo_id, selected_template)
     card_path = roi_root / "card.jpg"
-    card_image.save(card_path, "JPEG", quality=92)
+    save_jpeg_atomic(card_image, card_path, quality=92)
 
     crops: list[dict[str, Any]] = []
     for roi in preset.get("rois", []):
@@ -757,7 +767,7 @@ def generate_roi_preview(photo_id: str, template_type: str | None = None) -> dic
             continue
         rect = normalized_roi_rect(roi, card_image.width, card_image.height)
         crop_path = roi_root / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', label)}.jpg"
-        card_image.crop(rect).save(crop_path, "JPEG", quality=92)
+        save_jpeg_atomic(card_image.crop(rect), crop_path, quality=92)
         crops.append(
             {
                 "label": label,
@@ -795,21 +805,29 @@ def get_photo_roi_preview(photo_id: str, template_type: str | None = None) -> di
 
 
 @app.get("/api/photos/{photo_id}/roi-card/image")
-def get_photo_roi_card_image(photo_id: str, template_type: str | None = None) -> FileResponse:
+def get_photo_roi_card_image(photo_id: str, template_type: str | None = None) -> Response:
     preview = generate_roi_preview(photo_id, template_type)
     roi_root = safe_roi_root(photo_id, preview["template_type"])
-    return FileResponse(roi_root / "card.jpg", media_type="image/jpeg", filename=f"{photo_id}-card.jpg")
+    return Response(
+        (roi_root / "card.jpg").read_bytes(),
+        media_type="image/jpeg",
+        headers={"Content-Disposition": f'inline; filename="{photo_id}-card.jpg"'},
+    )
 
 
 @app.get("/api/photos/{photo_id}/roi/{roi_label}/image")
-def get_photo_roi_image(photo_id: str, roi_label: str, template_type: str | None = None) -> FileResponse:
+def get_photo_roi_image(photo_id: str, roi_label: str, template_type: str | None = None) -> Response:
     preview = generate_roi_preview(photo_id, template_type)
     labels = {crop["label"] for crop in preview["crops"]}
     if roi_label not in labels:
         raise HTTPException(status_code=404, detail="ROI label not found for the selected template.")
     roi_root = safe_roi_root(photo_id, preview["template_type"])
     crop_name = re.sub(r"[^A-Za-z0-9_.-]", "_", roi_label)
-    return FileResponse(roi_root / f"{crop_name}.jpg", media_type="image/jpeg", filename=f"{photo_id}-{crop_name}.jpg")
+    return Response(
+        (roi_root / f"{crop_name}.jpg").read_bytes(),
+        media_type="image/jpeg",
+        headers={"Content-Disposition": f'inline; filename="{photo_id}-{crop_name}.jpg"'},
+    )
 
 
 def image_input_from_path(image_path: Path, *, detail: str) -> dict[str, Any]:
@@ -1059,7 +1077,7 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
     if card_type not in {"Separated", "Mating", "unknown"}:
         card_type = "unknown"
     uncertain_fields = [
-        str(item)
+        str(item).strip()
         for item in (draft.get("uncertain_fields") if isinstance(draft.get("uncertain_fields"), list) else [])
         if str(item).strip()
     ]
