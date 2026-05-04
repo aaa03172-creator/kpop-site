@@ -16,6 +16,7 @@ from typing import Any
 
 try:
     from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.worksheet import Worksheet
 except ModuleNotFoundError as error:
     raise SystemExit(
@@ -30,6 +31,10 @@ def normalize_cell(value: Any) -> str:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     return " ".join(str(value).split())
+
+
+def cell_coordinate(row_index: int, column_index: int) -> str:
+    return f"{get_column_letter(column_index)}{row_index}"
 
 
 def parse_int_like(value: Any) -> int | None:
@@ -103,10 +108,10 @@ def parse_distribution_workbook(workbook_path: Path, sheet_name: str | None = No
                         "source_sheet": ws.title,
                         "source_row_number": row_index,
                         "source_cells": {
-                            "responsible_person": ws.cell(row_index, person_col).coordinate,
-                            "mating_type": ws.cell(row_index, block["mating_col"]).coordinate,
-                            "cage_count": ws.cell(row_index, block["cage_count_col"]).coordinate,
-                            "mating_cage_count": ws.cell(row_index, block["mating_cage_count_col"]).coordinate,
+                            "responsible_person": cell_coordinate(row_index, person_col),
+                            "mating_type": cell_coordinate(row_index, block["mating_col"]),
+                            "cage_count": cell_coordinate(row_index, block["cage_count_col"]),
+                            "mating_cage_count": cell_coordinate(row_index, block["mating_cage_count_col"]),
                         },
                         "review_status": "candidate",
                     }
