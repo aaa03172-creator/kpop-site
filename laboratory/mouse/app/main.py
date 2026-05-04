@@ -12,6 +12,7 @@ import base64
 import os
 import math
 import sqlite3
+from datetime import date
 from urllib.parse import quote
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -370,7 +371,43 @@ def load_roi_presets() -> dict[str, Any]:
         presets = json.load(file)
     if not isinstance(presets, dict) or not presets:
         raise HTTPException(status_code=500, detail="ROI preset configuration is invalid.")
+    if not validate_roi_presets(presets):
+        raise HTTPException(status_code=500, detail="ROI preset configuration is invalid.")
     return presets
+
+
+def validate_roi_presets(presets: dict[str, Any]) -> bool:
+    for template_key, preset in presets.items():
+        if not isinstance(template_key, str) or not template_key.strip() or not isinstance(preset, dict):
+            return False
+        if preset.get("boundary") != "parsed or intermediate result":
+            return False
+        rois = preset.get("rois")
+        if not isinstance(rois, list) or not rois:
+            return False
+        seen_labels: set[str] = set()
+        for roi in rois:
+            if not isinstance(roi, dict):
+                return False
+            label = str(roi.get("label") or "").strip()
+            if not label or label in seen_labels:
+                return False
+            seen_labels.add(label)
+            target_fields = roi.get("target_fields")
+            if not isinstance(target_fields, list) or not all(isinstance(field, str) and field.strip() for field in target_fields):
+                return False
+            try:
+                x = float(roi.get("x"))
+                y = float(roi.get("y"))
+                width = float(roi.get("w"))
+                height = float(roi.get("h"))
+            except (TypeError, ValueError):
+                return False
+            if x < 0 or y < 0 or width <= 0 or height <= 0:
+                return False
+            if x + width > 1 or y + height > 1:
+                return False
+    return True
 
 
 def normalized_roi_rect(roi: dict[str, Any], card_width: int, card_height: int) -> tuple[int, int, int, int]:
@@ -787,20 +824,11 @@ def image_input_from_path(image_path: Path, *, detail: str) -> dict[str, Any]:
 def ai_transcription_image_content(photo_id: str, image_path: Path, media_type: str, detail: str) -> dict[str, Any]:
     try:
         preview = generate_roi_preview(photo_id)
-    except HTTPException:
-        image_bytes = image_path.read_bytes()
-        if len(image_bytes) > 20 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Photo is too large for AI draft transcription.")
-        data_url = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
-        return {
-            "mode": "full_photo_fallback",
-            "payload_minimization": "Selected source photo only; ROI crop generation was unavailable for this image; no colony records or Excel rows sent.",
-            "extraction_regions": [],
-            "content": [
-                {"type": "input_text", "text": "Image 1: full selected source photo fallback. Use only visible card text."},
-                {"type": "input_image", "image_url": data_url, "detail": detail},
-            ],
-        }
+    except HTTPException as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=f"ROI crop generation is required before external AI transcription: {error.detail}",
+        ) from error
 
     roi_root = safe_roi_root(photo_id, preview["template_type"])
     content: list[dict[str, Any]] = [
@@ -917,12 +945,32 @@ def conservative_normalized_date(raw_value: Any, normalized_value: Any, uncertai
         return ""
     if "?" in raw or "?" in normalized:
         return ""
-    if re.search(r"[~–—]|\\.\\s*$", raw):
-        return ""
     # Preserve normalized values only when the raw text visibly contains a full date-like sequence.
-    if not re.search(r"\\d{2,4}\\D+\\d{1,2}\\D+\\d{1,2}", raw):
+    visible_full_dates = re.findall(r"\d{2,4}\D+\d{1,2}\D+\d{1,2}", raw)
+    if not visible_full_dates:
+        return ""
+    partial_range = bool(
+        "/" in normalized
+        or any(separator in raw for separator in ("~", "\u2013", "\u2014"))
+        or re.search(r"\d{2,4}\D+\d{1,2}\D+\d{1,2}\s*-\s*\d{1,2}\b", raw)
+    )
+    if partial_range and len(visible_full_dates) < 2:
+        return ""
+    if not valid_iso_date_or_range(normalized):
         return ""
     return normalized
+
+
+def valid_iso_date_or_range(value: str) -> bool:
+    parts = value.split("/")
+    if len(parts) not in {1, 2}:
+        return False
+    for part in parts:
+        try:
+            date.fromisoformat(part)
+        except ValueError:
+            return False
+    return True
 
 
 def ai_draft_schema() -> dict[str, Any]:

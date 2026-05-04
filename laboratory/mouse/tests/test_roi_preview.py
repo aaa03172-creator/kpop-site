@@ -4,9 +4,12 @@ import io
 import shutil
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
 from PIL import Image, ImageDraw
 
 from app import db
+from app import main as app_main
 from app.main import ROOT, detect_card_bbox, generate_roi_preview
 
 
@@ -76,3 +79,35 @@ def test_roi_preview_is_cache_artifact_and_preserves_raw_photo(tmp_path: Path) -
         db.DB_PATH = old_db_path
         shutil.rmtree(photo_dir, ignore_errors=True)
         shutil.rmtree(roi_dir, ignore_errors=True)
+
+
+def test_roi_preset_loader_rejects_invalid_coordinates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    preset_path = tmp_path / "roi_presets.json"
+    preset_path.write_text(
+        """
+        {
+          "bad_template": {
+            "label": "Bad template",
+            "boundary": "parsed or intermediate result",
+            "rois": [
+              {
+                "label": "sex_raw",
+                "target_fields": ["sex_raw"],
+                "x": 0.9,
+                "y": 0.2,
+                "w": 0.3,
+                "h": 0.1
+              }
+            ]
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_main, "ROI_PRESET_PATH", preset_path)
+
+    with pytest.raises(HTTPException) as error:
+        app_main.load_roi_presets()
+
+    assert error.value.status_code == 500
+    assert "ROI preset configuration is invalid" in str(error.value.detail)
