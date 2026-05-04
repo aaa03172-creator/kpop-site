@@ -287,11 +287,18 @@ def review_attention_level(item: dict[str, Any], parse_payload: dict[str, Any] |
     source_key = source_name.lower()
     priority = str(item.get("priority") or "").strip().lower()
     severity = str(item.get("severity") or "").strip().lower()
-    uncertain_fields = [
-        normalize_uncertain_field_name(field)
-        for field in (payload.get("uncertainFields") if isinstance(payload.get("uncertainFields"), list) else [])
-        if str(field).strip()
-    ]
+    raw_uncertain_fields: list[Any] = []
+    for key in ("uncertainFields", "uncertain_fields"):
+        if isinstance(payload.get(key), list):
+            raw_uncertain_fields.extend(payload[key])
+    uncertain_fields = []
+    seen_uncertain_fields: set[str] = set()
+    for field in raw_uncertain_fields:
+        field_name = normalize_uncertain_field_name(field)
+        if not field_name or field_name in seen_uncertain_fields:
+            continue
+        seen_uncertain_fields.add(field_name)
+        uncertain_fields.append(field_name)
     confidence_source = payload["confidence"] if "confidence" in payload else item.get("confidence", 0)
     confidence = bounded_float(confidence_source)
     raw_strain = str(payload.get("rawStrain") or "").strip()

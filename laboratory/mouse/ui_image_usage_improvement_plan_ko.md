@@ -36,6 +36,8 @@ Images should be used only when they improve orientation or reduce cognitive loa
 - Current PNG files are about 1 MB each and 1254px square. Many are displayed at 28px to 58px, which is inefficient.
 - SVG and PNG variants both remain in `static/assets/`; this is acceptable temporarily but should be cleaned once the final direction is chosen.
 
+These findings describe the pre-cleanup state. The implementation status below records which items have since been resolved.
+
 ## Keep, Reduce, Remove
 
 ### Keep
@@ -194,3 +196,4 @@ This gives the largest readability improvement while minimizing risk to the MVP 
 - Export Readiness visual board was reduced in height and image scale so it reads as supporting context rather than a dominant panel.
 - Phase 3 asset optimization: implemented for current PNG assets; kept generated PNGs are resized/compressed and each representative PNG is now under 250 KB.
 - Unused SVG backup assets were removed after confirming the UI no longer references them.
+- Flat illustration refresh: implemented with the built-in image generation tool. The remaining project PNG assets now use a flatter UI illustration style, with chroma-key backgrounds removed where generated, replacing the earlier 3D render look.

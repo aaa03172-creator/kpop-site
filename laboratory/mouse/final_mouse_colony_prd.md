@@ -14,6 +14,7 @@ Adopted project documents:
 - `roi_card_extraction_plan_ko.md`: non-canonical implementation planning note for ROI-based cage-card extraction and reviewable field evidence.
 - `wet_lab_operational_review_ko.md`: non-canonical operational review note from a wet-lab workflow perspective.
 - `ui_image_usage_improvement_plan_ko.md`: non-canonical UI review note for reducing decorative image noise while preserving evidence-first workflows.
+- `review_burden_reduction_plan_ko.md`: non-canonical workflow planning note for separating Focus Review blockers from quick checks and trace-only uncertainty.
 - `mvp_vertical_slice_plan.md`: non-canonical implementation planning note for the first end-to-end workflow.
 - `mousedb_cli_first_review_ko.md`: non-canonical review note for a standalone CLI-first MouseDB core that can later be called by PaperPipe, a personal Research Assistant, API, or MCP server.
 

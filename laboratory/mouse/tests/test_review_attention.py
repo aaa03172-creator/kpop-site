@@ -103,6 +103,27 @@ def test_review_attention_normalizes_uncertain_field_aliases() -> None:
     assert result["attention_level"] == "must_review"
 
 
+def test_review_attention_reads_snake_case_uncertain_fields() -> None:
+    result = review_attention_level(
+        {
+            "status": "open",
+            "issue": "AI-extracted photo transcription needs review",
+            "source_name": "ai_photo_extraction",
+            "photo_id": "photo_1",
+            "priority": "medium",
+            "severity": "Medium",
+        },
+        {
+            "confidence": 58,
+            "rawStrain": "ApoM Tg/Tg",
+            "sexRaw": "female",
+            "uncertain_fields": ["matched_strain"],
+        },
+    )
+
+    assert result["attention_level"] == "must_review"
+
+
 def test_review_attention_preserves_zero_payload_confidence() -> None:
     result = review_attention_level(
         {
