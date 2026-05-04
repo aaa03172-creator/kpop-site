@@ -4,8 +4,8 @@
 
 이 문서는 cage-card OCR/ROI 추출 이후 사용자에게 요구되는 확인 작업이 과도해지는 문제를 검토하고, 실제 연구실 workflow에서 피로감을 줄이기 위한 제품 방향과 구현 기준을 정리한다.
 
-분류: product/workflow design document / non-canonical planning note  
-데이터 경계: review item 설계 및 export/view UX 계획  
+분류: product/workflow design document / non-canonical planning note
+데이터 경계: review item 설계 및 export/view UX 계획
 Canonical status: non-canonical. 이 문서는 review 부담을 줄이기 위한 제품/UX 계획이며, `final_mouse_colony_prd.md`, `AGENTS.md`, adopted project documents를 대체하거나 단독으로 canonical schema/API behavior를 확정하지 않는다.
 작성 기준일: 2026-05-04
 
@@ -265,7 +265,7 @@ Focus Review 조건:
 
 1. `review_attention_level` 계산 함수 추가
 
-   입력: review item, parse payload, photo source  
+   입력: review item, parse payload, photo source
    출력: `must_review`, `quick_check`, `trace_only`, `hidden_default`
 
 2. `/api/review-items` 응답에 attention level과 reason 추가
@@ -274,7 +274,7 @@ Focus Review 조건:
 
 3. Review Queue 기본 필터를 Focus Review로 변경
 
-   기본 표시: must_review만  
+   기본 표시: must_review만
    토글: quick_check 포함, all review 포함
 
 4. numeric note review 그룹화
