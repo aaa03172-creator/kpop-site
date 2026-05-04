@@ -965,11 +965,14 @@ def valid_iso_date_or_range(value: str) -> bool:
     parts = value.split("/")
     if len(parts) not in {1, 2}:
         return False
+    parsed_dates: list[date] = []
     for part in parts:
         try:
-            date.fromisoformat(part)
+            parsed_dates.append(date.fromisoformat(part))
         except ValueError:
             return False
+    if len(parsed_dates) == 2 and parsed_dates[0] > parsed_dates[1]:
+        return False
     return True
 
 
