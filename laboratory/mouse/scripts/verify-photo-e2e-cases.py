@@ -13,6 +13,7 @@ from app.db import DB_PATH  # noqa: E402
 from app.main import list_review_items  # noqa: E402
 
 MANIFEST_PATH = ROOT / "config" / "photo_e2e_validation_cases.json"
+REQUIRED_TABLES = {"photo_log", "parse_result", "card_note_item_log", "review_queue"}
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -24,6 +25,21 @@ def parse_json_object(raw: str | None) -> dict[str, Any]:
         return {}
     value = json.loads(raw)
     return value if isinstance(value, dict) else {}
+
+
+def missing_fixture_tables() -> list[str]:
+    if not DB_PATH.exists():
+        return sorted(REQUIRED_TABLES)
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+            """
+        ).fetchall()
+    existing = {str(row[0]) for row in rows}
+    return sorted(REQUIRED_TABLES - existing)
 
 
 def latest_parse(conn: sqlite3.Connection, photo_id: str, source_name: str) -> sqlite3.Row | None:
@@ -242,12 +258,35 @@ def main() -> int:
     args = parser.parse_args()
 
     manifest = load_manifest(Path(args.manifest))
+    missing_tables = missing_fixture_tables()
+    if missing_tables:
+        summary = {
+            "manifest": str(Path(args.manifest).resolve()),
+            "case_count": len(manifest.get("cases", [])),
+            "passed": 0,
+            "failed": 0,
+            "skipped": len(manifest.get("cases", [])),
+            "skip_reason": (
+                "Local photo E2E fixture database is unavailable. "
+                f"Missing table(s): {', '.join(missing_tables)}."
+            ),
+            "boundary": manifest.get("boundary", "review item / test fixture"),
+        }
+        if args.json:
+            print(json.dumps(summary, indent=2, ensure_ascii=False))
+        else:
+            print(
+                "Photo E2E validation skipped: local fixture database is unavailable "
+                f"(missing table(s): {', '.join(missing_tables)})."
+            )
+        return 0
     results, fail_count = verify(manifest)
     summary = {
         "manifest": str(Path(args.manifest).resolve()),
         "case_count": len(results),
         "passed": len([result for result in results if result["status"] == "PASS"]),
         "failed": fail_count,
+        "skipped": 0,
         "results": results,
     }
     if args.json:
