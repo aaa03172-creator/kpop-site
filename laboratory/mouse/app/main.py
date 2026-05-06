@@ -2167,6 +2167,12 @@ def resolve_note_label_correction(
     resolved_at: str,
 ) -> dict[str, Any] | None:
     decision = payload.note_label_decision.strip()
+    is_grouped_numeric_review = review_id == f"review_unlabeled_numeric_{parse_id}"
+    if is_grouped_numeric_review and not decision:
+        raise HTTPException(
+            status_code=400,
+            detail="note_label_decision is required for grouped numeric note reviews.",
+        )
     if not decision:
         return None
     allowed_decisions = {"mouse_item", "count_note", "reviewed_note", "ignored_note"}
@@ -2176,7 +2182,7 @@ def resolve_note_label_correction(
             detail="note_label_decision must be mouse_item, count_note, reviewed_note, or ignored_note.",
         )
 
-    if review_id == f"review_unlabeled_numeric_{parse_id}":
+    if is_grouped_numeric_review:
         grouped_notes = conn.execute(
             """
             SELECT note_item_id, photo_id, parse_id, card_snapshot_id, card_type, line_number, raw_line_text, strike_status,
@@ -4725,7 +4731,16 @@ def list_review_items() -> list[dict[str, Any]]:
                                 SELECT note.note_item_id
                                 FROM card_note_item_log note
                                 WHERE note.parse_id = review.parse_id
-                                  AND note.parsed_type = 'unlabeled_numeric_note'
+                                  AND (
+                                      note.parsed_type = 'unlabeled_numeric_note'
+                                      OR note.note_item_id IN (
+                                          SELECT correction.entity_id
+                                          FROM correction_log correction
+                                          WHERE correction.review_id = review.review_id
+                                            AND correction.entity_type = 'note_item'
+                                            AND correction.field_name = 'parsed_label'
+                                      )
+                                  )
                                 ORDER BY note.line_number
                                 LIMIT 1
                             )

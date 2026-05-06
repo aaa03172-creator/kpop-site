@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+
 from app import db
 from app.main import (
     ReviewResolutionCreate,
@@ -564,6 +567,10 @@ def test_grouped_numeric_note_resolution_closes_all_grouped_lines(tmp_path: Path
                 """,
                 ("review_unlabeled_numeric_parse_numeric_group",),
             ).fetchall()
+        review_after_resolution = next(
+            item for item in list_review_items()
+            if item["review_id"] == "review_unlabeled_numeric_parse_numeric_group"
+        )
 
         assert resolve_payload["note_label_update"]["updated_note_item_count"] == 3
         assert {row["parsed_type"] for row in note_items} == {"reviewed_note"}
@@ -573,6 +580,91 @@ def test_grouped_numeric_note_resolution_closes_all_grouped_lines(tmp_path: Path
             "note_parse_numeric_group_2",
             "note_parse_numeric_group_3",
         ]
+        assert review_after_resolution["note_item_id"] == "note_parse_numeric_group_1"
+        assert review_after_resolution["review_note_raw_line"] == "1"
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_grouped_numeric_note_resolution_requires_label_decision(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_numeric_group",
+                    "numeric-card.jpg",
+                    "data/photos/test/numeric-card.jpg",
+                    "2026-05-04T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_numeric_group",
+                    "photo_numeric_group",
+                    "manual_photo_transcription",
+                    json.dumps({"notes": [{"raw": "1"}, {"raw": "2"}, {"raw": "3"}]}, ensure_ascii=False),
+                    "2026-05-04T00:00:00Z",
+                    "review",
+                    70,
+                    1,
+                ),
+            )
+            write_note_items_and_mouse_candidates(
+                conn,
+                "parse_numeric_group",
+                {
+                    "type": "Separated",
+                    "sourcePhotoId": "photo_numeric_group",
+                    "notes": [{"raw": "1"}, {"raw": "2"}, {"raw": "3"}],
+                },
+                "review",
+            )
+
+        with pytest.raises(HTTPException) as exc_info:
+            resolve_review_item(
+                "review_unlabeled_numeric_parse_numeric_group",
+                ReviewResolutionCreate(
+                    resolution_note="Resolve without classifying numeric evidence.",
+                    resolved_value="reviewed",
+                    note_item_id="note_parse_numeric_group_1",
+                ),
+            )
+
+        with db.connection() as conn:
+            review = conn.execute(
+                "SELECT status FROM review_queue WHERE review_id = ?",
+                ("review_unlabeled_numeric_parse_numeric_group",),
+            ).fetchone()
+            remaining_review_notes = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM card_note_item_log
+                WHERE parse_id = ?
+                  AND parsed_type = 'unlabeled_numeric_note'
+                  AND needs_review = 1
+                """,
+                ("parse_numeric_group",),
+            ).fetchone()
+
+        assert exc_info.value.status_code == 400
+        assert "note_label_decision" in exc_info.value.detail
+        assert review["status"] == "open"
+        assert remaining_review_notes["count"] == 3
     finally:
         db.DB_PATH = old_db_path
 

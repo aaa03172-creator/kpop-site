@@ -3431,7 +3431,7 @@
       const noteLabelControls = item.issue === "Unlabeled numeric note needs review"
         ? `
           <select class="note-label-decision" aria-label="Note label decision">
-            <option value="">No note label correction</option>
+            <option value="" selected disabled>Choose note label decision</option>
             <option value="count_note">Count note</option>
             <option value="mouse_item">Mouse ID</option>
             <option value="reviewed_note">Reviewed note</option>
@@ -3503,6 +3503,11 @@
       }
       noteInput.value = note;
       const resolvedValue = resolvedValueInput.value;
+      const noteLabelDecision = container.querySelector(".note-label-decision");
+      if (noteLabelDecision && !noteLabelDecision.value) {
+        noteLabelDecision.focus();
+        return null;
+      }
       const noteLabelCountValue = container.querySelector(".note-label-count")?.value || "";
       return {
         resolution_note: note,
@@ -3514,7 +3519,7 @@
         correction_before_value: button.dataset.currentValue || "",
         correction_after_value: resolvedValue || "",
         note_item_id: button.dataset.noteItemId || "",
-        note_label_decision: container.querySelector(".note-label-decision")?.value || "",
+        note_label_decision: noteLabelDecision?.value || "",
         note_label_mouse_id: container.querySelector(".note-label-mouse-id")?.value || "",
         note_label_count: noteLabelCountValue ? Number(noteLabelCountValue) : null
       };
