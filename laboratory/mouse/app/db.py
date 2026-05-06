@@ -45,9 +45,83 @@ EAR_LABEL_ALIAS_SEEDS = [
 ]
 
 
+GENOTYPE_STATUS_MASTER_SEEDS = [
+    ("not_requested", "Not requested", "No genotyping request or sample has been recorded.", "pre_result", 1, 1, "not_sampled", 10),
+    ("requested", "Requested", "Genotyping has been requested but no result is available.", "in_progress", 1, 1, "submitted", 20),
+    ("sample_collected", "Sample collected", "A tail/sample was collected and is waiting for submission or result.", "in_progress", 1, 1, "sampled", 30),
+    ("pending", "Pending", "A submitted sample is waiting for a genotype result.", "in_progress", 1, 1, "pending", 40),
+    ("failed", "Failed", "The assay failed and should be reviewed or repeated.", "review", 1, 1, "failed", 50),
+    ("inconclusive", "Inconclusive", "The result is ambiguous and must remain reviewable.", "review", 1, 1, "inconclusive", 60),
+    ("repeat_requested", "Repeat requested", "A repeat genotyping run has been requested.", "review", 1, 1, "repeat_requested", 70),
+    ("confirmed", "Confirmed", "A genotype result has been accepted for operational use.", "final", 0, 0, "resulted", 80),
+    ("superseded", "Superseded", "A previous genotype result was replaced by newer evidence.", "final", 1, 1, "superseded", 90),
+]
+
+
+REVIEW_ROLE_MASTER_SEEDS = [
+    (
+        "colony_reviewer",
+        "Colony Reviewer",
+        "Reviews cage-card photos, note-line evidence, mouse identity continuity, cage movement, and day-to-day colony state.",
+        "medium",
+        10,
+    ),
+    (
+        "strain_curator",
+        "Strain Curator",
+        "Reviews strain aliases, assigned strain scope, allele/genotype wording, and strain registry corrections.",
+        "medium",
+        20,
+    ),
+    (
+        "experiment_planner",
+        "Experiment Planner",
+        "Reviews experiment readiness, sample/genotyping worklists, and mice that should or should not be released for use.",
+        "high",
+        30,
+    ),
+    (
+        "data_export_manager",
+        "Data / Export Manager",
+        "Reviews predecessor Excel rows, workbook reconciliation, export blockers, and final Excel handoff readiness.",
+        "medium",
+        40,
+    ),
+]
+
+
+REVIEW_PRIORITY_MASTER_SEEDS = [
+    (
+        "high",
+        "High",
+        1,
+        1,
+        "Blocks export, experiment release, or risky canonical state changes until reviewed.",
+        10,
+    ),
+    (
+        "medium",
+        "Medium",
+        2,
+        1,
+        "Should be reviewed before routine export, but can usually wait behind high-risk identity or genotype conflicts.",
+        20,
+    ),
+    (
+        "low",
+        "Low",
+        3,
+        0,
+        "Useful cleanup or documentation review that should stay visible without stopping urgent work.",
+        30,
+    ),
+]
+
+
 def ensure_data_dirs() -> None:
     (DATA_DIR / "photos").mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "exports").mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "roi").mkdir(parents=True, exist_ok=True)
 
 
 def connect() -> sqlite3.Connection:
@@ -64,6 +138,9 @@ def connection() -> Iterator[sqlite3.Connection]:
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -112,6 +189,7 @@ def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
             "status": "TEXT NOT NULL DEFAULT 'active'",
             "source_photo_id": "TEXT",
             "source_record_id": "TEXT",
+            "last_verified_at": "TEXT NOT NULL DEFAULT ''",
             "created_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
             "updated_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
         },
@@ -164,6 +242,68 @@ def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
             "review_id": "TEXT",
         },
     )
+    ensure_columns(
+        conn,
+        "review_queue",
+        {
+            "assigned_role": "TEXT NOT NULL DEFAULT 'Colony Reviewer'",
+            "assigned_to": "TEXT NOT NULL DEFAULT ''",
+            "priority": "TEXT NOT NULL DEFAULT 'medium'",
+        },
+    )
+    ensure_columns(
+        conn,
+        "action_log",
+        {
+            "performed_by": "TEXT NOT NULL DEFAULT 'local_user'",
+            "performed_role": "TEXT NOT NULL DEFAULT 'Colony Reviewer'",
+        },
+    )
+    ensure_columns(
+        conn,
+        "export_log",
+        {
+            "generated_by": "TEXT NOT NULL DEFAULT 'local_user'",
+            "generated_role": "TEXT NOT NULL DEFAULT 'Data / Export Manager'",
+        },
+    )
+    conn.execute(
+        """
+        UPDATE review_queue
+        SET priority = CASE
+                WHEN LOWER(severity) = 'high' THEN 'high'
+                WHEN LOWER(severity) = 'low' THEN 'low'
+                ELSE priority
+            END
+        WHERE priority = 'medium'
+        """
+    )
+    conn.execute(
+        """
+        UPDATE review_queue
+        SET assigned_role = 'Data / Export Manager'
+        WHERE assigned_role = 'Colony Reviewer'
+          AND (
+              LOWER(issue) LIKE '%excel%'
+              OR LOWER(issue) LIKE '%export%'
+              OR LOWER(issue) LIKE '%workbook%'
+              OR LOWER(issue) LIKE '%legacy%'
+              OR LOWER(issue) LIKE '%comparison%'
+          )
+        """
+    )
+    conn.execute(
+        """
+        UPDATE review_queue
+        SET assigned_role = 'Strain Curator'
+        WHERE assigned_role = 'Colony Reviewer'
+          AND (
+              LOWER(issue) LIKE '%strain%'
+              OR LOWER(issue) LIKE '%allele%'
+              OR LOWER(review_reason) LIKE '%strain%'
+          )
+        """
+    )
 
 
 def init_db() -> None:
@@ -199,6 +339,9 @@ def init_db() -> None:
                 current_value TEXT NOT NULL DEFAULT '',
                 suggested_value TEXT NOT NULL DEFAULT '',
                 review_reason TEXT NOT NULL DEFAULT '',
+                assigned_role TEXT NOT NULL DEFAULT 'Colony Reviewer',
+                assigned_to TEXT NOT NULL DEFAULT '',
+                priority TEXT NOT NULL DEFAULT 'medium',
                 status TEXT NOT NULL DEFAULT 'open',
                 created_at TEXT NOT NULL,
                 resolved_at TEXT,
@@ -212,6 +355,8 @@ def init_db() -> None:
                 target_id TEXT NOT NULL,
                 before_value TEXT,
                 after_value TEXT,
+                performed_by TEXT NOT NULL DEFAULT 'local_user',
+                performed_role TEXT NOT NULL DEFAULT 'Colony Reviewer',
                 created_at TEXT NOT NULL
             );
 
@@ -315,6 +460,8 @@ def init_db() -> None:
                 status TEXT NOT NULL DEFAULT 'generated',
                 exported_at TEXT NOT NULL,
                 source_layer TEXT NOT NULL DEFAULT 'export or view',
+                generated_by TEXT NOT NULL DEFAULT 'local_user',
+                generated_role TEXT NOT NULL DEFAULT 'Data / Export Manager',
                 note TEXT NOT NULL DEFAULT ''
             );
 
@@ -361,6 +508,40 @@ def init_db() -> None:
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 UNIQUE (strain_text, target_genotype, purpose)
+            );
+
+            CREATE TABLE IF NOT EXISTS genotype_status_master (
+                status_key TEXT PRIMARY KEY,
+                display_label TEXT NOT NULL,
+                meaning TEXT NOT NULL DEFAULT '',
+                workflow_stage TEXT NOT NULL DEFAULT 'review',
+                blocks_experiment INTEGER NOT NULL DEFAULT 1,
+                export_warning INTEGER NOT NULL DEFAULT 1,
+                legacy_genotyping_status TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 100,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS review_role_master (
+                role_key TEXT PRIMARY KEY,
+                display_label TEXT NOT NULL UNIQUE,
+                responsibility TEXT NOT NULL DEFAULT '',
+                default_priority TEXT NOT NULL DEFAULT 'medium',
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 100,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS review_priority_master (
+                priority_key TEXT PRIMARY KEY,
+                display_label TEXT NOT NULL,
+                severity_rank INTEGER NOT NULL DEFAULT 2,
+                export_blocking_hint INTEGER NOT NULL DEFAULT 1,
+                response_expectation TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 100,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS cage_registry (
@@ -586,6 +767,7 @@ def init_db() -> None:
                 status TEXT NOT NULL DEFAULT 'active',
                 source_photo_id TEXT,
                 source_record_id TEXT,
+                last_verified_at TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (ear_label_code) REFERENCES ear_label_master(ear_label_code),
@@ -633,6 +815,12 @@ def init_db() -> None:
                 ON genotyping_record(mouse_id, sample_id);
             CREATE INDEX IF NOT EXISTS idx_strain_target_genotype_strain
                 ON strain_target_genotype(strain_text, active);
+            CREATE INDEX IF NOT EXISTS idx_genotype_status_master_active
+                ON genotype_status_master(active, sort_order);
+            CREATE INDEX IF NOT EXISTS idx_review_role_master_active
+                ON review_role_master(active, sort_order);
+            CREATE INDEX IF NOT EXISTS idx_review_priority_master_active
+                ON review_priority_master(active, sort_order);
             CREATE INDEX IF NOT EXISTS idx_cage_registry_label
                 ON cage_registry(cage_label COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS idx_mouse_cage_assignment_active
@@ -647,6 +835,26 @@ def init_db() -> None:
                 ON litter_registry(mating_id, birth_date);
             """
         )
+        try:
+            conn.executescript(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+                    entity_type UNINDEXED,
+                    entity_id UNINDEXED,
+                    title,
+                    body,
+                    source_layer UNINDEXED,
+                    updated_at UNINDEXED
+                );
+
+                CREATE TABLE IF NOT EXISTS search_index_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL DEFAULT ''
+                );
+                """
+            )
+        except sqlite3.OperationalError:
+            pass
         conn.executemany(
             """
             INSERT OR IGNORE INTO ear_label_master
@@ -662,4 +870,30 @@ def init_db() -> None:
             VALUES (?, ?, ?, ?, ?)
             """,
             EAR_LABEL_ALIAS_SEEDS,
+        )
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO genotype_status_master
+                (status_key, display_label, meaning, workflow_stage,
+                 blocks_experiment, export_warning, legacy_genotyping_status, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            GENOTYPE_STATUS_MASTER_SEEDS,
+        )
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO review_role_master
+                (role_key, display_label, responsibility, default_priority, sort_order)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            REVIEW_ROLE_MASTER_SEEDS,
+        )
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO review_priority_master
+                (priority_key, display_label, severity_rank, export_blocking_hint,
+                 response_expectation, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            REVIEW_PRIORITY_MASTER_SEEDS,
         )

@@ -8,6 +8,13 @@ Adopted project documents:
 - `design.md`: non-canonical UI and workflow design guidance.
 - `mouse_strain_colony_system_design_ko.md`: non-canonical Korean extension design for strain knowledge graph, colony tracking, evidence boundaries, review/correction, and visualization.
 - `reference_adoption_notes.md`: non-canonical reference adoption notes for development, design, and external tooling ideas.
+- `mouse_open_source_research_adoption_ko.md`: non-canonical adoption note that filters external mouse colony open-source research through the current photo-grounded MVP workflow.
+- `open_source_acceleration_candidates_ko.md`: non-canonical technical reference note for open-source libraries that may reduce implementation time or improve local performance.
+- `open_source_acceleration_doublecheck_ko.md`: non-canonical double-check note that prioritizes acceleration candidates after license, fit, and MVP-risk review.
+- `roi_card_extraction_plan_ko.md`: non-canonical implementation planning note for ROI-based cage-card extraction and reviewable field evidence.
+- `wet_lab_operational_review_ko.md`: non-canonical operational review note from a wet-lab workflow perspective.
+- `ui_image_usage_improvement_plan_ko.md`: non-canonical UI review note for reducing decorative image noise while preserving evidence-first workflows.
+- `review_burden_reduction_plan_ko.md`: non-canonical workflow planning note for separating Focus Review blockers from quick checks and trace-only uncertainty.
 - `mvp_vertical_slice_plan.md`: non-canonical implementation planning note for the first end-to-end workflow.
 - `mousedb_cli_first_review_ko.md`: non-canonical review note for a standalone CLI-first MouseDB core that can later be called by PaperPipe, a personal Research Assistant, API, or MCP server.
 

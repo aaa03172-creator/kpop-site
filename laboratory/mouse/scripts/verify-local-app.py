@@ -22,6 +22,12 @@ except ModuleNotFoundError:
     Workbook = None
     load_workbook = None
 
+try:
+    from PIL import Image, ImageDraw
+except ModuleNotFoundError:
+    Image = None
+    ImageDraw = None
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI_MAIN = ROOT / "mousedb" / "__main__.py"
@@ -31,6 +37,27 @@ CLI_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 def assert_true(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def sample_blue_card_image_bytes() -> bytes:
+    assert_true(Image is not None and ImageDraw is not None, "Pillow should be installed for ROI image verification.")
+    image = Image.new("RGB", (960, 620), "#36aee2")
+    draw = ImageDraw.Draw(image)
+    line_color = "#1f4d69"
+    for y in [60, 145, 230, 315, 390, 560]:
+        draw.line((28, y, 930, y), fill=line_color, width=4)
+    for x in [150, 360, 520, 760]:
+        draw.line((x, 60, x, 390), fill=line_color, width=4)
+    draw.text((45, 82), "Strain ApoM Tg/Tg", fill="#1c2678")
+    draw.text((45, 162), "Sex F6", fill="#1c2678")
+    draw.text((385, 162), "D.O.B 26.3.1-4", fill="#1c2678")
+    draw.text((45, 250), "I.D Atg", fill="#1c2678")
+    draw.text((650, 330), "LMO Y/N", fill="#1c2678")
+    draw.text((45, 420), "Note", fill="#1c2678")
+    draw.text((80, 470), "1 2 3 4 5", fill="#1c2678")
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=92)
+    return output.getvalue()
 
 
 def run_cli(data_dir: Path, *args: str, expect_code: int = 0) -> subprocess.CompletedProcess[str]:
@@ -209,8 +236,9 @@ def main() -> None:
                 "mother_id",
                 "litter_id",
                 "source_record_id",
+                "last_verified_at",
             }.issubset(mouse_columns),
-            "Existing mouse_master tables should migrate to the genotyping, lineage, and traceability schema.",
+            "Existing mouse_master tables should migrate to the genotyping, lineage, traceability, and verification schema.",
         )
         assert_true(
             {"parsed_ear_label_code", "strike_status", "needs_review"}.issubset(note_columns),
@@ -369,6 +397,9 @@ def main() -> None:
                 "mouse_event",
                 "genotyping_record",
                 "strain_target_genotype",
+                "genotype_status_master",
+                "review_role_master",
+                "review_priority_master",
                 "cage_registry",
                 "mouse_cage_assignment",
                 "mating_registry",
@@ -455,10 +486,49 @@ def main() -> None:
                 """,
                 ("mouse_test_319_a",),
             ).fetchone()
+            review_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(review_queue)").fetchall()
+            }
+            action_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(action_log)").fetchall()
+            }
+            export_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(export_log)").fetchall()
+            }
             same_display_count = conn.execute(
                 "SELECT COUNT(*) FROM mouse_master WHERE display_id = ?",
                 ("319",),
             ).fetchone()[0]
+            genotype_statuses = {
+                row[0]: row[1:]
+                for row in conn.execute(
+                    """
+                    SELECT status_key, blocks_experiment, export_warning, legacy_genotyping_status
+                    FROM genotype_status_master
+                    """
+                ).fetchall()
+            }
+            review_roles = {
+                row[0]: row[1:]
+                for row in conn.execute(
+                    """
+                    SELECT display_label, default_priority, active
+                    FROM review_role_master
+                    """
+                ).fetchall()
+            }
+            review_priorities = {
+                row[0]: row[1:]
+                for row in conn.execute(
+                    """
+                    SELECT priority_key, severity_rank, export_blocking_hint
+                    FROM review_priority_master
+                    """
+                ).fetchall()
+            }
             conn.commit()
         finally:
             conn.close()
@@ -470,7 +540,43 @@ def main() -> None:
             tuple(mouse_defaults) == ("not_sampled", "sample_needed", "active"),
             "Mouse workflow defaults are wrong.",
         )
+        assert_true(
+            {"assigned_role", "assigned_to", "priority"}.issubset(review_columns),
+            "Review Queue should carry persona assignment and priority fields.",
+        )
+        assert_true(
+            {"performed_by", "performed_role"}.issubset(action_columns),
+            "Action Log should preserve who/which persona performed workflow changes.",
+        )
+        assert_true(
+            {"generated_by", "generated_role"}.issubset(export_columns),
+            "Export Log should preserve who/which persona generated export views.",
+        )
         assert_true(same_display_count == 2, "Mouse display IDs must remain non-unique identity candidates.")
+        assert_true(
+            "confirmed" in genotype_statuses
+            and genotype_statuses["confirmed"][0] == 0
+            and genotype_statuses["confirmed"][2] == "resulted",
+            "Genotype status vocabulary should mark confirmed results as resulted and not experiment-blocking.",
+        )
+        assert_true(
+            "inconclusive" in genotype_statuses
+            and genotype_statuses["inconclusive"][0] == 1
+            and genotype_statuses["inconclusive"][1] == 1,
+            "Genotype status vocabulary should keep inconclusive results blocking and export-warning.",
+        )
+        assert_true(
+            "Experiment Planner" in review_roles
+            and review_roles["Experiment Planner"][0] == "high"
+            and review_roles["Experiment Planner"][1] == 1,
+            "Review role master should seed experiment planning ownership without relying only on UI literals.",
+        )
+        assert_true(
+            "high" in review_priorities
+            and review_priorities["high"][0] == 1
+            and review_priorities["high"][1] == 1,
+            "Review priority master should preserve high priority as the top export-readiness hint.",
+        )
 
         if TestClient is None:
             with db.connection() as conn:
@@ -533,6 +639,8 @@ def main() -> None:
                 assert_true("Request Genotyping" in index_html, "Local UI should expose genotyping request workflow.")
                 assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
                 assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
+                assert_true("genotypeStatusRows" in index_html and "Genotype status vocabulary" in index_html, "Local UI should expose genotype status vocabulary.")
+                assert_true("experimentReadinessRows" in index_html and "Experiment readiness" in index_html, "Local UI should expose experiment readiness planning.")
                 assert_true("exportRows" in index_html, "Local UI should expose export preview rows.")
                 assert_true("exportFilenames" in index_html, "Local UI should expose expected workbook filenames.")
                 assert_true("exportReadinessCard" in index_html, "Local UI should expose an export readiness status card.")
@@ -547,6 +655,9 @@ def main() -> None:
                 assert_true("reviewStatusFilter" in index_html, "Local UI should expose review status filtering.")
                 assert_true("reviewSeverityFilter" in index_html, "Local UI should expose review severity filtering.")
                 assert_true("reviewEvidenceFilter" in index_html, "Local UI should expose review evidence filtering.")
+                assert_true("reviewRoleFilter" in index_html and "reviewRoleRows" in index_html, "Review Queue should expose persona-based work queues from configured masters.")
+                assert_true("reviewPriorityRows" in index_html and "/api/review-vocabulary" in index_html, "Review Queue should expose configured priority meanings.")
+                assert_true("Last verified" in index_html and "last_verified_at" in index_html, "Mouse records should expose current-state verification timestamps.")
                 assert_true("review-resolution-note" in index_html, "Local UI should resolve reviews inline instead of using prompt-only workflow.")
                 assert_true("Mouse Audit Trace" in index_html, "Local UI should expose mouse audit trace view.")
                 assert_true("auditTraceRows" in index_html, "Local UI should render audit trace rows.")
@@ -603,6 +714,25 @@ def main() -> None:
                     and "transcriptionPhotoEvidenceMeta" in index_html,
                     "Photo review should expose display-only zoom/rotation controls and source evidence metadata.",
                 )
+                assert_true(
+                    "roiPreviewPanel" in index_html
+                    and "/roi-preview" in index_html
+                    and "renderRoiPreview" in index_html,
+                    "Photo review should expose ROI card/field crop previews for selected cage-card photos.",
+                )
+                assert_true(
+                    "extractionEvidencePanel" in index_html
+                    and "uncertainFieldPills" in index_html
+                    and "symbolConfusionPills" in index_html
+                    and "renderExtractionEvidence" in index_html,
+                    "Photo review should expose reviewable AI uncertainty, symbol confusions, and raw visible text evidence.",
+                )
+                assert_true(
+                    "focus-uncertain-field" in index_html
+                    and "needs-review" in index_html
+                    and "focusUncertainField" in index_html,
+                    "Photo review should make uncertain extracted fields actionable from the evidence panel.",
+                )
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -621,6 +751,26 @@ def main() -> None:
                 assert_true(client.get("/api/assigned-strains").json() == [], "Assigned strain scope should start empty.")
                 assert_true(client.get("/api/source-records").json() == [], "Source evidence should start empty.")
                 assert_true(client.get("/api/strains").json() == [], "Strain registry should start empty.")
+                genotype_vocabulary = client.get("/api/genotype-status-vocabulary").json()
+                assert_true(
+                    any(item["status_key"] == "confirmed" and item["blocks_experiment"] is False for item in genotype_vocabulary)
+                    and any(item["status_key"] == "pending" and item["export_warning"] is True for item in genotype_vocabulary),
+                    "Genotype status vocabulary API should distinguish confirmed from pending/review states.",
+                )
+                review_vocabulary = client.get("/api/review-vocabulary").json()
+                assert_true(
+                    review_vocabulary["boundary"] == "canonical structured state"
+                    and any(item["display_label"] == "Colony Reviewer" for item in review_vocabulary["roles"])
+                    and any(item["priority_key"] == "high" and item["export_blocking_hint"] is True for item in review_vocabulary["priorities"]),
+                    "Review vocabulary API should expose configured personas and priority meanings.",
+                )
+                initial_experiment_readiness = client.get("/api/experiment-readiness").json()
+                assert_true(
+                    initial_experiment_readiness["boundary"] == "export or view"
+                    and "rows" in initial_experiment_readiness
+                    and initial_experiment_readiness["total_count"] >= 0,
+                    "Experiment readiness should be an export/view planning surface.",
+                )
                 strain = client.post(
                     "/api/strains",
                     json={
@@ -806,6 +956,11 @@ def main() -> None:
                     "Photo image endpoint should preserve an image content type.",
                 )
                 photo_image.close()
+                invalid_roi_preview = client.get(f"/api/photos/{photo_payload['photo_id']}/roi-preview")
+                assert_true(
+                    invalid_roi_preview.status_code == 415,
+                    "ROI preview should reject unreadable uploaded image bytes without changing raw photo evidence.",
+                )
                 photo_workbench = client.get("/api/photo-review-workbench").json()
                 assert_true(photo_workbench["boundary"] == "export or view", "Photo review workbench should remain a review/export view.")
                 assert_true(photo_workbench["pending_transcription_count"] >= 1, "Untranscribed photos should be queued for manual transcription.")
@@ -833,7 +988,7 @@ def main() -> None:
                 )
                 ai_photo_upload = client.post(
                     "/api/photos",
-                    files={"file": ("ai_card.jpg", io.BytesIO(b"fake ai image bytes"), "image/jpeg")},
+                    files={"file": ("ai_card.jpg", io.BytesIO(sample_blue_card_image_bytes()), "image/jpeg")},
                 )
                 assert_true(ai_photo_upload.status_code == 200, f"Could not upload AI extraction photo: {ai_photo_upload.text}")
                 ai_photo_payload = ai_photo_upload.json()
@@ -859,6 +1014,8 @@ def main() -> None:
                                 {"raw": "MT401 R'", "meaning": "mouse", "strike": "none", "confidence": 91},
                                 {"raw": "MT402 L'", "meaning": "mouse", "strike": "none", "confidence": 90},
                             ],
+                            "raw_visible_text_lines": ["ApoM Tg/Tg", "\u2640 2 total", "MT401 R'", "MT402 L'"],
+                            "symbol_confusions": ["F vs \u2640 resolved from Sex ROI"],
                             "confidence": 88,
                             "uncertain_fields": ["dob_normalized"],
                             "reviewer_note": "Drafted from image.",
@@ -883,6 +1040,30 @@ def main() -> None:
                             "Assigned strain scope" in payload_text,
                             "AI extraction prompt should include only bounded assigned strain context.",
                         )
+                        assert_true(
+                            "Extraction image mode: roi_field_crops" in payload_text
+                            and "target_fields" in payload_text,
+                            "AI extraction prompt should describe fixed ROI regions and their target fields.",
+                        )
+                        image_parts = [
+                            item for item in json["input"][0]["content"]
+                            if item.get("type") == "input_image"
+                        ]
+                        assert_true(
+                            len(image_parts) > 1,
+                            "AI extraction should send normalized card and field ROI crops instead of only one full photo.",
+                        )
+                        label_text = "\n".join(
+                            item.get("text", "")
+                            for item in json["input"][0]["content"]
+                            if item.get("type") == "input_text"
+                        )
+                        assert_true(
+                            "ROI label=sex_raw" in label_text
+                            and "ROI label=dob_raw" in label_text
+                            and "ROI label=notes" in label_text,
+                            "AI extraction should label field-specific ROI crops for the model.",
+                        )
                         return FakeOpenAIResponse()
 
                 with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-ai-extract"}, clear=False):
@@ -898,6 +1079,24 @@ def main() -> None:
                     and ai_extraction_payload["created_note_items"] == 2
                     and ai_extraction_payload["created_mouse_candidates"] == 0,
                     "AI extraction should save parsed note evidence for review without canonical mouse writes.",
+                )
+                assert_true(
+                    ai_extraction_payload["extraction_image_mode"] == "roi_field_crops"
+                    and ai_extraction_payload["roi_template_type"] == "blue_structured_card",
+                    "AI extraction response should disclose ROI-based extraction mode and template.",
+                )
+                with db.connection() as conn:
+                    ai_record = conn.execute(
+                        "SELECT raw_payload FROM parse_result WHERE parse_id = ?",
+                        (ai_extraction_payload["parse_id"],),
+                    ).fetchone()
+                ai_raw_payload = json.loads(ai_record["raw_payload"])
+                assert_true(
+                    ai_raw_payload["extractionImageMode"] == "roi_field_crops"
+                    and ai_raw_payload["uncertainFields"] == ["dob_normalized"]
+                    and ai_raw_payload["symbolConfusions"] == ["F vs \u2640 resolved from Sex ROI"]
+                    and ai_raw_payload["rawVisibleTextLines"],
+                    "AI extraction should persist structured uncertainty, symbol confusion, raw visible text, and ROI mode evidence.",
                 )
                 ai_reviews = [
                     item for item in client.get("/api/review-items").json()
@@ -924,6 +1123,11 @@ def main() -> None:
                     if item["photo_id"] == photo_payload["photo_id"]
                 ]
                 assert_true(photo_reviews, "Photo review candidate should be visible in Review Queue.")
+                assert_true(
+                    photo_reviews[0]["assigned_role"] == "Colony Reviewer"
+                    and photo_reviews[0]["priority"] in {"medium", "high", "low"},
+                    "Review Queue API should expose persona assignment and priority for operational queues.",
+                )
                 assert_true(
                     "manual cage-card transcription" in photo_reviews[0]["issue"],
                     "Photo review candidate should require manual transcription.",
@@ -962,10 +1166,11 @@ def main() -> None:
                 assert_true(
                     any(
                         item["issue"] == "Unlabeled numeric note needs review"
-                        and item["current_value"] == "1 2 3"
+                        and item["current_value"] == "1, 2, 3"
+                        and "numeric-only note lines" in item["review_reason"]
                         for item in manual_review_items
                     ),
-                    "Numeric-only manual note lines should open a review item instead of becoming mouse IDs.",
+                    "Numeric-only manual note lines should open one grouped review item instead of becoming mouse IDs.",
                 )
                 assert_true(
                     transcription_payload["resolved_photo_review_items"] >= 1,
@@ -1240,6 +1445,11 @@ def main() -> None:
                 assert_true(
                     applied_mt321["source_note_item_id"] and applied_mt322["source_note_item_id"],
                     "Applied canonical mouse records should retain source note-line anchors.",
+                )
+                assert_true(
+                    applied_mt321["last_verified_at"] == apply_payload["applied_at"]
+                    and applied_mt322["last_verified_at"] == apply_payload["applied_at"],
+                    "Canonical apply should stamp mouse current state with last_verified_at.",
                 )
                 applied_events = [
                     item
@@ -1615,6 +1825,12 @@ def main() -> None:
                 assert_true(export_log[0]["query"] == "MT321", "Export log should preserve the export filter.")
                 assert_true(export_log[0]["row_count"] == len(filtered_mice), "Export log should preserve exported row count.")
                 assert_true(export_log[0]["source_layer"] == "export or view", "Export log should stay in the export/view layer.")
+                assert_true("last_verified_at" in csv_text, "Mouse CSV export should include last verified timestamps.")
+                assert_true(
+                    export_log[0]["generated_role"] == "Data / Export Manager"
+                    and export_log[0]["generated_by"] == "local_user",
+                    "Export log should expose persona ownership for generated export views.",
+                )
                 blocked_export = client.get("/api/exports/mice.csv", params={"query": "MT321", "require_ready": "true"})
                 assert_true(blocked_export.status_code == 409, "Final CSV export should be blocked by open review items.")
                 blocked_separation_xlsx = client.get("/api/exports/separation.xlsx")
@@ -1704,6 +1920,11 @@ def main() -> None:
                 assert_true(
                     export_preview["blocked_review_items"] >= len(export_preview["review_blockers"]),
                     "Export preview should expose review blocker details up to its display limit.",
+                )
+                assert_true(
+                    export_preview["genotype_blocker_items"] >= 1
+                    and any(item.get("blocker_type") == "genotype_status" for item in export_preview["readiness_warnings"]),
+                    "Export preview should include genotype status readiness warnings from the vocabulary.",
                 )
                 assert_true(export_preview["ready"] is False, "Open review blockers should keep export preview blocked.")
                 dashboard_before = client.get("/api/genotyping-dashboard")
@@ -1949,6 +2170,16 @@ def main() -> None:
                 assert_true(genotyping_payload["genotyping_status"] == "resulted", "Genotyping result should mark mouse resulted.")
                 assert_true(genotyping_payload["target_match_status"] == "matches_target", "Genotyping result should use configured target matching.")
                 assert_true(genotyping_payload["next_action"] == "consider_for_mating", "Matching target genotype should suggest a mating review action.")
+                experiment_readiness = client.get("/api/experiment-readiness").json()
+                ready_experiment_mouse = next(
+                    item for item in experiment_readiness["rows"]
+                    if item["mouse_id"] == genotyping_target["mouse_id"]
+                )
+                assert_true(
+                    ready_experiment_mouse["readiness_status"] == "warning"
+                    and ready_experiment_mouse["genotype_status"] == "confirmed",
+                    "Experiment readiness should show confirmed non-experimental-use mice as warnings, not genotype blockers.",
+                )
                 stale_preview = client.get("/api/export-preview").json()
                 assert_true(
                     stale_preview["export_stale"] is True
@@ -2257,6 +2488,11 @@ def main() -> None:
                 ready_preview = client.get("/api/export-preview").json()
                 assert_true(ready_preview["ready"] is True, "Resolved review blockers should make export preview ready.")
                 assert_true(ready_preview["blocked_review_items"] == 0, "Ready export preview should have no blockers.")
+                assert_true(
+                    "readiness_warnings" in ready_preview
+                    and "genotype_blocker_items" in ready_preview,
+                    "Ready export preview should still expose genotype readiness warnings separately from export blockers.",
+                )
                 ready_export = client.get("/api/exports/mice.csv", params={"query": "MT321", "require_ready": "true"})
                 assert_true(ready_export.status_code == 200, "Ready CSV export should succeed after review resolution.")
                 assert_true("MT321" in ready_export.text, "Ready CSV export should include the filtered mouse row.")

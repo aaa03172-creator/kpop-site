@@ -308,51 +308,54 @@ def merge_payloads(source_file: Path, workbook_kind: str, payloads: list[dict[st
 
 
 def parse_workbook(path: Path, kind: str = "auto", sheet_name: str | None = None) -> dict[str, Any]:
-    wb = load_workbook(path, read_only=False, data_only=True)
-    if sheet_name:
-        ws = wb[sheet_name]
+    wb = load_workbook(path, read_only=True, data_only=True)
+    try:
+        if sheet_name:
+            ws = wb[sheet_name]
+            if kind == "animal":
+                return parse_animal_sheet(ws, path)
+            if kind == "separation":
+                return parse_separation_sheet(ws, path)
+            animal_header, animal_columns = detect_header(ws, ANIMAL_HEADERS)
+            separation_header, separation_columns = detect_header(ws, SEPARATION_HEADERS)
+            if animal_header and len(animal_columns) >= len(separation_columns):
+                return parse_animal_sheet(ws, path)
+            if separation_header:
+                return parse_separation_sheet(ws, path)
+            raise ValueError(f"Could not detect supported legacy workbook shape for {path.name} sheet {sheet_name!r}.")
+
+        if kind in {"animal", "separation"}:
+            parser = parse_animal_sheet if kind == "animal" else parse_separation_sheet
+            workbook_kind = "legacy_animal_sheet" if kind == "animal" else "legacy_separation_status"
+            payloads: list[dict[str, Any]] = []
+            errors: list[str] = []
+            for ws in wb.worksheets:
+                try:
+                    payload = parser(ws, path)
+                except ValueError as error:
+                    errors.append(str(error))
+                    continue
+                if payload.get("rows"):
+                    payloads.append(payload)
+            if payloads:
+                return merge_payloads(path, workbook_kind, payloads)
+            raise ValueError("; ".join(errors) or f"No supported {kind} sheets found in {path.name}.")
+
+        ws = wb[wb.sheetnames[0]]
         if kind == "animal":
             return parse_animal_sheet(ws, path)
         if kind == "separation":
             return parse_separation_sheet(ws, path)
+
         animal_header, animal_columns = detect_header(ws, ANIMAL_HEADERS)
         separation_header, separation_columns = detect_header(ws, SEPARATION_HEADERS)
         if animal_header and len(animal_columns) >= len(separation_columns):
             return parse_animal_sheet(ws, path)
         if separation_header:
             return parse_separation_sheet(ws, path)
-        raise ValueError(f"Could not detect supported legacy workbook shape for {path.name} sheet {sheet_name!r}.")
-
-    if kind in {"animal", "separation"}:
-        parser = parse_animal_sheet if kind == "animal" else parse_separation_sheet
-        workbook_kind = "legacy_animal_sheet" if kind == "animal" else "legacy_separation_status"
-        payloads: list[dict[str, Any]] = []
-        errors: list[str] = []
-        for ws in wb.worksheets:
-            try:
-                payload = parser(ws, path)
-            except ValueError as error:
-                errors.append(str(error))
-                continue
-            if payload.get("rows"):
-                payloads.append(payload)
-        if payloads:
-            return merge_payloads(path, workbook_kind, payloads)
-        raise ValueError("; ".join(errors) or f"No supported {kind} sheets found in {path.name}.")
-
-    ws = wb[wb.sheetnames[0]]
-    if kind == "animal":
-        return parse_animal_sheet(ws, path)
-    if kind == "separation":
-        return parse_separation_sheet(ws, path)
-
-    animal_header, animal_columns = detect_header(ws, ANIMAL_HEADERS)
-    separation_header, separation_columns = detect_header(ws, SEPARATION_HEADERS)
-    if animal_header and len(animal_columns) >= len(separation_columns):
-        return parse_animal_sheet(ws, path)
-    if separation_header:
-        return parse_separation_sheet(ws, path)
-    raise ValueError(f"Could not detect supported legacy workbook shape for {path.name}.")
+        raise ValueError(f"Could not detect supported legacy workbook shape for {path.name}.")
+    finally:
+        wb.close()
 
 
 def main() -> None:
