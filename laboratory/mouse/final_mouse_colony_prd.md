@@ -8,6 +8,14 @@ Adopted project documents:
 - `design.md`: non-canonical UI and workflow design guidance.
 - `mouse_strain_colony_system_design_ko.md`: non-canonical Korean extension design for strain knowledge graph, colony tracking, evidence boundaries, review/correction, and visualization.
 - `reference_adoption_notes.md`: non-canonical reference adoption notes for development, design, and external tooling ideas.
+- `mouse_open_source_research_adoption_ko.md`: non-canonical adoption note that filters external mouse colony open-source research through the current photo-grounded MVP workflow.
+- `open_source_acceleration_candidates_ko.md`: non-canonical technical reference note for open-source libraries that may reduce implementation time or improve local performance.
+- `open_source_acceleration_doublecheck_ko.md`: non-canonical double-check note that prioritizes acceleration candidates after license, fit, and MVP-risk review.
+- `roi_card_extraction_plan_ko.md`: non-canonical implementation planning note for ROI-based cage-card extraction and reviewable field evidence.
+- `wet_lab_operational_review_ko.md`: non-canonical operational review note from a wet-lab workflow perspective.
+- `ui_image_usage_improvement_plan_ko.md`: non-canonical UI review note for reducing decorative image noise while preserving evidence-first workflows.
+- `review_burden_reduction_plan_ko.md`: non-canonical workflow planning note for separating Focus Review blockers from quick checks and trace-only uncertainty.
+- `selective_normalization_controls_plan_ko.md`: non-canonical workflow planning note for keeping raw evidence separate while using bounded selection controls for normalized/reviewed values.
 - `mvp_vertical_slice_plan.md`: non-canonical implementation planning note for the first end-to-end workflow.
 - `mousedb_cli_first_review_ko.md`: non-canonical review note for a standalone CLI-first MouseDB core that can later be called by PaperPipe, a personal Research Assistant, API, or MCP server.
 
@@ -63,10 +71,19 @@ Core principles:
 - Auto-fill by default.
 - Review only low-confidence or logically conflicting items.
 - Keep raw values and normalized values separate.
+- Prefer bounded selection controls for normalized/reviewed values when the valid range is limited, while keeping the raw OCR/manual value visible and unchanged.
+- Ear-label review is a bounded correction flow: reviewers choose a normalized code such as `R_PRIME`, `R_CIRCLE`, `NONE`, or `UNREADABLE`, and the raw note token remains preserved as source evidence.
+- If the sex/count evidence indicates both male and female animals in the same cage, the parsed/intermediate card type should default to `Mating`. This is an operational inference for review and export preparation, not permission to overwrite raw sex text or canonical mating records without source-backed review.
 - Treat note lines and strike-throughs as structured data.
 - Track state changes as events.
 - Treat Excel files as outputs/views, not the only source of truth.
 - Avoid hard-coded strain, genotype, and protocol logic.
+
+### 3.1 Raw Evidence And Selectable Normalization
+
+When a field has a small or configured set of valid normalized meanings, the UI should let the user select the normalized value instead of typing it repeatedly. This applies especially to card type, sex interpretation, LMO/Y/N style marks, note-line interpretation, genotype status, and assigned strain matching.
+
+Selection controls must not overwrite raw evidence. The system should display and store the original OCR/manual text separately from the selected normalized value or matched candidate. For example, a handwritten sex symbol or unclear OCR text remains `sex_raw`, while the reviewer may select `female`, `male`, `mixed`, `unknown`, or `not_visible` as the normalized interpretation. Assigned strain choices should come from configurable assigned-strain/strain masters, with an explicit unmatched/review path for new or unexpected strains.
 
 ## 4. Important Domain Clarifications
 

@@ -1,0 +1,157 @@
+{
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "description": "Small real-photo regression set for cage-card extraction contracts. These cases do not replace raw photos or review decisions.",
+  "source_policy": "Use only locally stored photos and local SQLite parse results. Do not send validation payloads to external services.",
+  "latest_parse_selector": {
+    "source_name": "ai_photo_extraction",
+    "order": "parsed_at DESC",
+    "limit": 1
+  },
+  "cases": [
+    {
+      "case_id": "rwm_impossible_ear_label",
+      "photo_id": "photo_45193d422a8f",
+      "photo_filename": "KakaoTalk_20260502_102059315_09.jpg",
+      "purpose": "A W-like struck note must remain reviewable instead of being accepted as a clean ear label.",
+      "min_photo_bytes": 100000,
+      "expected_parse": {
+        "status": "review",
+        "min_confidence": 40,
+        "field_contains": {
+          "rawStrain": ["ApoM", "Tg/Tg"],
+          "mouseCount": ["2"]
+        },
+        "uncertain_fields_include": ["notes"]
+      },
+      "expected_note_items": [
+        {
+          "raw_line_text": "318 RWM",
+          "parsed_ear_label_review_status": "needs_review"
+        },
+        {
+          "raw_line_text": "319 L'",
+          "parsed_ear_label_code": "L_PRIME",
+          "parsed_ear_label_review_status": "auto_filled"
+        },
+        {
+          "raw_line_text": "320 R'L'",
+          "parsed_ear_label_code": "R_PRIME_L_PRIME",
+          "parsed_ear_label_review_status": "auto_filled"
+        }
+      ],
+      "expected_open_review": {
+        "attention_levels_include": ["quick_check"],
+        "targets_include": ["Ear label", "Source photo"]
+      }
+    },
+    {
+      "case_id": "numeric_notes_are_not_mouse_ids",
+      "photo_id": "photo_cdde8898f569",
+      "photo_filename": "KakaoTalk_20260502_102059315_15.jpg",
+      "purpose": "Numeric note lines must stay reviewable as note anchors and must not silently become mouse IDs.",
+      "min_photo_bytes": 100000,
+      "expected_parse": {
+        "status": "review",
+        "min_confidence": 60,
+        "field_contains": {
+          "mouseCount": ["6"]
+        }
+      },
+      "expected_note_items": [
+        {
+          "raw_line_text": "1",
+          "parsed_ear_label_review_status": "needs_review"
+        },
+        {
+          "raw_line_text": "6",
+          "parsed_ear_label_review_status": "needs_review"
+        }
+      ],
+      "expected_open_review": {
+        "attention_levels_include": ["quick_check"],
+        "targets_include": ["Numeric note label", "Note line anchor"]
+      }
+    },
+    {
+      "case_id": "digit_prime_ear_label_confusion",
+      "photo_id": "photo_7cc0a42a188e",
+      "photo_filename": "KakaoTalk_20260502_102059315_11.jpg",
+      "purpose": "A possible prime mark misread as digit 1 must stay reviewable, while clear adjacent labels can auto-fill.",
+      "min_photo_bytes": 100000,
+      "expected_parse": {
+        "status": "review",
+        "min_confidence": 60,
+        "field_contains": {
+          "rawStrain": ["ApoM", "Tg/Tg"],
+          "mouseCount": ["3"]
+        }
+      },
+      "expected_note_items": [
+        {
+          "raw_line_text": "300 R1",
+          "parsed_ear_label_review_status": "needs_review"
+        },
+        {
+          "raw_line_text": "301 L'",
+          "parsed_ear_label_code": "L_PRIME",
+          "parsed_ear_label_review_status": "auto_filled"
+        },
+        {
+          "raw_line_text": "302 R'L'",
+          "parsed_ear_label_code": "R_PRIME_L_PRIME",
+          "parsed_ear_label_review_status": "auto_filled"
+        }
+      ],
+      "expected_open_review": {
+        "attention_levels_include": ["quick_check"],
+        "targets_include": ["Ear label", "Source photo"]
+      }
+    },
+    {
+      "case_id": "low_confidence_card_blocks_export",
+      "photo_id": "photo_ffd23b32d912",
+      "photo_filename": "KakaoTalk_20260502_102059315_14.jpg",
+      "purpose": "A very low confidence extraction must be promoted to must-review instead of being hidden as ordinary noise.",
+      "min_photo_bytes": 100000,
+      "expected_parse": {
+        "status": "review",
+        "max_confidence": 20,
+        "uncertain_fields_include": ["raw_strain", "sex_raw", "mouse_count"]
+      },
+      "expected_open_review": {
+        "attention_levels_include": ["must_review"],
+        "targets_include": ["Low OCR confidence"]
+      }
+    },
+    {
+      "case_id": "mating_note_lines_remain_reviewable",
+      "photo_id": "photo_2ab2d80c7d36",
+      "photo_filename": "KakaoTalk_20260502_102059315_02.jpg",
+      "purpose": "Dense mating/litter-like note lines must preserve raw line evidence and stay reviewable when parsed values are uncertain.",
+      "min_photo_bytes": 100000,
+      "expected_parse": {
+        "status": "review",
+        "min_confidence": 40,
+        "field_contains": {
+          "rawStrain": ["ApoM", "Tg/Tg"]
+        },
+        "uncertain_fields_include": ["mouse_count", "notes"]
+      },
+      "expected_note_items": [
+        {
+          "raw_line_text": "26.7.21 - 4p",
+          "parsed_ear_label_review_status": "needs_review"
+        },
+        {
+          "raw_line_text": "26.48 - 10p",
+          "parsed_ear_label_review_status": "needs_review"
+        }
+      ],
+      "expected_open_review": {
+        "attention_levels_include": ["quick_check"],
+        "targets_include": ["Mouse count", "Notes"]
+      }
+    }
+  ]
+}
