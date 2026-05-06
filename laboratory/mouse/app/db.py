@@ -20,7 +20,46 @@ EAR_LABEL_MASTER_SEEDS = [
     ("R_CIRCLE_L_CIRCLE", "R\u00b0L\u00b0", "right circle + left circle"),
     ("R_PRIME_L_CIRCLE", "R'L\u00b0", "right prime + left circle"),
     ("R_CIRCLE_L_PRIME", "R\u00b0L'", "right circle + left prime"),
+    ("R_DOUBLE_CIRCLE", "R\u00b0\u00b0", "right ear double circle mark"),
+    ("L_DOUBLE_CIRCLE", "L\u00b0\u00b0", "left ear double circle mark"),
+    ("R_DOUBLE_CIRCLE_L_DOUBLE_CIRCLE", "R\u00b0\u00b0L\u00b0\u00b0", "right double circle + left double circle"),
+    ("R_PRIME_L_DOUBLE_CIRCLE", "R'L\u00b0\u00b0", "right prime + left double circle"),
+    ("R_DOUBLE_CIRCLE_L_PRIME", "R\u00b0\u00b0L'", "right double circle + left prime"),
     ("NONE", "N", "no ear label / no mark"),
+]
+
+
+LABELING_RULE_SET_SEEDS = [
+    (
+        "label_rule_apom_tgtg_20260506",
+        "ApoM Tg/Tg 2026-05-06",
+        "ApoM Tg/Tg",
+        "2026-05-06",
+        "male_first",
+        "continues_across_cages_within_same_id",
+        "resets_per_cage",
+        "dead",
+        "sample_id_equals_mouse_display_id",
+        "ApoM-tg",
+        1,
+    ),
+]
+
+
+LABELING_RULE_EAR_SEQUENCE_SEEDS = [
+    ("label_rule_apom_tgtg_20260506", 1, "R_PRIME"),
+    ("label_rule_apom_tgtg_20260506", 2, "L_PRIME"),
+    ("label_rule_apom_tgtg_20260506", 3, "R_PRIME_L_PRIME"),
+    ("label_rule_apom_tgtg_20260506", 4, "R_CIRCLE"),
+    ("label_rule_apom_tgtg_20260506", 5, "L_CIRCLE"),
+    ("label_rule_apom_tgtg_20260506", 6, "R_CIRCLE_L_CIRCLE"),
+    ("label_rule_apom_tgtg_20260506", 7, "R_PRIME_L_CIRCLE"),
+    ("label_rule_apom_tgtg_20260506", 8, "R_CIRCLE_L_PRIME"),
+    ("label_rule_apom_tgtg_20260506", 9, "R_DOUBLE_CIRCLE"),
+    ("label_rule_apom_tgtg_20260506", 10, "L_DOUBLE_CIRCLE"),
+    ("label_rule_apom_tgtg_20260506", 11, "R_DOUBLE_CIRCLE_L_DOUBLE_CIRCLE"),
+    ("label_rule_apom_tgtg_20260506", 12, "R_PRIME_L_DOUBLE_CIRCLE"),
+    ("label_rule_apom_tgtg_20260506", 13, "R_DOUBLE_CIRCLE_L_PRIME"),
 ]
 
 
@@ -708,6 +747,32 @@ def init_db() -> None:
                 UNIQUE (raw_text, ear_label_code)
             );
 
+            CREATE TABLE IF NOT EXISTS labeling_rule_set (
+                rule_set_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL UNIQUE,
+                applies_to_strain_text TEXT NOT NULL DEFAULT '',
+                session_date TEXT NOT NULL DEFAULT '',
+                numbering_order TEXT NOT NULL DEFAULT 'unknown',
+                mouse_number_scope TEXT NOT NULL DEFAULT 'unknown',
+                ear_sequence_scope TEXT NOT NULL DEFAULT 'unknown',
+                crossed_out_handling TEXT NOT NULL DEFAULT 'review',
+                sample_mapping TEXT NOT NULL DEFAULT 'review',
+                genotyping_target TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS labeling_rule_ear_sequence (
+                rule_set_id TEXT NOT NULL,
+                sequence_index INTEGER NOT NULL,
+                ear_label_code TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (rule_set_id, sequence_index),
+                FOREIGN KEY (rule_set_id) REFERENCES labeling_rule_set(rule_set_id),
+                FOREIGN KEY (ear_label_code) REFERENCES ear_label_master(ear_label_code)
+            );
+
             CREATE TABLE IF NOT EXISTS card_note_item_log (
                 note_item_id TEXT PRIMARY KEY,
                 photo_id TEXT,
@@ -821,6 +886,8 @@ def init_db() -> None:
                 ON review_role_master(active, sort_order);
             CREATE INDEX IF NOT EXISTS idx_review_priority_master_active
                 ON review_priority_master(active, sort_order);
+            CREATE INDEX IF NOT EXISTS idx_labeling_rule_set_active
+                ON labeling_rule_set(active, session_date);
             CREATE INDEX IF NOT EXISTS idx_cage_registry_label
                 ON cage_registry(cage_label COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS idx_mouse_cage_assignment_active
@@ -870,6 +937,24 @@ def init_db() -> None:
             VALUES (?, ?, ?, ?, ?)
             """,
             EAR_LABEL_ALIAS_SEEDS,
+        )
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO labeling_rule_set
+                (rule_set_id, display_name, applies_to_strain_text, session_date,
+                 numbering_order, mouse_number_scope, ear_sequence_scope,
+                 crossed_out_handling, sample_mapping, genotyping_target, active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            LABELING_RULE_SET_SEEDS,
+        )
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO labeling_rule_ear_sequence
+                (rule_set_id, sequence_index, ear_label_code)
+            VALUES (?, ?, ?)
+            """,
+            LABELING_RULE_EAR_SEQUENCE_SEEDS,
         )
         conn.executemany(
             """
