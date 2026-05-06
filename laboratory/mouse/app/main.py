@@ -2034,46 +2034,8 @@ def review_note_item_id(review_id: str, payload_note_item_id: str = "") -> str:
     return ""
 
 
-def resolve_note_label_correction(
-    conn: Any,
-    *,
-    review_id: str,
-    parse_id: str,
-    payload: ReviewResolutionCreate,
-    resolved_at: str,
-) -> dict[str, Any] | None:
-    decision = payload.note_label_decision.strip()
-    if not decision:
-        return None
-    allowed_decisions = {"mouse_item", "count_note", "reviewed_note", "ignored_note"}
-    if decision not in allowed_decisions:
-        raise HTTPException(
-            status_code=400,
-            detail="note_label_decision must be mouse_item, count_note, reviewed_note, or ignored_note.",
-        )
-
-    note_item_id = review_note_item_id(review_id, payload.note_item_id)
-    if not note_item_id:
-        raise HTTPException(status_code=400, detail="note_item_id is required for note label review corrections.")
-    note = conn.execute(
-        """
-        SELECT note_item_id, photo_id, parse_id, card_snapshot_id, card_type, line_number, raw_line_text, strike_status,
-               parsed_type, interpreted_status, parsed_mouse_display_id,
-               parsed_ear_label_raw, parsed_ear_label_code, parsed_ear_label_confidence,
-               parsed_ear_label_review_status, parsed_event_date, parsed_count,
-               confidence, needs_review
-        FROM card_note_item_log
-        WHERE note_item_id = ?
-        """,
-        (note_item_id,),
-    ).fetchone()
-    if note is None:
-        raise HTTPException(status_code=404, detail="Note item not found for label review correction.")
-    if note["parse_id"] != parse_id:
-        raise HTTPException(status_code=409, detail="Review item and note item parse IDs do not match.")
-
-    before = dict(note)
-    after = dict(before)
+def note_label_after_value(note: Any, decision: str, payload: ReviewResolutionCreate) -> dict[str, Any]:
+    after = dict(note)
     after.update(
         {
             "parsed_type": decision,
@@ -2112,7 +2074,21 @@ def resolve_note_label_correction(
         after["interpreted_status"] = payload.note_label_interpreted_status.strip() or "reviewed_note"
     elif decision == "ignored_note":
         after["interpreted_status"] = payload.note_label_interpreted_status.strip() or "ignored"
+    return after
 
+
+def update_note_label_with_trace(
+    conn: Any,
+    *,
+    review_id: str,
+    note: Any,
+    decision: str,
+    payload: ReviewResolutionCreate,
+    resolved_at: str,
+) -> tuple[str, dict[str, Any]]:
+    note_item_id = str(note["note_item_id"])
+    before = dict(note)
+    after = note_label_after_value(note, decision, payload)
     conn.execute(
         """
         UPDATE card_note_item_log
@@ -2179,11 +2155,113 @@ def resolve_note_label_correction(
             resolved_at,
         ),
     )
+    return correction_id, after
+
+
+def resolve_note_label_correction(
+    conn: Any,
+    *,
+    review_id: str,
+    parse_id: str,
+    payload: ReviewResolutionCreate,
+    resolved_at: str,
+) -> dict[str, Any] | None:
+    decision = payload.note_label_decision.strip()
+    if not decision:
+        return None
+    allowed_decisions = {"mouse_item", "count_note", "reviewed_note", "ignored_note"}
+    if decision not in allowed_decisions:
+        raise HTTPException(
+            status_code=400,
+            detail="note_label_decision must be mouse_item, count_note, reviewed_note, or ignored_note.",
+        )
+
+    if review_id == f"review_unlabeled_numeric_{parse_id}":
+        grouped_notes = conn.execute(
+            """
+            SELECT note_item_id, photo_id, parse_id, card_snapshot_id, card_type, line_number, raw_line_text, strike_status,
+                   parsed_type, interpreted_status, parsed_mouse_display_id,
+                   parsed_ear_label_raw, parsed_ear_label_code, parsed_ear_label_confidence,
+                   parsed_ear_label_review_status, parsed_event_date, parsed_count,
+                   confidence, needs_review
+            FROM card_note_item_log
+            WHERE parse_id = ?
+              AND parsed_type = 'unlabeled_numeric_note'
+            ORDER BY line_number
+            """,
+            (parse_id,),
+        ).fetchall()
+        if grouped_notes:
+            if decision == "mouse_item" and len(grouped_notes) > 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Grouped numeric note reviews cannot map multiple note lines to one mouse ID.",
+                )
+            correction_ids: list[str] = []
+            effective_decisions: list[str] = []
+            for index, note in enumerate(grouped_notes):
+                effective_decision = decision
+                if decision == "count_note" and len(grouped_notes) > 1 and index > 0:
+                    effective_decision = "reviewed_note"
+                correction_id, _ = update_note_label_with_trace(
+                    conn,
+                    review_id=review_id,
+                    note=note,
+                    decision=effective_decision,
+                    payload=payload,
+                    resolved_at=resolved_at,
+                )
+                correction_ids.append(correction_id)
+                effective_decisions.append(effective_decision)
+            snapshot_update = refresh_card_snapshot_summary(conn, str(grouped_notes[0]["card_snapshot_id"] or ""), resolved_at)
+            return {
+                "note_item_id": str(grouped_notes[0]["note_item_id"]),
+                "note_item_ids": [str(note["note_item_id"]) for note in grouped_notes],
+                "decision": decision,
+                "effective_decisions": effective_decisions,
+                "correction_id": correction_ids[0],
+                "correction_ids": correction_ids,
+                "updated_note_item_count": len(grouped_notes),
+                "card_snapshot_update": snapshot_update,
+                "boundary": "parsed or intermediate result",
+            }
+
+    note_item_id = review_note_item_id(review_id, payload.note_item_id)
+    if not note_item_id:
+        raise HTTPException(status_code=400, detail="note_item_id is required for note label review corrections.")
+    note = conn.execute(
+        """
+        SELECT note_item_id, photo_id, parse_id, card_snapshot_id, card_type, line_number, raw_line_text, strike_status,
+               parsed_type, interpreted_status, parsed_mouse_display_id,
+               parsed_ear_label_raw, parsed_ear_label_code, parsed_ear_label_confidence,
+               parsed_ear_label_review_status, parsed_event_date, parsed_count,
+               confidence, needs_review
+        FROM card_note_item_log
+        WHERE note_item_id = ?
+        """,
+        (note_item_id,),
+    ).fetchone()
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note item not found for label review correction.")
+    if note["parse_id"] != parse_id:
+        raise HTTPException(status_code=409, detail="Review item and note item parse IDs do not match.")
+
+    correction_id, _ = update_note_label_with_trace(
+        conn,
+        review_id=review_id,
+        note=note,
+        decision=decision,
+        payload=payload,
+        resolved_at=resolved_at,
+    )
     snapshot_update = refresh_card_snapshot_summary(conn, str(note["card_snapshot_id"] or ""), resolved_at)
     return {
         "note_item_id": note_item_id,
+        "note_item_ids": [note_item_id],
         "decision": decision,
         "correction_id": correction_id,
+        "correction_ids": [correction_id],
+        "updated_note_item_count": 1,
         "card_snapshot_update": snapshot_update,
         "boundary": "parsed or intermediate result",
     }
