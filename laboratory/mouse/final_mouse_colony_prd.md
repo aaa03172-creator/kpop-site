@@ -1612,6 +1612,12 @@ MouseEvent or action log entries should be append-only by default. Corrections a
 
 Controlled vocabularies such as status values, genotype categories, protocol names, date rules, and event types should be centralized and replaceable. They may start as seed/config values in MVP, but they should not be scattered as hard-coded domain logic.
 
+### 18.4 Labeling Session Rules
+
+Labeling session rule sets are configurable parsed/intermediate workflow policy, not canonical mouse state. A rule set may describe the session date, compatible strain text, mouse numbering order, ear-label sequence, crossed-out note handling, sample-to-mouse mapping, and default genotyping target.
+
+Rule application must preserve raw note text, raw ear-label tokens, raw sample IDs, and source photo links. Expected ear-label codes, inferred dead candidates, and genotyping target defaults should remain traceable processing assumptions until existing review/canonical writer paths accept them with before/after evidence.
+
 ## 19. Risks And Mitigations
 
 | Risk | Mitigation |
