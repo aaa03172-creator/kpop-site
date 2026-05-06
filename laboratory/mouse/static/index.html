@@ -470,6 +470,16 @@
       gap: 8px;
       justify-items: end;
     }
+    .review-focus-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 10px;
+    }
+    .review-focus-toolbar .muted {
+      margin-right: auto;
+    }
     .review-workbench {
       display: grid;
       grid-template-columns: minmax(520px, 1.25fr) minmax(320px, 0.75fr);
@@ -570,6 +580,23 @@
       line-height: 1.45;
       overflow-wrap: anywhere;
       word-break: break-word;
+    }
+    .review-evidence.plausibility-evidence {
+      border-left-color: #f2d28d;
+      background: #fffaf0;
+      padding: 8px 10px;
+      border-radius: 0 6px 6px 0;
+    }
+    .plausibility-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .plausibility-list span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
     }
     .review-card .inspect-review {
       white-space: nowrap;
@@ -907,6 +934,75 @@
       color: var(--primary-dark);
       font-weight: 900;
       font-size: 11px;
+    }
+    .collapsible-section details {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .collapsible-section summary {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 14px;
+      cursor: pointer;
+      list-style: none;
+    }
+    .collapsible-section summary::-webkit-details-marker {
+      display: none;
+    }
+    .collapsible-section summary h2 {
+      margin-bottom: 4px;
+    }
+    .collapsible-section summary p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .collapsible-section details > :not(summary) {
+      margin-left: 14px;
+      margin-right: 14px;
+    }
+    .collapsible-section details > table {
+      width: calc(100% - 28px);
+    }
+    .collapsible-section details > :last-child {
+      margin-bottom: 14px;
+    }
+    .summary-action {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8fbfa;
+      color: var(--primary-dark);
+      padding: 5px 10px;
+      font-size: 11px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .records-jump-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .records-jump-bar a {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8fbfa;
+      color: var(--primary-dark);
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 900;
+      text-decoration: none;
+    }
+    .records-jump-bar a:hover {
+      border-color: rgba(20, 122, 103, 0.45);
+      background: #eef7f4;
+    }
+    section[id^="records-"] {
+      scroll-margin-top: 88px;
     }
     .mouse-profile-card {
       display: grid;
@@ -1844,9 +1940,30 @@
         position: static;
         height: auto;
         grid-template-rows: auto auto auto;
+        gap: 10px;
+        padding: 14px;
       }
       .nav-group {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .nav-label {
+        grid-column: 1 / -1;
+        margin: 4px 6px 2px;
+      }
+      .nav-button {
+        grid-template-columns: 22px minmax(0, 1fr);
+        gap: 6px;
+        min-height: 40px;
+        padding: 7px 8px;
+        font-size: 12px;
+      }
+      .nav-button span:nth-child(2) {
+        line-height: 1.2;
+      }
+      .nav-count,
+      .sidebar-footer {
+        display: none;
       }
       header {
         position: static;
@@ -1864,6 +1981,26 @@
       .full { grid-column: auto; }
       .form-grid { grid-template-columns: 1fr; }
       .photo-review-layout { grid-template-columns: 1fr; }
+      .photo-review-layout {
+        display: flex;
+        flex-direction: column;
+      }
+      .photo-review-layout > .transcription-form {
+        order: 1;
+        width: 100%;
+      }
+      .photo-review-layout > .photo-preview-pane {
+        order: 2;
+        width: 100%;
+      }
+      .photo-review-layout > .photo-worklist {
+        order: 3;
+        width: 100%;
+      }
+      .photo-preview-frame {
+        min-height: 180px;
+        max-height: 360px;
+      }
       .review-workbench { grid-template-columns: 1fr; }
       .comparison-workbench { grid-template-columns: 1fr; }
       .comparison-list-panel { overflow-x: auto; }
@@ -1888,6 +2025,20 @@
       .view-hero-panel,
       .visual-guide,
       .section-kicker { grid-template-columns: 1fr; }
+      .view-hero-panel {
+        gap: 10px;
+        padding: 12px;
+      }
+      .view-hero-copy {
+        gap: 10px;
+      }
+      .view-hero-panel h2 {
+        font-size: 20px;
+      }
+      .view-hero-panel p {
+        font-size: 13px;
+        line-height: 1.4;
+      }
       .review-card { grid-template-columns: 1fr; }
       .review-card .inspect-review { justify-self: start; }
       .hero-illustration,
@@ -1905,7 +2056,66 @@
       .note-evidence-card,
       .pedigree-parents { grid-template-columns: 1fr; }
       .visual-board-arrow::after { display: none; }
-      .workflow-steps { grid-template-columns: 1fr; }
+      .workflow-steps {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .workflow-step {
+        min-height: 0;
+        padding: 8px 6px;
+      }
+      .workflow-step strong {
+        margin: 0;
+        font-size: 11px;
+      }
+      .workflow-step span {
+        display: none;
+      }
+      .hero-illustration {
+        grid-template-columns: 1fr;
+        min-height: 0;
+        gap: 6px;
+        padding: 8px;
+        box-shadow: none;
+      }
+      .hero-asset-stack {
+        display: none;
+      }
+      .hero-flow-card {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .hero-flow-row {
+        grid-template-columns: 1fr;
+        gap: 3px;
+        justify-items: center;
+        text-align: center;
+        padding: 6px 4px;
+      }
+      .hero-flow-row img {
+        width: 22px;
+        height: 22px;
+      }
+      .hero-flow-row strong {
+        font-size: 10px;
+      }
+      .hero-flow-row span {
+        display: none;
+      }
+      .hero-metrics {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .hero-metric {
+        min-width: 0;
+        padding: 8px;
+      }
+      .collapsible-section summary {
+        grid-template-columns: 1fr;
+      }
+      .summary-action {
+        justify-self: start;
+      }
       .metric-grid { grid-template-columns: 1fr 1fr; }
       .viz-grid,
       .viz-kpis,
@@ -2258,8 +2468,25 @@
           <input id="transcriptionRawStrain" type="text" placeholder="ApoM Tg/Tg">
         </label>
         <label>
-          Sex
+          Matched strain
+          <select id="transcriptionMatchedStrain">
+            <option value="">Use raw strain / unmatched</option>
+          </select>
+        </label>
+        <label>
+          Raw sex/count
           <input id="transcriptionSexRaw" type="text" placeholder="male/female symbol, mixed, or unclear">
+        </label>
+        <label>
+          Sex interpretation
+          <select id="transcriptionSexNormalized">
+            <option value="">Use raw sex</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="mixed">Mixed</option>
+            <option value="unknown">Unknown</option>
+            <option value="not_visible">Not visible</option>
+          </select>
         </label>
         <label>
           I.D
@@ -2274,6 +2501,16 @@
           <input id="transcriptionMouseCount" type="text" placeholder="??2p or 2 total">
         </label>
         <label>
+          LMO/Y/N
+          <select id="transcriptionLmoRaw">
+            <option value="">Not recorded</option>
+            <option value="Y">Y</option>
+            <option value="N">N</option>
+            <option value="unknown">Unknown</option>
+            <option value="not_visible">Not visible</option>
+          </select>
+        </label>
+        <label>
           Note lines
           <textarea id="transcriptionNotes" rows="3" placeholder="MT318 R'&#10;MT322 L'&#10;1 2 3 4 5&#10;26.04.13 - 10p"></textarea>
         </label>
@@ -2283,6 +2520,8 @@
           <p class="muted" id="extractionEvidenceMode"></p>
           <span class="evidence-text-label">Uncertain fields</span>
           <div class="evidence-pill-list" id="uncertainFieldPills"></div>
+          <span class="evidence-text-label">Plausibility warnings</span>
+          <div class="evidence-pill-list" id="plausibilityWarningPills"></div>
           <span class="evidence-text-label">Symbol confusions</span>
           <div class="evidence-pill-list" id="symbolConfusionPills"></div>
           <span class="evidence-text-label">Visible text</span>
@@ -2487,6 +2726,24 @@
       </table>
     </section>
 
+    <section class="full" data-view="records">
+      <div class="section-kicker">
+        <div>
+          <h2>Records Sections</h2>
+          <p>Jump to the core operation area without scrolling through every record table.</p>
+        </div>
+        <span class="chip">navigation aid</span>
+      </div>
+      <nav class="records-jump-bar" aria-label="Records section shortcuts">
+        <a href="#records-colony">Colony</a>
+        <a href="#records-cage">Cage</a>
+        <a href="#records-breeding">Breeding</a>
+        <a href="#records-genotyping">Genotyping</a>
+        <a href="#records-evidence">Evidence</a>
+        <a href="#records-audit">Audit</a>
+      </nav>
+    </section>
+
     <section class="full" data-view="review">
       <h2>Review Queue</h2>
       <div class="review-controls">
@@ -2555,16 +2812,23 @@
       </div>
     </section>
 
-    <section class="full" data-view="review records">
-      <h2>Source Evidence</h2>
-      <p>Raw photos, manual entries, and imported rows remain traceable evidence.</p>
+    <section class="full collapsible-section" data-view="review records">
+      <details>
+        <summary>
+          <div>
+            <h2>Source Evidence</h2>
+            <p>Raw photos, manual entries, and imported rows remain traceable evidence.</p>
+          </div>
+          <span class="summary-action">Show table</span>
+        </summary>
       <table>
         <thead><tr><th>Type</th><th>Label</th><th>URI</th><th>Imported</th><th>Note</th></tr></thead>
         <tbody id="sourceRows"></tbody>
       </table>
+      </details>
     </section>
 
-    <section class="full" data-view="records">
+    <section class="full" data-view="records" id="records-colony">
       <h2>Colony Records</h2>
       <p>Current mouse-level candidate state from accepted source-backed note lines.</p>
       <table>
@@ -2587,7 +2851,7 @@
       </table>
     </section>
 
-    <section class="full" data-view="records">
+    <section class="full" data-view="records" id="records-cage">
       <div class="section-kicker">
         <div>
           <h2>Cage View</h2>
@@ -2630,7 +2894,7 @@
       <p class="muted" id="moveCageMessage"></p>
     </section>
 
-    <section class="full" data-view="records">
+    <section class="full" data-view="records" id="records-breeding">
       <div class="section-kicker">
         <div>
           <h2>Breeding / Litter View</h2>
@@ -2737,7 +3001,7 @@
       <p class="muted" id="weanMessage"></p>
     </section>
 
-    <section class="full" data-view="records">
+    <section class="full" data-view="records" id="records-genotyping">
       <div class="section-kicker">
         <div>
           <h2>Genotyping Worklist</h2>
@@ -2823,14 +3087,15 @@
       </table>
     </section>
 
-    <section class="full" data-view="records">
-      <div class="section-kicker">
-        <div>
-          <h2>Parsed Note Evidence</h2>
-          <p>Line-level parsed evidence preserved before mouse state is written.</p>
-        </div>
-        <span class="chip">parsed or intermediate result</span>
-      </div>
+    <section class="full collapsible-section" data-view="records" id="records-evidence">
+      <details>
+        <summary>
+          <div>
+            <h2>Parsed Note Evidence</h2>
+            <p>Line-level parsed evidence preserved before mouse state is written.</p>
+          </div>
+          <span class="summary-action">Show evidence</span>
+        </summary>
       <div class="note-evidence-overview" id="noteEvidenceOverview" aria-label="Parsed note evidence summary"></div>
       <table>
         <thead>
@@ -2848,11 +3113,18 @@
         </thead>
         <tbody id="noteRows"></tbody>
       </table>
+      </details>
     </section>
 
-    <section class="full" data-view="records">
-      <h2>Card Snapshots</h2>
-      <p>Cage-card transcription snapshots remain parsed evidence; corrections update the snapshot summary without overwriting raw photo records.</p>
+    <section class="full collapsible-section" data-view="records">
+      <details>
+        <summary>
+          <div>
+            <h2>Card Snapshots</h2>
+            <p>Cage-card transcription snapshots remain parsed evidence; corrections update the snapshot summary without overwriting raw photo records.</p>
+          </div>
+          <span class="summary-action">Show snapshots</span>
+        </summary>
       <table>
         <thead>
           <tr>
@@ -2867,15 +3139,23 @@
         </thead>
         <tbody id="cardSnapshotRows"></tbody>
       </table>
+      </details>
     </section>
 
-    <section class="full" data-view="records">
-      <h2>Mouse Events</h2>
-      <p>Durable mouse history, separate from the latest mouse card state.</p>
+    <section class="full collapsible-section" data-view="records">
+      <details>
+        <summary>
+          <div>
+            <h2>Mouse Events</h2>
+            <p>Durable mouse history, separate from the latest mouse card state.</p>
+          </div>
+          <span class="summary-action">Show events</span>
+        </summary>
       <table>
         <thead><tr><th>Mouse</th><th>Event</th><th>Date</th><th>Related</th><th>Details</th></tr></thead>
         <tbody id="eventRows"></tbody>
       </table>
+      </details>
     </section>
 
     <section class="full" data-view="review">
@@ -2900,9 +3180,15 @@
       </table>
     </section>
 
-    <section class="full" data-view="records">
-      <h2>Mouse Audit Trace</h2>
-      <p>Source-backed trace for one mouse across note lines, reviews, corrections, events, and genotyping records.</p>
+    <section class="full collapsible-section" data-view="records" id="records-audit">
+      <details>
+        <summary>
+          <div>
+            <h2>Mouse Audit Trace</h2>
+            <p>Source-backed trace for one mouse across note lines, reviews, corrections, events, and genotyping records.</p>
+          </div>
+          <span class="summary-action">Show trace</span>
+        </summary>
       <div class="form-grid">
         <label>
           Mouse
@@ -2914,6 +3200,7 @@
         <thead><tr><th>Layer</th><th>When</th><th>What</th><th>Evidence</th><th>Details</th></tr></thead>
         <tbody id="auditTraceRows"></tbody>
       </table>
+      </details>
     </section>
 
     <section class="full" data-view="exports">
@@ -3002,7 +3289,7 @@
             <h3>Blocker table</h3>
             <div class="export-table-wrap">
               <table>
-                <thead><tr><th>Blocker</th><th>Severity</th><th>Suggested</th><th>Reason</th></tr></thead>
+                <thead><tr><th>Blocker</th><th>Severity</th><th>Check</th><th>Suggested</th><th>Reason</th></tr></thead>
                 <tbody id="exportBlockerRows"></tbody>
               </table>
             </div>
@@ -3256,6 +3543,7 @@
     let activeView = "photo";
     let selectedAuditMouseId = "";
     let selectedReviewId = "";
+    let currentVisibleReviews = [];
     let selectedComparisonKey = "";
     let reviewStatusFilter = "focus";
     let reviewSeverityFilter = "all";
@@ -3424,10 +3712,30 @@
       ).join("") || row(["No review priorities configured", "", "", ""]);
     }
 
+    function earLabelReviewOptions(item) {
+      const choices = [
+        ["", "Select ear label"],
+        ["R_PRIME", "R prime"],
+        ["L_PRIME", "L prime"],
+        ["R_CIRCLE", "R circle"],
+        ["L_CIRCLE", "L circle"],
+        ["R_PRIME_L_PRIME", "R prime + L prime"],
+        ["R_PRIME_L_CIRCLE", "R prime + L circle"],
+        ["R_CIRCLE_L_PRIME", "R circle + L prime"],
+        ["R_CIRCLE_L_CIRCLE", "R circle + L circle"],
+        ["NONE", "None"],
+        ["UNREADABLE", "Not readable"]
+      ];
+      const suggested = String(item?.suggested_value || "").toUpperCase();
+      return choices.map(([value, label]) =>
+        `<option value="${escapeHtml(value)}" ${value && value === suggested ? "selected" : ""}>${escapeHtml(label)}</option>`
+      ).join("");
+    }
+
     function reviewResolutionControls(item) {
       if (!item || item.status !== "open") return escapeHtml(item?.resolution_note || "Resolved");
       const quickLabel = item.attention_level === "must_review" ? "Accept after check" : "Looks OK";
-      const allowQuickResolve = item.issue !== "Unlabeled numeric note needs review";
+      const allowQuickResolve = !["Unlabeled numeric note needs review", "Ear label needs review"].includes(item.issue);
       const noteLabelControls = item.issue === "Unlabeled numeric note needs review"
         ? `
           <select class="note-label-decision" aria-label="Note label decision">
@@ -3441,6 +3749,9 @@
           <input class="note-label-count" type="number" min="0" value="" placeholder="Count if selected" aria-label="Corrected count">
         `
         : "";
+      const resolvedValueControl = item.issue === "Ear label needs review"
+        ? `<select class="review-resolved-value ear-label-code" aria-label="Reviewed ear label">${earLabelReviewOptions(item)}</select>`
+        : `<input class="review-resolved-value" type="text" value="${escapeHtml(item.suggested_value || "")}" aria-label="Resolved value">`;
       return `
         <div class="review-actions">
           <select class="review-legacy-decision" aria-label="Legacy decision">
@@ -3449,7 +3760,7 @@
             <option value="reject_legacy_candidate">Reject legacy candidate</option>
             <option value="map_to_canonical_candidate">Map candidate draft</option>
           </select>
-          <input class="review-resolved-value" type="text" value="${escapeHtml(item.suggested_value || "")}" aria-label="Resolved value">
+          ${resolvedValueControl}
           <input class="review-resolution-note" type="text" placeholder="Resolution note required" aria-label="Resolution note">
           ${noteLabelControls}
           ${allowQuickResolve ? `<button class="quick-resolve-review" type="button"
@@ -3461,6 +3772,39 @@
             data-review-id="${escapeHtml(item.review_id)}"
             data-current-value="${escapeHtml(item.current_value || "")}"
             data-note-item-id="${escapeHtml(item.note_item_id || "")}">Resolve with note</button>
+        </div>
+      `;
+    }
+
+    function reviewCheckTargetsText(item) {
+      return (item?.review_check_targets || []).filter(Boolean).join(" / ");
+    }
+
+    function reviewPlausibilityFindings(item) {
+      return (item?.review_plausibility_findings || [])
+        .filter((finding) => finding && finding.field && finding.message)
+        .map((finding) => ({
+          field: String(finding.field || ""),
+          severity: String(finding.severity || "medium"),
+          message: String(finding.message || "")
+        }));
+    }
+
+    function reviewPlausibilityPanel(item, compact = false) {
+      const findings = reviewPlausibilityFindings(item);
+      if (!findings.length) return "";
+      const visibleFindings = compact ? findings.slice(0, 2) : findings;
+      const remainder = findings.length - visibleFindings.length;
+      const rows = visibleFindings.map((finding) =>
+        `<span><strong>${escapeHtml(finding.field)}</strong> ${escapeHtml(finding.severity)} · ${escapeHtml(finding.message)}</span>`
+      ).join("");
+      return `
+        <div class="review-evidence plausibility-evidence">
+          <strong>Why flagged</strong>
+          <div class="plausibility-list">
+            ${rows}
+            ${remainder > 0 ? `<span>+${escapeHtml(remainder)} more in detail</span>` : ""}
+          </div>
         </div>
       `;
     }
@@ -3504,6 +3848,11 @@
       noteInput.value = note;
       const resolvedValue = resolvedValueInput.value;
       const noteLabelCountValue = container.querySelector(".note-label-count")?.value || "";
+      const earLabelCode = container.querySelector(".ear-label-code")?.value || "";
+      if (item?.issue === "Ear label needs review" && !earLabelCode) {
+        resolvedValueInput.focus();
+        return null;
+      }
       return {
         resolution_note: note,
         resolved_value: resolvedValue || "",
@@ -3516,19 +3865,57 @@
         note_item_id: button.dataset.noteItemId || "",
         note_label_decision: container.querySelector(".note-label-decision")?.value || "",
         note_label_mouse_id: container.querySelector(".note-label-mouse-id")?.value || "",
-        note_label_count: noteLabelCountValue ? Number(noteLabelCountValue) : null
+        note_label_count: noteLabelCountValue ? Number(noteLabelCountValue) : null,
+        ear_label_code: earLabelCode
       };
     }
 
     async function submitReviewResolution(button, item, allowAutoNote) {
       const payload = reviewResolutionPayload(button, item, allowAutoNote);
       if (!payload) return;
+      const resolvedReviewId = button.dataset.reviewId;
+      const resolvedIndex = currentVisibleReviews.findIndex((entry) => entry.review_id === resolvedReviewId);
+      const nextReview = resolvedIndex >= 0
+        ? currentVisibleReviews[resolvedIndex + 1] || currentVisibleReviews[resolvedIndex - 1]
+        : null;
       await api(`/api/review-items/${button.dataset.reviewId}/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
+      selectedReviewId = nextReview?.review_id || "";
       await refresh();
+    }
+
+    function selectedReviewPosition() {
+      const index = currentVisibleReviews.findIndex((item) => item.review_id === selectedReviewId);
+      return {
+        index,
+        total: currentVisibleReviews.length,
+        label: index >= 0 ? `${index + 1}/${currentVisibleReviews.length}` : `0/${currentVisibleReviews.length}`
+      };
+    }
+
+    function selectVisibleReviewByOffset(offset) {
+      if (!currentVisibleReviews.length) return;
+      const position = selectedReviewPosition();
+      const currentIndex = position.index >= 0 ? position.index : 0;
+      const nextIndex = Math.min(Math.max(currentIndex + offset, 0), currentVisibleReviews.length - 1);
+      selectedReviewId = currentVisibleReviews[nextIndex].review_id;
+      renderReviewDetail(currentVisibleReviews[nextIndex]);
+      attachReviewAuditHandler();
+      attachReviewNavigationHandlers();
+      document.querySelectorAll("#reviewRows .review-card").forEach((card) => {
+        card.classList.toggle("selected-card", card.dataset.reviewId === selectedReviewId);
+      });
+    }
+
+    function openReviewSourcePhoto(item) {
+      if (!item?.photo_id) return;
+      setActiveView("photo");
+      setTranscriptionPhoto(item.photo_id);
+      document.getElementById("viewSubtitle").textContent =
+        "Source photo opened from Focus Review. Raw photo and extracted evidence remain traceable.";
     }
 
     function reviewSourceEvidencePanel(item) {
@@ -3635,13 +4022,21 @@
         `;
         return;
       }
+      const position = selectedReviewPosition();
       panel.innerHTML = `
         <h3>${escapeHtml(item.issue)}</h3>
         <p class="muted">${escapeHtml(item.review_reason || "Review source evidence before accepting a value.")}</p>
+        <div class="review-focus-toolbar" aria-label="Focus review navigation">
+          <span class="muted">${escapeHtml(reviewStatusLabel(reviewStatusFilter))} ${escapeHtml(position.label)}</span>
+          <button class="previous-review" type="button" ${position.index <= 0 ? "disabled" : ""}>Previous</button>
+          <button class="next-review" type="button" ${position.index < 0 || position.index >= position.total - 1 ? "disabled" : ""}>Next</button>
+          ${item.photo_id ? `<button class="open-review-source-photo" type="button" data-photo-id="${escapeHtml(item.photo_id)}">Open source photo</button>` : ""}
+        </div>
         ${reviewSourceEvidencePanel(item)}
         <div class="detail-stack">
           <div class="detail-row"><span>Status</span><strong>${escapeHtml(item.status)} / ${escapeHtml(item.severity)}</strong></div>
           <div class="detail-row"><span>Attention</span><strong>${escapeHtml([(item.attention_level || "review").replaceAll("_", " "), item.attention_reason].filter(Boolean).join(" / "))}</strong></div>
+          <div class="detail-row"><span>Check</span><strong>${escapeHtml(reviewCheckTargetsText(item) || "Source evidence")}</strong></div>
           <div class="detail-row"><span>Persona</span><strong>${escapeHtml([item.assigned_role || "Colony Reviewer", item.priority || "medium", item.assigned_to].filter(Boolean).join(" / "))}</strong></div>
           <div class="detail-row"><span>Source</span><strong>${escapeHtml(item.original_filename || item.source_name || item.photo_id || item.parse_id || "--")}</strong></div>
           <div class="detail-row"><span>Evidence</span><strong>${escapeHtml(item.evidence_preview || "--")}</strong></div>
@@ -3649,6 +4044,7 @@
           <div class="detail-row"><span>Suggested</span><strong>${escapeHtml(item.suggested_value || "--")}</strong></div>
           <div class="detail-row"><span>Note lines</span><strong>${escapeHtml(item.note_line_count ? `${item.note_line_count} note lines` : "No note lines")}</strong></div>
         </div>
+        ${reviewPlausibilityPanel(item)}
         ${reviewEvidencePanel(item)}
         <div class="detail-stack">
           <button class="audit-review-item" type="button" data-review-id="${escapeHtml(item.review_id)}">Load Audit Trace</button>
@@ -3667,6 +4063,22 @@
             `${result.summary.correction_count} correction(s), ${result.summary.action_count} action(s), ` +
             `${result.summary.has_photo ? "photo linked" : "photo pending"}, ` +
             `${result.summary.has_card_snapshot ? "snapshot linked" : "snapshot pending"}.`;
+        });
+      });
+    }
+
+    function attachReviewNavigationHandlers() {
+      document.querySelectorAll(".previous-review").forEach((button) => {
+        button.addEventListener("click", () => selectVisibleReviewByOffset(-1));
+      });
+      document.querySelectorAll(".next-review").forEach((button) => {
+        button.addEventListener("click", () => selectVisibleReviewByOffset(1));
+      });
+      document.querySelectorAll(".open-review-source-photo").forEach((button) => {
+        button.addEventListener("click", () => {
+          const item = currentVisibleReviews.find((entry) => entry.review_id === selectedReviewId)
+            || currentVisibleReviews.find((entry) => entry.photo_id === button.dataset.photoId);
+          openReviewSourcePhoto(item);
         });
       });
     }
@@ -3908,23 +4320,70 @@
     function clearTranscriptionForm() {
       document.getElementById("transcriptionCardType").value = "unknown";
       document.getElementById("transcriptionRawStrain").value = "";
+      document.getElementById("transcriptionMatchedStrain").value = "";
       document.getElementById("transcriptionSexRaw").value = "";
+      document.getElementById("transcriptionSexNormalized").value = "";
       document.getElementById("transcriptionIdRaw").value = "";
       document.getElementById("transcriptionDobRaw").value = "";
       document.getElementById("transcriptionMouseCount").value = "";
+      document.getElementById("transcriptionLmoRaw").value = "";
       document.getElementById("transcriptionNotes").value = "";
       renderExtractionEvidence(null);
+    }
+
+    function ensureSelectOption(select, value, label = value) {
+      if (!select || !value) return;
+      if ([...select.options].some((option) => option.value === value)) return;
+      select.appendChild(new Option(label, value));
+    }
+
+    function sexNormalizedFromRaw(value) {
+      const text = String(value || "").trim();
+      const lower = text.toLowerCase();
+      if (!text) return "";
+      const hasMale = text.includes("\u2642") || /\b(m|male|man)\b/.test(lower);
+      const hasFemale = text.includes("\u2640") || /\b(f|female|woman)\b/.test(lower);
+      if ((hasMale && hasFemale) || ["mixed", "both", "m/f", "f/m", "mf"].some((token) => lower.includes(token))) return "mixed";
+      if (hasMale) return "male";
+      if (hasFemale) return "female";
+      return "unknown";
+    }
+
+    function inferCardTypeFromSexSelection() {
+      const cardType = document.getElementById("transcriptionCardType");
+      const rawSexInference = sexNormalizedFromRaw(document.getElementById("transcriptionSexRaw").value);
+      const selectedSex = document.getElementById("transcriptionSexNormalized").value;
+      const sex = rawSexInference === "mixed" ? "mixed" : selectedSex || rawSexInference;
+      if (sex === "mixed" && ["", "unknown", "Separated"].includes(cardType.value)) {
+        cardType.value = "Mating";
+      }
+    }
+
+    function updateTranscriptionChoiceControls(assignedStrains) {
+      const select = document.getElementById("transcriptionMatchedStrain");
+      const previous = select.value;
+      const activeStrains = (assignedStrains || []).filter((strain) => strain.active !== false);
+      select.innerHTML = '<option value="">Use raw strain / unmatched</option>' + activeStrains.map((strain) => {
+        const aliases = (strain.aliases || []).filter(Boolean).join(", ");
+        const label = aliases ? `${strain.display_name} (${aliases})` : strain.display_name;
+        return `<option value="${escapeHtml(strain.display_name)}">${escapeHtml(label)}</option>`;
+      }).join("");
+      ensureSelectOption(select, previous);
+      select.value = previous;
     }
 
     function fieldControlForUncertainty(fieldName) {
       const field = String(fieldName || "").toLowerCase();
       if (field.includes("card_type")) return document.getElementById("transcriptionCardType");
+      if (field.includes("matched_strain")) return document.getElementById("transcriptionMatchedStrain");
       if (field.includes("strain")) return document.getElementById("transcriptionRawStrain");
-      if (field.includes("sex") || field.includes("mouse_count")) return document.getElementById("transcriptionSexRaw");
+      if (field.includes("sex_normalized")) return document.getElementById("transcriptionSexNormalized");
+      if (field.includes("mouse_count")) return document.getElementById("transcriptionMouseCount");
+      if (field.includes("sex")) return document.getElementById("transcriptionSexRaw");
       if (field.includes("id_raw") || field === "id" || field.includes("i.d")) return document.getElementById("transcriptionIdRaw");
       if (field.includes("dob") || field.includes("date")) return document.getElementById("transcriptionDobRaw");
       if (field.includes("note") || field.includes("raw_visible")) return document.getElementById("transcriptionNotes");
-      if (field.includes("lmo")) return document.getElementById("transcriptionNotes");
+      if (field.includes("lmo")) return document.getElementById("transcriptionLmoRaw");
       return null;
     }
 
@@ -3932,10 +4391,13 @@
       [
         "transcriptionCardType",
         "transcriptionRawStrain",
+        "transcriptionMatchedStrain",
         "transcriptionSexRaw",
+        "transcriptionSexNormalized",
         "transcriptionIdRaw",
         "transcriptionDobRaw",
         "transcriptionMouseCount",
+        "transcriptionLmoRaw",
         "transcriptionNotes"
       ].forEach((id) => {
         const control = document.getElementById(id);
@@ -3952,7 +4414,7 @@
         const control = fieldControlForUncertainty(field);
         if (!control) return;
         const existing = fieldReasons.get(control.id) || [];
-        existing.push(field);
+        if (!existing.includes(field)) existing.push(field);
         fieldReasons.set(control.id, existing);
       });
       fieldReasons.forEach((fields, id) => {
@@ -4014,15 +4476,18 @@
       const cleanReviewerNote = cleanReviewerEvidenceNote(reviewerNote);
       const explicitUncertainFields = record?.uncertainFields || record?.uncertain_fields || [];
       const explicitSymbolConfusions = record?.symbolConfusions || record?.symbol_confusions || [];
+      const plausibilityFindings = (record?.plausibilityFindings || record?.plausibility_findings || [])
+        .filter((finding) => finding && finding.field && finding.message);
       const uncertainFields = explicitUncertainFields.length ? explicitUncertainFields : reviewerNoteList(record, "Uncertain fields");
       const symbolConfusions = explicitSymbolConfusions.length ? explicitSymbolConfusions : reviewerNoteList(record, "Symbol confusions");
       const visibleLines = record?.rawVisibleTextLines || record?.raw_visible_text_lines || [];
       const mode = record?.extractionImageMode || record?.extraction_image_mode || record?.extractionMethod || record?.extraction_method || "";
-      const hasEvidence = Boolean(cleanReviewerNote || uncertainFields.length || symbolConfusions.length || visibleLines.length || mode);
+      const hasEvidence = Boolean(cleanReviewerNote || uncertainFields.length || plausibilityFindings.length || symbolConfusions.length || visibleLines.length || mode);
       panel.classList.toggle("active", hasEvidence);
       if (!hasEvidence) {
         document.getElementById("extractionEvidenceMode").textContent = "";
         document.getElementById("uncertainFieldPills").innerHTML = "";
+        document.getElementById("plausibilityWarningPills").innerHTML = "";
         document.getElementById("symbolConfusionPills").innerHTML = "";
         document.getElementById("rawVisibleTextLines").textContent = "";
         document.getElementById("reviewerEvidenceNote").textContent = "";
@@ -4034,6 +4499,15 @@
       document.getElementById("uncertainFieldPills").innerHTML = uncertainFields.length
         ? uncertainFields.map((item) => `<button type="button" class="warn focus-uncertain-field" data-field="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")
         : `<span>no uncertain fields listed</span>`;
+      document.getElementById("plausibilityWarningPills").innerHTML = plausibilityFindings.length
+        ? plausibilityFindings.map((finding) => `
+            <button type="button" class="warn focus-uncertain-field"
+              data-field="${escapeHtml(finding.field)}"
+              title="${escapeHtml(finding.message)}">
+              ${escapeHtml(finding.field)} ${escapeHtml(finding.severity || "medium")} - ${escapeHtml(finding.message)}
+            </button>
+          `).join("")
+        : `<span>none</span>`;
       document.getElementById("symbolConfusionPills").innerHTML = symbolConfusions.length
         ? symbolConfusions.map((item) => `<span class="warn">${escapeHtml(item)}</span>`).join("")
         : "";
@@ -4041,16 +4515,28 @@
         ? visibleLines.join("\n")
         : "";
       document.getElementById("reviewerEvidenceNote").textContent = cleanReviewerNote || "";
-      applyUncertaintyHighlights(uncertainFields);
+      applyUncertaintyHighlights([
+        ...uncertainFields,
+        ...plausibilityFindings.map((finding) => finding.field)
+      ]);
     }
 
     function fillTranscriptionDraft(draft) {
       document.getElementById("transcriptionCardType").value = draft.card_type || "unknown";
-      document.getElementById("transcriptionRawStrain").value = draft.matched_strain || draft.raw_strain || "";
+      document.getElementById("transcriptionRawStrain").value = draft.raw_strain || draft.matched_strain || "";
+      const matchedStrainSelect = document.getElementById("transcriptionMatchedStrain");
+      ensureSelectOption(matchedStrainSelect, draft.matched_strain || "");
+      matchedStrainSelect.value = draft.matched_strain || "";
       document.getElementById("transcriptionSexRaw").value = draft.sex_raw || "";
+      const sexNormalized = draft.sex_normalized || sexNormalizedFromRaw(draft.sex_raw);
+      ensureSelectOption(document.getElementById("transcriptionSexNormalized"), sexNormalized);
+      document.getElementById("transcriptionSexNormalized").value = sexNormalized;
+      inferCardTypeFromSexSelection();
       document.getElementById("transcriptionIdRaw").value = draft.id_raw || "";
       document.getElementById("transcriptionDobRaw").value = draft.dob_raw || draft.dob_normalized || "";
       document.getElementById("transcriptionMouseCount").value = draft.mouse_count || "";
+      ensureSelectOption(document.getElementById("transcriptionLmoRaw"), draft.lmo_raw || "");
+      document.getElementById("transcriptionLmoRaw").value = draft.lmo_raw || "";
       document.getElementById("transcriptionNotes").value = (draft.notes || [])
         .map((note) => note.raw || "")
         .filter(Boolean)
@@ -4068,14 +4554,17 @@
         raw_strain: record.rawStrain || record.raw_strain || "",
         matched_strain: record.matchedStrain || record.matched_strain || record.rawStrain || "",
         sex_raw: record.sexRaw || record.sex_raw || "",
+        sex_normalized: record.sexNormalized || record.sex_normalized || "",
         id_raw: record.idRaw || record.id_raw || "",
         dob_raw: record.dobRaw || record.dob_raw || "",
         dob_normalized: record.dobNormalized || record.dob_normalized || "",
+        lmo_raw: record.lmoRaw || record.lmo_raw || "",
         mouse_count: record.mouseCount || record.mouse_count || "",
         notes: record.notes || [],
         reviewerNote: record.reviewerNote || record.reviewer_note || "",
         uncertainFields: record.uncertainFields || record.uncertain_fields || [],
         symbolConfusions: record.symbolConfusions || record.symbol_confusions || [],
+        plausibilityFindings: record.plausibilityFindings || record.plausibility_findings || [],
         rawVisibleTextLines: record.rawVisibleTextLines || record.raw_visible_text_lines || [],
         extractionImageMode: record.extractionImageMode || record.extraction_image_mode || record.extractionMethod || "",
         roiTemplateType: record.roiTemplateType || record.roi_template_type || "",
@@ -4316,11 +4805,16 @@
     }
 
     function noteEvidenceRow(item) {
+      const displayValue = item.display_value || item.raw_line_text || "--";
+      const rawNote = item.raw_line_text || "--";
+      const noteValue = displayValue === rawNote
+        ? escapeHtml(rawNote)
+        : `<strong>${escapeHtml(displayValue)}</strong><br><span class="muted">raw: ${escapeHtml(rawNote)}</span>`;
       return `
         <tr>
           <td>${noteSourceCell(item)}</td>
           <td>${escapeHtml(item.line_number ?? "--")}</td>
-          <td>${escapeHtml(item.raw_line_text)}</td>
+          <td>${noteValue}</td>
           <td>${escapeHtml(item.parsed_type)}</td>
           <td>${escapeHtml(item.strike_status)}</td>
           <td>${escapeHtml(item.interpreted_status)}</td>
@@ -4635,6 +5129,7 @@
         <div class="export-blocker-row">
           <strong>${escapeHtml(item.issue || "Review blocker")}</strong>
           <span>${escapeHtml([item.severity, item.assigned_role, item.priority, item.original_filename || item.source_name || item.photo_id || item.parse_id].filter(Boolean).join(" / ") || "source pending")}</span>
+          ${item.review_check_targets?.length ? `<span><strong>Check</strong> ${escapeHtml(reviewCheckTargetsText(item))}</span>` : ""}
           <span>${escapeHtml(item.evidence_preview || item.review_reason || item.suggested_value || "Review source evidence before export.")}</span>
         </div>
       `).join("") || `
@@ -4678,10 +5173,11 @@
         row([
           item.issue,
           item.severity,
+          reviewCheckTargetsText(item) || "--",
           item.suggested_value || "--",
           item.review_reason || item.display_id || item.parse_id || "--"
         ])
-      ).join("") || row(["No Focus Review blockers", "", "", ""]);
+      ).join("") || row(["No Focus Review blockers", "", "", "", ""]);
       document.getElementById("exportLogRows").innerHTML = exportLog.map((item) =>
         row([
           item.filename,
@@ -4746,6 +5242,7 @@
       document.getElementById("assignedStrainRows").innerHTML = assignedStrains.map((strain) =>
         assignedStrainRow(strain)
       ).join("") || row(["No assigned strains yet", "", "", "", ""]);
+      updateTranscriptionChoiceControls(assignedStrains);
       document.querySelectorAll(".deactivate-scope").forEach((button) => {
         button.addEventListener("click", async () => {
           await api(`/api/assigned-strains/${button.dataset.assignedStrainId}/deactivate`, { method: "POST" });
@@ -4865,6 +5362,7 @@
       document.getElementById("reviewEvidenceFilter").value = reviewEvidenceFilter;
       document.getElementById("reviewRoleFilter").value = reviewRoleFilter;
       const visibleReviews = filteredReviews(reviews);
+      currentVisibleReviews = visibleReviews;
       const attentionCounts = reviewAttentionCounts(reviews);
       document.getElementById("reviewQueueSummary").innerHTML = [
         `${reviewStatusLabel(reviewStatusFilter)}: ${visibleReviews.length}`,
@@ -4879,8 +5377,9 @@
       const selectedReview = visibleReviews.find((item) => item.review_id === selectedReviewId);
       document.getElementById("reviewRows").innerHTML = visibleReviews.map((item) => {
         const visual = reviewVisual(item);
+        const checkTargets = reviewCheckTargetsText(item);
         return `
-        <article class="review-card ${item.review_id === selectedReviewId ? "selected-card" : ""}">
+        <article class="review-card ${item.review_id === selectedReviewId ? "selected-card" : ""}" data-review-id="${escapeHtml(item.review_id)}">
           <div class="review-card-content">
             <span class="review-card-kind ${escapeHtml(visual.tone)}">${escapeHtml(visual.label)}</span>
             <h3>${escapeHtml(item.issue)}</h3>
@@ -4894,10 +5393,17 @@
               <span class="chip">${escapeHtml(item.original_filename || item.source_name || item.photo_id || "source pending")}</span>
               <span class="chip">${escapeHtml(item.note_line_count ? `${item.note_line_count} note lines` : "no note lines")}</span>
             </div>
+            ${checkTargets ? `<div class="review-evidence"><strong>Check</strong> ${escapeHtml(checkTargets)}</div>` : ""}
+            ${reviewPlausibilityPanel(item, true)}
             <div class="review-evidence">${escapeHtml(item.evidence_preview || item.suggested_value || "No evidence preview")}</div>
           </div>
           <div class="review-card-actions">
             <button class="inspect-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Inspect</button>
+            ${item.photo_id ? `
+              <button class="open-review-card-photo" type="button"
+                data-review-id="${escapeHtml(item.review_id)}"
+                data-photo-id="${escapeHtml(item.photo_id)}">Photo</button>
+            ` : ""}
             ${item.status === "open" && item.attention_level === "quick_check" && item.issue !== "Unlabeled numeric note needs review" ? `
               <button class="quick-resolve-review" type="button"
                 data-review-id="${escapeHtml(item.review_id)}"
@@ -4910,13 +5416,22 @@
       }).join("") || '<p class="muted">No review items match the current filters.</p>';
       renderReviewDetail(selectedReview);
       attachReviewAuditHandler();
+      attachReviewNavigationHandlers();
       document.querySelectorAll(".inspect-review").forEach((button) => {
         button.addEventListener("click", () => {
           selectedReviewId = button.dataset.reviewId;
           renderReviewDetail(visibleReviews.find((item) => item.review_id === selectedReviewId));
           attachReviewAuditHandler();
+          attachReviewNavigationHandlers();
           document.querySelectorAll("#reviewRows .review-card").forEach((card) => card.classList.remove("selected-card"));
           button.closest(".review-card").classList.add("selected-card");
+        });
+      });
+      document.querySelectorAll(".open-review-card-photo").forEach((button) => {
+        button.addEventListener("click", () => {
+          selectedReviewId = button.dataset.reviewId;
+          const item = visibleReviews.find((entry) => entry.review_id === selectedReviewId);
+          openReviewSourcePhoto(item);
         });
       });
       document.querySelectorAll(".resolve-review").forEach((button) => {
@@ -4937,7 +5452,7 @@
           const valueInput = container.querySelector(".review-resolved-value");
           const noteInput = container.querySelector(".review-resolution-note");
           valueInput.focus();
-          valueInput.select();
+          if (typeof valueInput.select === "function") valueInput.select();
           noteInput.placeholder = "Describe the correction before resolving";
         });
       });
@@ -5314,8 +5829,9 @@
         });
         fillTranscriptionDraft(result.draft || {});
         const uncertain = (result.draft?.uncertain_fields || []).join(", ") || "none listed";
+        const warningCount = (result.draft?.plausibility_findings || []).length;
         message.textContent =
-          `Draft filled from ${result.photo_filename}; confidence ${result.draft?.confidence ?? "--"}. Review uncertain fields: ${uncertain}.`;
+          `Draft filled from ${result.photo_filename}; confidence ${result.draft?.confidence ?? "--"}. Review uncertain fields: ${uncertain}; plausibility warnings: ${warningCount}.`;
       } catch (error) {
         message.textContent = `AI draft unavailable: ${error.message}`;
       }
@@ -5341,8 +5857,16 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ approved_external_inference: true, detail: "high" })
         });
+        renderExtractionEvidence({
+          plausibility_findings: result.plausibility_findings || [],
+          uncertain_fields: result.uncertain_fields || [],
+          confidence: result.draft_confidence,
+          extraction_image_mode: result.extraction_image_mode,
+          extractionMethod: result.extraction_method
+        });
+        const warningCount = (result.plausibility_findings || []).length;
         message.textContent =
-          `Saved extracted review ${result.parse_id}; ${result.created_note_items} note line(s), confidence ${result.draft_confidence ?? "--"}.`;
+          `Saved extracted review ${result.parse_id}; ${result.created_note_items} note line(s), confidence ${result.draft_confidence ?? "--"}, plausibility warnings ${warningCount}.`;
         await refresh();
       } catch (error) {
         message.textContent = `AI extraction unavailable: ${error.message}`;
@@ -5385,6 +5909,15 @@
         `Created ${result.created_review_items} comparison review item(s); ${result.existing_review_items} already existed; ${result.skipped_comparisons} exact/no-action comparison(s) skipped.`;
       await refresh();
     });
+    document.getElementById("transcriptionSexRaw").addEventListener("input", () => {
+      const sexSelect = document.getElementById("transcriptionSexNormalized");
+      const inferredSex = sexNormalizedFromRaw(document.getElementById("transcriptionSexRaw").value);
+      if (!sexSelect.value || sexSelect.value === "unknown" || inferredSex === "mixed") {
+        sexSelect.value = inferredSex;
+      }
+      inferCardTypeFromSexSelection();
+    });
+    document.getElementById("transcriptionSexNormalized").addEventListener("change", inferCardTypeFromSexSelection);
     document.getElementById("transcriptionButton").addEventListener("click", async () => {
       const photoId = document.getElementById("transcriptionPhotoId").value;
       if (!photoId) {
@@ -5396,17 +5929,23 @@
         .map((line) => line.trim())
         .filter(Boolean)
         .map((line) => ({ raw: line, strike: "none" }));
+      const rawStrain = document.getElementById("transcriptionRawStrain").value;
+      const matchedStrain = document.getElementById("transcriptionMatchedStrain").value;
+      const rawSex = document.getElementById("transcriptionSexRaw").value;
+      const selectedSex = document.getElementById("transcriptionSexNormalized").value;
       const result = await api(`/api/photos/${encodeURIComponent(photoId)}/manual-transcription`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           card_type: document.getElementById("transcriptionCardType").value,
-          raw_strain: document.getElementById("transcriptionRawStrain").value,
-          matched_strain: document.getElementById("transcriptionRawStrain").value,
-          sex_raw: document.getElementById("transcriptionSexRaw").value,
+          raw_strain: rawStrain,
+          matched_strain: matchedStrain || rawStrain,
+          sex_raw: rawSex,
+          sex_normalized: selectedSex,
           id_raw: document.getElementById("transcriptionIdRaw").value,
           dob_raw: document.getElementById("transcriptionDobRaw").value,
           mouse_count: document.getElementById("transcriptionMouseCount").value,
+          lmo_raw: document.getElementById("transcriptionLmoRaw").value,
           notes
         })
       });

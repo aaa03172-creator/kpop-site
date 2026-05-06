@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.main import normalize_ai_draft_payload
+from app.main import infer_card_type_from_sex, normalize_ai_draft_payload, normalize_sex_raw
 
 
 def base_draft(**overrides):
@@ -33,6 +33,15 @@ def test_ai_draft_keeps_full_visible_date_normalization() -> None:
     )
 
     assert draft["dob_normalized"] == "2026-03-01"
+
+
+def test_male_and_female_symbols_normalize_to_mixed_and_mating_card() -> None:
+    assert normalize_sex_raw("\u2642/\u2640") == "mixed"
+    assert infer_card_type_from_sex("Separated", "\u2642/\u2640", "") == "Mating"
+
+    draft = normalize_ai_draft_payload(base_draft(card_type="Separated", sex_raw="\u2642/\u2640"))
+
+    assert draft["card_type"] == "Mating"
 
 
 def test_ai_draft_drops_partial_date_range_normalization() -> None:
@@ -164,3 +173,40 @@ def test_ai_draft_drops_reversed_iso_date_range() -> None:
     )
 
     assert draft["dob_normalized"] == ""
+
+
+def test_ai_draft_flags_digit_only_sex_as_plausibility_warning() -> None:
+    draft = normalize_ai_draft_payload(
+        base_draft(sex_raw="6", mouse_count="")
+    )
+
+    assert "sex_raw" in draft["uncertain_fields"]
+    assert "mouse_count" in draft["uncertain_fields"]
+    assert draft["plausibility_findings"][0]["field"] == "sex_raw"
+    assert draft["plausibility_findings"][0]["severity"] == "high"
+    assert "Plausibility checks" in draft["reviewer_note"]
+
+
+def test_ai_draft_flags_strain_like_mouse_count_text() -> None:
+    draft = normalize_ai_draft_payload(
+        base_draft(mouse_count="fl/fl tg")
+    )
+
+    assert "mouse_count" in draft["uncertain_fields"]
+    assert any(
+        finding["field"] == "mouse_count" and finding["severity"] == "high"
+        for finding in draft["plausibility_findings"]
+    )
+
+
+def test_ai_draft_flags_invalid_visible_calendar_date() -> None:
+    draft = normalize_ai_draft_payload(
+        base_draft(dob_raw="2026.02.30", dob_normalized="2026-02-30")
+    )
+
+    assert draft["dob_normalized"] == ""
+    assert "dob_raw" in draft["uncertain_fields"]
+    assert any(
+        finding["field"] == "dob_raw" and finding["severity"] == "high"
+        for finding in draft["plausibility_findings"]
+    )

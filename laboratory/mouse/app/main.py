@@ -122,6 +122,7 @@ class ReviewResolutionCreate(BaseModel):
     note_label_mouse_id: str = ""
     note_label_count: int | None = Field(default=None, ge=0)
     note_label_interpreted_status: str = ""
+    ear_label_code: str = ""
 
 
 class PhotoManualTranscriptionCreate(BaseModel):
@@ -129,6 +130,7 @@ class PhotoManualTranscriptionCreate(BaseModel):
     raw_strain: str = ""
     matched_strain: str = ""
     sex_raw: str = ""
+    sex_normalized: str = ""
     id_raw: str = ""
     dob_raw: str = ""
     dob_normalized: str = ""
@@ -143,6 +145,7 @@ class PhotoManualTranscriptionCreate(BaseModel):
     raw_visible_text_lines: list[str] = Field(default_factory=list)
     symbol_confusions: list[str] = Field(default_factory=list)
     uncertain_fields: list[str] = Field(default_factory=list)
+    plausibility_findings: list[dict[str, Any]] = Field(default_factory=list)
     extraction_image_mode: str = ""
     roi_template_type: str = ""
     extraction_regions: list[dict[str, Any]] = Field(default_factory=list)
@@ -278,6 +281,22 @@ def review_priority(severity: str = "", issue: str = "", review_reason: str = ""
     return "medium"
 
 
+def review_uncertain_fields(parse_payload: dict[str, Any]) -> list[str]:
+    raw_uncertain_fields: list[Any] = []
+    for key in ("uncertainFields", "uncertain_fields"):
+        if isinstance(parse_payload.get(key), list):
+            raw_uncertain_fields.extend(parse_payload[key])
+    uncertain_fields = []
+    seen_uncertain_fields: set[str] = set()
+    for field in raw_uncertain_fields:
+        field_name = normalize_uncertain_field_name(field)
+        if not field_name or field_name in seen_uncertain_fields:
+            continue
+        seen_uncertain_fields.add(field_name)
+        uncertain_fields.append(field_name)
+    return uncertain_fields
+
+
 def review_attention_level(item: dict[str, Any], parse_payload: dict[str, Any] | None = None) -> dict[str, str]:
     payload = parse_payload or {}
     status = str(item.get("status") or "").strip().lower()
@@ -287,18 +306,9 @@ def review_attention_level(item: dict[str, Any], parse_payload: dict[str, Any] |
     source_key = source_name.lower()
     priority = str(item.get("priority") or "").strip().lower()
     severity = str(item.get("severity") or "").strip().lower()
-    raw_uncertain_fields: list[Any] = []
-    for key in ("uncertainFields", "uncertain_fields"):
-        if isinstance(payload.get(key), list):
-            raw_uncertain_fields.extend(payload[key])
-    uncertain_fields = []
-    seen_uncertain_fields: set[str] = set()
-    for field in raw_uncertain_fields:
-        field_name = normalize_uncertain_field_name(field)
-        if not field_name or field_name in seen_uncertain_fields:
-            continue
-        seen_uncertain_fields.add(field_name)
-        uncertain_fields.append(field_name)
+    uncertain_fields = review_uncertain_fields(payload)
+    plausibility_findings = parse_payload_plausibility_findings(payload)
+    high_plausibility_findings = [finding for finding in plausibility_findings if finding["severity"] == "high"]
     confidence_source = payload["confidence"] if "confidence" in payload else item.get("confidence", 0)
     confidence = bounded_float(confidence_source)
     raw_strain = str(payload.get("rawStrain") or "").strip()
@@ -336,6 +346,11 @@ def review_attention_level(item: dict[str, Any], parse_payload: dict[str, Any] |
                 "attention_level": "must_review",
                 "attention_reason": "Low-confidence OCR draft needs focused review.",
             }
+        if high_plausibility_findings:
+            return {
+                "attention_level": "must_review",
+                "attention_reason": "Plausibility check found an impossible or cross-field OCR value.",
+            }
         if not raw_strain or not sex_raw:
             return {
                 "attention_level": "must_review",
@@ -367,6 +382,56 @@ def review_attention_level(item: dict[str, Any], parse_payload: dict[str, Any] |
         "attention_level": "quick_check",
         "attention_reason": "Open review retained outside the focused default queue.",
     }
+
+
+def review_check_targets(item: dict[str, Any], parse_payload: dict[str, Any] | None = None) -> list[str]:
+    payload = parse_payload or {}
+    issue_key = str(item.get("issue") or "").strip().lower()
+    confidence_source = payload["confidence"] if "confidence" in payload else item.get("confidence", 0)
+    confidence = bounded_float(confidence_source)
+    uncertain_fields = set(review_uncertain_fields(payload))
+    plausibility_findings = parse_payload_plausibility_findings(payload)
+    targets: list[str] = []
+
+    def add(label: str) -> None:
+        if label and label not in targets:
+            targets.append(label)
+
+    if issue_key == "unlabeled numeric note needs review":
+        add("Numeric note label")
+        add("Note line anchor")
+    elif issue_key == "ear label needs review":
+        add("Ear label")
+        add("Source photo")
+    elif issue_key == "ai-extracted photo transcription needs review":
+        if confidence <= 55:
+            add("Low OCR confidence")
+        if plausibility_findings:
+            add("Plausibility warning")
+        if not str(payload.get("rawStrain") or "").strip():
+            add("Strain field")
+        if not str(payload.get("sexRaw") or "").strip():
+            add("Sex/count field")
+        if "matched_strain" in uncertain_fields:
+            add("Assigned strain match")
+        if "raw_strain" in uncertain_fields:
+            add("Raw strain text")
+        if "sex_raw" in uncertain_fields:
+            add("Sex/count field")
+        if "mouse_count" in uncertain_fields:
+            add("Mouse count")
+        if "dob_raw" in uncertain_fields or "dob_normalized" in uncertain_fields:
+            add("DOB")
+        if "notes" in uncertain_fields:
+            add("Notes")
+        if not targets:
+            add("Source photo")
+    elif "duplicate active" in issue_key:
+        add("Duplicate mouse ID")
+        add("Source evidence")
+    else:
+        add("Source evidence")
+    return targets[:5]
 
 
 def ai_draft_status() -> dict[str, Any]:
@@ -1124,6 +1189,178 @@ def valid_iso_date_or_range(value: str) -> bool:
     return True
 
 
+def add_uncertain_field(uncertain_fields: list[str], field_name: str) -> None:
+    normalized = normalize_uncertain_field_name(field_name)
+    if normalized and normalized not in uncertain_fields:
+        uncertain_fields.append(normalized)
+
+
+def field_contains_neighbor_label(value: Any) -> bool:
+    text = str(value or "").lower()
+    return bool(
+        re.search(
+            r"\b(strain|d\.?\s*o\.?\s*b|dob|i\.?\s*d|lmo|mating|cage|card|note|no\.?)\b",
+            text,
+        )
+    )
+
+
+def has_sex_hint(value: Any) -> bool:
+    text = repair_known_ocr_symbol_mojibake(value)
+    lowered = text.lower()
+    return bool(
+        "\u2642" in text
+        or "\u2640" in text
+        or re.search(r"(^|[^a-z])(m|f)([^a-z]|$)", lowered)
+        or any(token in lowered for token in ["male", "female", "mixed", "both", "m/f", "f/m"])
+        or any(token in text for token in ["수", "암"])
+    )
+
+
+def mouse_count_has_unexpected_text(value: Any) -> bool:
+    text = repair_known_ocr_symbol_mojibake(value).strip()
+    if not text:
+        return False
+    scrubbed = text.lower()
+    scrubbed = scrubbed.replace("\u2642", " ").replace("\u2640", " ")
+    scrubbed = re.sub(r"\b(total|mixed|both|male|female|m|f|p|ea|pcs|count)\b", " ", scrubbed)
+    scrubbed = re.sub(r"[\d\s,./+\-()]+", " ", scrubbed)
+    return bool(re.search(r"[a-z]{2,}", scrubbed))
+
+
+def first_visible_invalid_date_token(value: Any) -> str:
+    text = str(value or "")
+    for match in re.finditer(r"\d{4}\D+\d{1,2}\D+\d{1,2}", text):
+        numbers = re.findall(r"\d+", match.group(0))
+        if len(numbers) != 3:
+            continue
+        try:
+            date(int(numbers[0]), int(numbers[1]), int(numbers[2]))
+        except ValueError:
+            return match.group(0).strip()
+    return ""
+
+
+def extract_declared_mouse_count(value: Any) -> int | None:
+    text = repair_known_ocr_symbol_mojibake(value).strip()
+    if not text:
+        return None
+    if "\u2642" not in text and "\u2640" not in text and not re.search(r"\b(total|mixed|both|male|female|m|f|p)\b", text, re.I):
+        return None
+    numbers = [int(item) for item in re.findall(r"\d+", text)]
+    if not numbers:
+        return None
+    return max(numbers)
+
+
+def strain_tokens(value: Any) -> set[str]:
+    return {
+        token.lower()
+        for token in re.findall(r"[A-Za-z0-9]+", str(value or ""))
+        if len(token) >= 2
+    }
+
+
+def ai_draft_plausibility_findings(draft: dict[str, Any]) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+
+    def add(field: str, message: str, severity: str = "medium") -> None:
+        if not any(item["field"] == field and item["message"] == message for item in findings):
+            findings.append({"field": field, "severity": severity, "message": message})
+
+    raw_strain = str(draft.get("raw_strain") or "").strip()
+    matched_strain = str(draft.get("matched_strain") or "").strip()
+    sex_raw = repair_known_ocr_symbol_mojibake(draft.get("sex_raw")).strip()
+    mouse_count = repair_known_ocr_symbol_mojibake(draft.get("mouse_count")).strip()
+    notes = draft.get("notes") if isinstance(draft.get("notes"), list) else []
+
+    if field_contains_neighbor_label(raw_strain):
+        add("raw_strain", "Raw strain text appears to include a neighboring card label.", "high")
+    if field_contains_neighbor_label(matched_strain):
+        add("matched_strain", "Assigned strain match appears to include a neighboring card label.", "high")
+    if raw_strain and matched_strain and raw_strain.lower() != matched_strain.lower():
+        raw_tokens = strain_tokens(raw_strain)
+        matched_tokens = strain_tokens(matched_strain)
+        if raw_tokens and matched_tokens and raw_tokens.isdisjoint(matched_tokens):
+            add("matched_strain", "Assigned strain has no visible token overlap with raw strain text.", "medium")
+    if matched_strain and not raw_strain:
+        add("raw_strain", "Assigned strain exists but raw visible strain text is blank.", "medium")
+
+    if sex_raw:
+        sex_normalized = normalize_sex_raw(sex_raw)
+        if field_contains_neighbor_label(sex_raw):
+            add("sex_raw", "Sex field appears to include neighboring card-label text.", "high")
+        if sex_normalized == "unknown":
+            add("sex_raw", "Sex field is not one of the expected sex symbols or words.", "high")
+        if re.search(r"\d", sex_raw) and not has_sex_hint(sex_raw):
+            add("sex_raw", "Sex field contains digits without a sex symbol or sex word.", "high")
+            add("mouse_count", "Digits in the sex field may belong to mouse count instead.", "medium")
+
+    if mouse_count:
+        if field_contains_neighbor_label(mouse_count):
+            add("mouse_count", "Mouse count appears to include neighboring card-label text.", "high")
+        if not re.search(r"\d", mouse_count):
+            add("mouse_count", "Mouse count has no visible number.", "medium")
+        if mouse_count_has_unexpected_text(mouse_count):
+            add("mouse_count", "Mouse count contains unexpected long text; it may be strain or note text.", "high")
+
+    for raw_field, normalized_field in [("dob_raw", "dob_normalized"), ("mating_date_raw", "mating_date_normalized")]:
+        invalid_token = first_visible_invalid_date_token(draft.get(raw_field))
+        if invalid_token:
+            add(raw_field, f"Visible date-like text is not a valid calendar date: {invalid_token}.", "high")
+        if str(draft.get(raw_field) or "").strip() and not str(draft.get(normalized_field) or "").strip():
+            add(normalized_field, "Visible date text was preserved raw but not normalized.", "low")
+
+    declared_count = extract_declared_mouse_count(mouse_count)
+    if declared_count is not None and notes:
+        active_note_count = 0
+        for note in notes:
+            raw_line = str(note.get("raw") if isinstance(note, dict) else note)
+            strike = str(note.get("strike") if isinstance(note, dict) else "none") or "none"
+            if parse_note_line(raw_line, str(draft.get("card_type") or "unknown"))["parsed_type"] == "mouse_item" and strike == "none":
+                active_note_count += 1
+        if active_note_count and declared_count != active_note_count:
+            add(
+                "mouse_count",
+                f"Declared count {declared_count} does not match {active_note_count} active mouse note line(s).",
+                "medium",
+            )
+
+    return findings[:10]
+
+
+def append_plausibility_note(reviewer_note: str, findings: list[dict[str, str]]) -> str:
+    note = str(reviewer_note or "").strip()
+    if not findings:
+        return note
+    summary = "; ".join(
+        f"{finding['field']}: {finding['message'].rstrip('.')}"
+        for finding in findings[:5]
+    )
+    suffix = f"Plausibility checks: {summary}."
+    return f"{note} {suffix}".strip() if note else suffix
+
+
+def parse_payload_plausibility_findings(parse_payload: dict[str, Any]) -> list[dict[str, str]]:
+    raw_findings = []
+    for key in ("plausibilityFindings", "plausibility_findings"):
+        if isinstance(parse_payload.get(key), list):
+            raw_findings.extend(parse_payload[key])
+    findings: list[dict[str, str]] = []
+    for item in raw_findings:
+        if not isinstance(item, dict):
+            continue
+        field = normalize_uncertain_field_name(item.get("field"))
+        message = str(item.get("message") or "").strip()
+        severity = str(item.get("severity") or "medium").strip().lower()
+        if not field or not message:
+            continue
+        if severity not in {"low", "medium", "high"}:
+            severity = "medium"
+        findings.append({"field": field, "severity": severity, "message": message})
+    return findings
+
+
 def ai_draft_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -1206,6 +1443,7 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
     card_type = str(draft.get("card_type") or "unknown")
     if card_type not in {"Separated", "Mating", "unknown"}:
         card_type = "unknown"
+    card_type = infer_card_type_from_sex(card_type, draft.get("sex_raw"), "")
     uncertain_fields: list[str] = []
     seen_uncertain_fields: set[str] = set()
     for item in draft.get("uncertain_fields") if isinstance(draft.get("uncertain_fields"), list) else []:
@@ -1214,7 +1452,7 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
             continue
         seen_uncertain_fields.add(field_name)
         uncertain_fields.append(field_name)
-    return {
+    normalized_draft = {
         "card_type": card_type,
         "raw_strain": str(draft.get("raw_strain") or ""),
         "matched_strain": str(draft.get("matched_strain") or ""),
@@ -1246,6 +1484,13 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
         "uncertain_fields": uncertain_fields,
         "reviewer_note": str(draft.get("reviewer_note") or ""),
     }
+    findings = ai_draft_plausibility_findings(normalized_draft)
+    for finding in findings:
+        if finding["severity"] in {"medium", "high"}:
+            add_uncertain_field(uncertain_fields, finding["field"])
+    normalized_draft["plausibility_findings"] = findings
+    normalized_draft["reviewer_note"] = append_plausibility_note(normalized_draft["reviewer_note"], findings)
+    return normalized_draft
 
 
 def normalize_uncertain_field_name(value: Any) -> str:
@@ -1330,6 +1575,8 @@ def request_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -
                             "Do not guess the century or reorder ambiguous handwritten two-digit dates. Leave normalized date fields empty when uncertain. "
                             "For numeric-only post-separation labels, keep the raw numbers as notes and mark "
                             "meaning as unlabeled_numeric_note rather than inventing mouse IDs. "
+                            "Ear label suffixes are constrained lab marks: R', L', R\u00b0/L\u00b0 or R0/L0 when circle-vs-zero is ambiguous, plus N for none. "
+                            "If OCR sees impossible suffixes such as RWM, RL1M, stray letters, or a line crossing the text, preserve the raw note but mark the ear label uncertain instead of normalizing it. "
                             "Strike marks: none, single, double, unclear. "
                             f"Assigned strain scope for matching only: {json.dumps(assigned_scope, ensure_ascii=False)}"
                         ),
@@ -1409,6 +1656,7 @@ def create_photo_ai_extracted_transcription(photo_id: str, payload: PhotoAiDraft
             raw_strain=draft["raw_strain"],
             matched_strain=draft["matched_strain"],
             sex_raw=draft["sex_raw"],
+            sex_normalized=normalize_sex_raw(draft["sex_raw"]),
             id_raw=draft["id_raw"],
             dob_raw=draft["dob_raw"],
             dob_normalized=draft["dob_normalized"],
@@ -1422,12 +1670,14 @@ def create_photo_ai_extracted_transcription(photo_id: str, payload: PhotoAiDraft
                 f"AI-extracted cage-card draft using {extraction['extraction_image_mode']}. "
                 "Reviewer must compare against the raw photo before canonical writes. "
                 f"Uncertain fields: {', '.join(draft['uncertain_fields']) or 'none listed'}. "
-                f"Symbol confusions: {', '.join(draft['symbol_confusions']) or 'none listed'}."
+                f"Symbol confusions: {', '.join(draft['symbol_confusions']) or 'none listed'}. "
+                f"{draft['reviewer_note']}"
             ),
             extraction_method="ai_photo_extraction",
             raw_visible_text_lines=draft["raw_visible_text_lines"],
             symbol_confusions=draft["symbol_confusions"],
             uncertain_fields=draft["uncertain_fields"],
+            plausibility_findings=draft["plausibility_findings"],
             extraction_image_mode=extraction["extraction_image_mode"],
             roi_template_type=extraction.get("roi_template_type", ""),
             extraction_regions=extraction.get("extraction_regions", []),
@@ -1443,6 +1693,7 @@ def create_photo_ai_extracted_transcription(photo_id: str, payload: PhotoAiDraft
         "roi_template_type": extraction.get("roi_template_type", ""),
         "draft_confidence": draft["confidence"],
         "uncertain_fields": draft["uncertain_fields"],
+        "plausibility_findings": draft["plausibility_findings"],
     }
 
 
@@ -2034,6 +2285,75 @@ def review_note_item_id(review_id: str, payload_note_item_id: str = "") -> str:
     return ""
 
 
+def update_note_item_label(conn: Any, note_item_id: str, after: dict[str, Any]) -> None:
+    conn.execute(
+        """
+        UPDATE card_note_item_log
+        SET parsed_type = ?,
+            interpreted_status = ?,
+            parsed_mouse_display_id = ?,
+            parsed_ear_label_raw = ?,
+            parsed_ear_label_code = ?,
+            parsed_ear_label_confidence = ?,
+            parsed_ear_label_review_status = ?,
+            parsed_event_date = ?,
+            parsed_count = ?,
+            confidence = ?,
+            needs_review = ?
+        WHERE note_item_id = ?
+        """,
+        (
+            after["parsed_type"],
+            after["interpreted_status"],
+            after["parsed_mouse_display_id"],
+            after["parsed_ear_label_raw"],
+            after["parsed_ear_label_code"],
+            after["parsed_ear_label_confidence"],
+            after["parsed_ear_label_review_status"],
+            after["parsed_event_date"],
+            after["parsed_count"],
+            after["confidence"],
+            after["needs_review"],
+            note_item_id,
+        ),
+    )
+
+
+def log_note_label_review_action(
+    conn: Any,
+    *,
+    action_type: str,
+    note_item_id: str,
+    before: dict[str, Any],
+    review_id: str,
+    decision: str,
+    after: dict[str, Any],
+    resolved_at: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id("action"),
+            action_type,
+            note_item_id,
+            json.dumps(before, ensure_ascii=False),
+            json.dumps(
+                {
+                    "review_id": review_id,
+                    "decision": decision,
+                    "after": after,
+                    "boundary": "parsed or intermediate result",
+                },
+                ensure_ascii=False,
+            ),
+            resolved_at,
+        ),
+    )
+
+
 def resolve_note_label_correction(
     conn: Any,
     *,
@@ -2053,6 +2373,19 @@ def resolve_note_label_correction(
         )
 
     note_item_id = review_note_item_id(review_id, payload.note_item_id)
+    if review_id == f"review_unlabeled_numeric_{parse_id}" and not payload.note_item_id.strip():
+        first_numeric_note = conn.execute(
+            """
+            SELECT note_item_id
+            FROM card_note_item_log
+            WHERE parse_id = ?
+              AND parsed_type = 'unlabeled_numeric_note'
+            ORDER BY line_number
+            LIMIT 1
+            """,
+            (parse_id,),
+        ).fetchone()
+        note_item_id = first_numeric_note["note_item_id"] if first_numeric_note is not None else ""
     if not note_item_id:
         raise HTTPException(status_code=400, detail="note_item_id is required for note label review corrections.")
     note = conn.execute(
@@ -2071,6 +2404,11 @@ def resolve_note_label_correction(
         raise HTTPException(status_code=404, detail="Note item not found for label review correction.")
     if note["parse_id"] != parse_id:
         raise HTTPException(status_code=409, detail="Review item and note item parse IDs do not match.")
+    is_grouped_numeric_review = (
+        review_id == f"review_unlabeled_numeric_{parse_id}"
+        and note["parsed_type"] == "unlabeled_numeric_note"
+        and decision in {"count_note", "reviewed_note", "ignored_note"}
+    )
 
     before = dict(note)
     after = dict(before)
@@ -2100,6 +2438,8 @@ def resolve_note_label_correction(
         )
     elif decision == "count_note":
         count_value = payload.note_label_count
+        if is_grouped_numeric_review:
+            count_value = note["parsed_count"]
         if count_value is None:
             match = re.search(r"\d+", payload.resolved_value or note["raw_line_text"] or "")
             if match:
@@ -2157,33 +2497,162 @@ def resolve_note_label_correction(
         ),
         resolved_at,
     )
-    conn.execute(
-        """
-        INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (
-            new_id("action"),
-            "note_label_reviewed",
-            note_item_id,
-            json.dumps(before, ensure_ascii=False),
-            json.dumps(
+    log_note_label_review_action(
+        conn,
+        action_type="note_label_reviewed",
+        note_item_id=note_item_id,
+        before=before,
+        review_id=review_id,
+        decision=decision,
+        after=after,
+        resolved_at=resolved_at,
+    )
+    grouped_note_item_ids = [note_item_id]
+    if is_grouped_numeric_review:
+        sibling_rows = conn.execute(
+            """
+            SELECT note_item_id, photo_id, parse_id, card_snapshot_id, card_type, line_number, raw_line_text, strike_status,
+                   parsed_type, interpreted_status, parsed_mouse_display_id,
+                   parsed_ear_label_raw, parsed_ear_label_code, parsed_ear_label_confidence,
+                   parsed_ear_label_review_status, parsed_event_date, parsed_count,
+                   confidence, needs_review
+            FROM card_note_item_log
+            WHERE parse_id = ?
+              AND parsed_type = 'unlabeled_numeric_note'
+              AND note_item_id <> ?
+            ORDER BY line_number
+            """,
+            (parse_id, note_item_id),
+        ).fetchall()
+        for sibling in sibling_rows:
+            sibling_before = dict(sibling)
+            sibling_after = dict(sibling_before)
+            sibling_after.update(
                 {
-                    "review_id": review_id,
-                    "decision": decision,
-                    "after": after,
-                    "boundary": "parsed or intermediate result",
-                },
-                ensure_ascii=False,
-            ),
-            resolved_at,
-        ),
+                    "parsed_type": decision,
+                    "interpreted_status": payload.note_label_interpreted_status.strip() or (
+                        "reviewed_count" if decision == "count_note" else decision.replace("_note", "")
+                    ),
+                    "parsed_mouse_display_id": None,
+                    "parsed_ear_label_raw": None,
+                    "parsed_ear_label_code": None,
+                    "parsed_ear_label_confidence": None,
+                    "parsed_ear_label_review_status": "user_corrected",
+                    "parsed_event_date": None,
+                    "parsed_count": None,
+                    "confidence": 1.0,
+                    "needs_review": 0,
+                }
+            )
+            if decision == "count_note":
+                count_value = sibling["parsed_count"]
+                if count_value is None:
+                    match = re.search(r"\d+", sibling["raw_line_text"] or "")
+                    count_value = int(match.group(0)) if match else 0
+                sibling_after["parsed_count"] = count_value
+                sibling_after["interpreted_status"] = payload.note_label_interpreted_status.strip() or "reviewed_count"
+            elif decision == "reviewed_note":
+                sibling_after["interpreted_status"] = payload.note_label_interpreted_status.strip() or "reviewed_note"
+            elif decision == "ignored_note":
+                sibling_after["interpreted_status"] = payload.note_label_interpreted_status.strip() or "ignored"
+            update_note_item_label(conn, sibling["note_item_id"], sibling_after)
+            grouped_note_item_ids.append(str(sibling["note_item_id"]))
+            log_note_label_review_action(
+                conn,
+                action_type="grouped_note_label_reviewed",
+                note_item_id=sibling["note_item_id"],
+                before=sibling_before,
+                review_id=review_id,
+                decision=decision,
+                after=sibling_after,
+                resolved_at=resolved_at,
+            )
+    snapshot_update = refresh_card_snapshot_summary(conn, str(note["card_snapshot_id"] or ""), resolved_at)
+    return {
+        "note_item_id": note_item_id,
+        "grouped_note_item_ids": grouped_note_item_ids,
+        "decision": decision,
+        "correction_id": correction_id,
+        "card_snapshot_update": snapshot_update,
+        "boundary": "parsed or intermediate result",
+    }
+
+
+def resolve_ear_label_correction(
+    conn: Any,
+    *,
+    review_id: str,
+    parse_id: str,
+    payload: ReviewResolutionCreate,
+    resolved_at: str,
+) -> dict[str, Any] | None:
+    selected_code = payload.ear_label_code.strip().upper()
+    if not selected_code:
+        return None
+    allowed_codes = {
+        "R_PRIME",
+        "L_PRIME",
+        "R_CIRCLE",
+        "L_CIRCLE",
+        "R_PRIME_L_PRIME",
+        "R_PRIME_L_CIRCLE",
+        "R_CIRCLE_L_PRIME",
+        "R_CIRCLE_L_CIRCLE",
+        "NONE",
+        "UNREADABLE",
+    }
+    if selected_code not in allowed_codes:
+        raise HTTPException(status_code=400, detail="ear_label_code is not an allowed review choice.")
+
+    note_item_id = review_note_item_id(review_id, payload.note_item_id)
+    if not note_item_id:
+        raise HTTPException(status_code=400, detail="note_item_id is required for ear label review corrections.")
+    note = conn.execute(
+        """
+        SELECT note_item_id, photo_id, parse_id, card_snapshot_id, card_type, line_number, raw_line_text, strike_status,
+               parsed_type, interpreted_status, parsed_mouse_display_id,
+               parsed_ear_label_raw, parsed_ear_label_code, parsed_ear_label_confidence,
+               parsed_ear_label_review_status, parsed_event_date, parsed_count,
+               confidence, needs_review
+        FROM card_note_item_log
+        WHERE note_item_id = ?
+        """,
+        (note_item_id,),
+    ).fetchone()
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note item not found for ear label review correction.")
+    if note["parse_id"] != parse_id:
+        raise HTTPException(status_code=409, detail="Review item and note item parse IDs do not match.")
+    if note["parsed_type"] != "mouse_item":
+        raise HTTPException(status_code=400, detail="Ear label review can only update mouse note items.")
+
+    before = dict(note)
+    after = dict(before)
+    after.update(
+        {
+            "parsed_ear_label_code": None if selected_code == "UNREADABLE" else selected_code,
+            "parsed_ear_label_confidence": 1.0,
+            "parsed_ear_label_review_status": "reviewed_unreadable" if selected_code == "UNREADABLE" else "user_corrected",
+            "confidence": 1.0,
+            "needs_review": 0,
+        }
+    )
+    update_note_item_label(conn, note_item_id, after)
+    log_note_label_review_action(
+        conn,
+        action_type="ear_label_reviewed",
+        note_item_id=note_item_id,
+        before=before,
+        review_id=review_id,
+        decision=selected_code,
+        after=after,
+        resolved_at=resolved_at,
     )
     snapshot_update = refresh_card_snapshot_summary(conn, str(note["card_snapshot_id"] or ""), resolved_at)
     return {
         "note_item_id": note_item_id,
-        "decision": decision,
-        "correction_id": correction_id,
+        "ear_label_code": after["parsed_ear_label_code"],
+        "ear_label_review_status": after["parsed_ear_label_review_status"],
         "card_snapshot_update": snapshot_update,
         "boundary": "parsed or intermediate result",
     }
@@ -3193,13 +3662,25 @@ def split_dob_range(raw: Any, normalized: Any) -> tuple[str, str | None, str | N
 def normalize_sex_raw(raw: Any) -> str:
     text = repair_known_ocr_symbol_mojibake(raw).strip()
     lowered = text.lower()
-    if "\u2642" in text or lowered in {"m", "male", "man"}:
-        return "male"
-    if "\u2640" in text or lowered in {"f", "female", "woman"}:
-        return "female"
+    has_male = "\u2642" in text or bool(re.search(r"\b(m|male|man)\b", lowered))
+    has_female = "\u2640" in text or bool(re.search(r"\b(f|female|woman)\b", lowered))
+    if has_male and has_female:
+        return "mixed"
     if any(token in lowered for token in ["mixed", "both", "m/f", "f/m", "mf"]):
         return "mixed"
+    if has_male:
+        return "male"
+    if has_female:
+        return "female"
     return "unknown" if text else ""
+
+
+def infer_card_type_from_sex(card_type: str, sex_raw: Any = "", sex_normalized: str = "") -> str:
+    normalized_card_type = str(card_type or "unknown")
+    sex_value = str(sex_normalized or "").strip().lower() or normalize_sex_raw(sex_raw)
+    if sex_value == "mixed" and normalized_card_type in {"", "unknown", "Separated"}:
+        return "Mating"
+    return normalized_card_type or "unknown"
 
 
 def first_int(value: Any) -> int | None:
@@ -3226,16 +3707,22 @@ def mouse_id_prefix(display_id: str) -> str:
 def normalize_ear_label(raw: str) -> dict[str, Any]:
     text = "".join(str(raw or "").split())
     if not text:
-        return {"code": None, "confidence": 0.0, "status": "needs_review", "candidates": []}
+        return {"code": None, "confidence": 0.0, "status": "needs_review", "candidates": [], "reason": "Ear label is blank."}
     if text.upper() == "N":
-        return {"code": "NONE", "confidence": 1.0, "status": "auto_filled", "candidates": []}
+        return {"code": "NONE", "confidence": 1.0, "status": "auto_filled", "candidates": [], "reason": ""}
 
     components: list[tuple[str, str, float, str]] = []
     index = 0
     while index < len(text):
         side = text[index].upper()
         if side not in {"R", "L"}:
-            return {"code": None, "confidence": 0.0, "status": "needs_review", "candidates": []}
+            return {
+                "code": None,
+                "confidence": 0.0,
+                "status": "needs_review",
+                "candidates": [],
+                "reason": f"Unexpected ear-label side '{text[index]}' in '{text}'. Expected R or L.",
+            }
         index += 1
         if index >= len(text):
             return {
@@ -3243,6 +3730,7 @@ def normalize_ear_label(raw: str) -> dict[str, Any]:
                 "confidence": 0.2,
                 "status": "needs_review",
                 "candidates": [{"code": f"{side}_PRIME", "confidence": 0.35}, {"code": f"{side}_CIRCLE", "confidence": 0.35}],
+                "reason": f"Ear-label side '{side}' is missing a mark. Expected prime or circle.",
             }
         mark = text[index]
         index += 1
@@ -3253,15 +3741,22 @@ def normalize_ear_label(raw: str) -> dict[str, Any]:
         elif mark in {"0", "o", "O"}:
             components.append((side, "CIRCLE", 0.65, "check"))
         else:
-            return {"code": None, "confidence": 0.0, "status": "needs_review", "candidates": []}
+            return {
+                "code": None,
+                "confidence": 0.0,
+                "status": "needs_review",
+                "candidates": [{"code": f"{side}_PRIME", "confidence": 0.25}, {"code": f"{side}_CIRCLE", "confidence": 0.25}],
+                "reason": f"Unexpected ear-label mark '{mark}' in '{text}'. Expected prime or circle.",
+            }
 
     if not components:
-        return {"code": None, "confidence": 0.0, "status": "needs_review", "candidates": []}
+        return {"code": None, "confidence": 0.0, "status": "needs_review", "candidates": [], "reason": "Ear label could not be parsed."}
 
     code = "_".join(f"{side}_{mark}" for side, mark, _, _ in components)
     confidence = min(confidence for _, _, confidence, _ in components)
     status = "check" if any(status == "check" for _, _, _, status in components) else "auto_filled"
-    return {"code": code, "confidence": confidence, "status": status, "candidates": []}
+    reason = "Ambiguous circle/zero mark needs review." if status == "check" else ""
+    return {"code": code, "confidence": confidence, "status": status, "candidates": [], "reason": reason}
 
 
 def interpreted_status(card_type: str, strike_status: str) -> str:
@@ -3315,6 +3810,14 @@ def parse_note_line(raw_line: str, card_type: str) -> dict[str, Any]:
     if mouse_match and "x" not in line.lower():
         ear_raw = mouse_match.group(2).strip()
         ear = normalize_ear_label(ear_raw)
+        parsed_metadata = {}
+        if ear["status"] in {"check", "needs_review"}:
+            parsed_metadata = {
+                "ear_label_issue": ear.get("reason") or "Ear label token needs source-photo review.",
+                "ear_label_raw": ear_raw,
+                "allowed_ear_label_examples": ["R'", "L'", "R°", "L°", "R0", "L0", "N"],
+                "display": f"{mouse_match.group(1)} [ear label review: {ear_raw}]",
+            }
         return {
             "parsed_type": "mouse_item",
             "parsed_mouse_display_id": mouse_match.group(1),
@@ -3324,7 +3827,7 @@ def parse_note_line(raw_line: str, card_type: str) -> dict[str, Any]:
             "parsed_ear_label_review_status": ear["status"],
             "parsed_event_date": None,
             "parsed_count": None,
-            "parsed_metadata": {},
+            "parsed_metadata": parsed_metadata,
             "confidence": ear["confidence"],
             "needs_review": 1 if ear["status"] in {"check", "needs_review"} else 0,
         }
@@ -3434,7 +3937,7 @@ def create_card_snapshot(conn: Any, parse_id: str, photo_id: str | None, record:
             str(record.get("rawStrain") or ""),
             str(record.get("matchedStrain") or ""),
             str(record.get("sexRaw") or ""),
-            normalize_sex_raw(record.get("sexRaw")),
+            str(record.get("sexNormalized") or "") or normalize_sex_raw(record.get("sexRaw")),
             str(record.get("mouseCount") or ""),
             first_int(record.get("mouseCount")),
             dob_raw,
@@ -4410,10 +4913,11 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
         record = {
             "id": parse_id,
             "uploaded": photo["original_filename"],
-            "type": payload.card_type or "Separated",
+            "type": infer_card_type_from_sex(payload.card_type or "Separated", payload.sex_raw, payload.sex_normalized),
             "rawStrain": payload.raw_strain,
             "matchedStrain": payload.matched_strain or payload.raw_strain,
             "sexRaw": repair_known_ocr_symbol_mojibake(payload.sex_raw),
+            "sexNormalized": payload.sex_normalized,
             "idRaw": payload.id_raw,
             "dobRaw": payload.dob_raw,
             "dobNormalized": payload.dob_normalized,
@@ -4454,6 +4958,17 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                 for item in payload.uncertain_fields
                 if str(item).strip()
             ][:30],
+            "plausibilityFindings": [
+                {
+                    "field": normalize_uncertain_field_name(item.get("field")),
+                    "severity": str(item.get("severity") or "medium").strip().lower(),
+                    "message": str(item.get("message") or "").strip(),
+                }
+                for item in payload.plausibility_findings
+                if isinstance(item, dict)
+                and normalize_uncertain_field_name(item.get("field"))
+                and str(item.get("message") or "").strip()
+            ][:10],
             "extractionImageMode": payload.extraction_image_mode,
             "roiTemplateType": payload.roi_template_type,
             "extractionRegions": [
@@ -4676,7 +5191,9 @@ def list_review_items() -> list[dict[str, Any]]:
         payload["image_url"] = f"/api/photos/{quote(payload['photo_id'])}/image" if payload.get("photo_id") else ""
         payload["review_note_summary"] = json_object(payload.pop("review_note_summary_json", "{}"))
         parse_payload = json_object(payload.pop("parse_raw_payload", "{}"))
+        payload["review_plausibility_findings"] = parse_payload_plausibility_findings(parse_payload)
         payload.update(review_attention_level(payload, parse_payload))
+        payload["review_check_targets"] = review_check_targets(payload, parse_payload)
         payload.pop("parse_confidence", None)
         result.append(payload)
     return result
@@ -4739,6 +5256,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         before = dict(existing)
         canonical_candidate_id = None
         note_label_update = None
+        ear_label_update = None
         after = {
             "status": "resolved",
             "resolved_value": payload.resolved_value,
@@ -4758,6 +5276,13 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
             (resolved_at, payload.resolution_note, review_id),
         )
         note_label_update = resolve_note_label_correction(
+            conn,
+            review_id=review_id,
+            parse_id=existing["parse_id"],
+            payload=payload,
+            resolved_at=resolved_at,
+        )
+        ear_label_update = resolve_ear_label_correction(
             conn,
             review_id=review_id,
             parse_id=existing["parse_id"],
@@ -4836,6 +5361,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
                 "canonical_candidate_id": canonical_candidate_id,
                 "legacy_row_review_status": legacy_row_review_status,
                 "note_label_update": note_label_update,
+                "ear_label_update": ear_label_update,
                 "source_parse_id": source_context.get("parse_id") or "",
                 "source_photo_id": source_context.get("photo_id") or "",
                 "source_photo_filename": source_context.get("original_filename") or "",
@@ -4870,6 +5396,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "canonical_candidate_id": canonical_candidate_id,
         "correction_id": correction_id,
         "note_label_update": note_label_update,
+        "ear_label_update": ear_label_update,
         "review_action_id": review_action_id,
         "audit_url": f"/api/review-items/{quote(review_id)}/audit",
     }
@@ -6249,11 +6776,18 @@ def list_note_items() -> list[dict[str, Any]]:
     for row in rows:
         payload = dict(row)
         payload["parsed_metadata"] = json_object(payload.pop("parsed_metadata_json", "{}"))
-        payload["display_value"] = (
-            payload["parsed_metadata"].get("display_ko")
-            if payload["parsed_type"] == "unlabeled_numeric_note"
-            else payload["raw_line_text"]
-        )
+        if payload["parsed_type"] == "unlabeled_numeric_note":
+            payload["display_value"] = payload["parsed_metadata"].get("display_ko") or payload["raw_line_text"]
+        elif (
+            payload["parsed_type"] == "mouse_item"
+            and payload["parsed_ear_label_review_status"] in {"check", "needs_review"}
+        ):
+            payload["display_value"] = (
+                payload["parsed_metadata"].get("display")
+                or f"{payload['parsed_mouse_display_id'] or '--'} [ear label review: {payload['parsed_ear_label_raw'] or payload['raw_line_text']}]"
+            )
+        else:
+            payload["display_value"] = payload["raw_line_text"]
         result.append(payload)
     return result
 
@@ -6912,6 +7446,8 @@ def open_review_blockers(conn: Any, limit: int = 10) -> list[dict[str, Any]]:
         payload.pop("parse_confidence", None)
         attention = review_attention_level(payload, parse_payload)
         payload.update(attention)
+        payload["review_plausibility_findings"] = parse_payload_plausibility_findings(parse_payload)
+        payload["review_check_targets"] = review_check_targets(payload, parse_payload)
         if payload["attention_level"] == "must_review":
             blockers.append(payload)
         if len(blockers) >= limit:

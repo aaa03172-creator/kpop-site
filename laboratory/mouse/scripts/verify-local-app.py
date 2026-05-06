@@ -695,8 +695,10 @@ def main() -> None:
                 assert_true("openAiApiKeyInput" in index_html, "Local UI should allow a temporary session API key for AI drafts.")
                 assert_true("ai-draft-settings" in index_html, "Local UI should update AI draft settings without storing the key in app records.")
                 assert_true("transcriptionSexRaw" in index_html and "transcriptionIdRaw" in index_html, "Manual transcription should capture raw Sex and I.D card fields.")
+                assert_true("inferCardTypeFromSexSelection" in index_html and "Mating" in index_html, "Mixed sex selection should default the parsed card type to Mating.")
                 assert_true("unlabeled" in index_html or "1 2 3 4 5" in index_html, "Manual transcription should make numeric-only temporary labels visible in note entry.")
                 assert_true("note-label-decision" in index_html, "Review UI should expose structured transcription label correction controls.")
+                assert_true("ear-label-code" in index_html and "R_PRIME" in index_html, "Review UI should resolve bounded ear-label corrections with a select control.")
                 assert_true(
                     "review-source-preview" in index_html
                     and "reviewSourceEvidencePanel" in index_html,
@@ -723,9 +725,10 @@ def main() -> None:
                 assert_true(
                     "extractionEvidencePanel" in index_html
                     and "uncertainFieldPills" in index_html
+                    and "plausibilityWarningPills" in index_html
                     and "symbolConfusionPills" in index_html
                     and "renderExtractionEvidence" in index_html,
-                    "Photo review should expose reviewable AI uncertainty, symbol confusions, and raw visible text evidence.",
+                    "Photo review should expose reviewable AI uncertainty, plausibility warnings, symbol confusions, and raw visible text evidence.",
                 )
                 assert_true(
                     "focus-uncertain-field" in index_html
@@ -1750,6 +1753,35 @@ def main() -> None:
                     ),
                     "Mouse candidate should not accept an uncertain normalized ear label.",
                 )
+                ambiguous_ear_note = next(item for item in note_items if item["raw_line_text"] == "MT399 R0")
+                ear_resolution = client.post(
+                    f"/api/review-items/review_ear_{ambiguous_ear_note['note_item_id']}/resolve",
+                    json={
+                        "resolution_note": "Checked the source card; circle-vs-zero mark is R circle.",
+                        "resolved_value": "R_CIRCLE",
+                        "note_item_id": ambiguous_ear_note["note_item_id"],
+                        "ear_label_code": "R_CIRCLE",
+                    },
+                )
+                assert_true(ear_resolution.status_code == 200, "Ear label review should resolve from a bounded select value.")
+                ear_resolution_payload = ear_resolution.json()
+                assert_true(
+                    ear_resolution_payload["ear_label_update"]["ear_label_code"] == "R_CIRCLE"
+                    and ear_resolution_payload["ear_label_update"]["boundary"] == "parsed or intermediate result",
+                    "Ear label resolution should update parsed evidence without becoming canonical state.",
+                )
+                updated_note_items = client.get("/api/note-items").json()
+                assert_true(
+                    any(
+                        item["note_item_id"] == ambiguous_ear_note["note_item_id"]
+                        and item["raw_line_text"] == "MT399 R0"
+                        and item["parsed_ear_label_code"] == "R_CIRCLE"
+                        and item["parsed_ear_label_review_status"] == "user_corrected"
+                        and item["needs_review"] == 0
+                        for item in updated_note_items
+                    ),
+                    "Ear label correction should preserve raw note text while clearing the note-level review flag.",
+                )
                 assert_true(
                     any(mouse["display_id"] == "MT323" and mouse["status"] == "moved" for mouse in mice),
                     "Mouse API should expose moved candidate from single-struck note line.",
@@ -1851,8 +1883,13 @@ def main() -> None:
                         "review_reason",
                         "evidence_preview",
                         "note_line_count",
+                        "review_check_targets",
                     }.issubset(blocked_payload["review_blockers"][0]),
                     "Blocked final CSV export should include actionable review blocker details.",
+                )
+                assert_true(
+                    blocked_payload["review_blockers"][0]["review_check_targets"],
+                    "Blocked final CSV export should include focused check targets for review blockers.",
                 )
                 blocked_separation_payload = blocked_separation_xlsx.json()["detail"]
                 blocked_animal_payload = blocked_animal_xlsx.json()["detail"]

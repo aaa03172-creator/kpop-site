@@ -197,3 +197,8 @@ This gives the largest readability improvement while minimizing risk to the MVP 
 - Phase 3 asset optimization: implemented for current PNG assets; kept generated PNGs are resized/compressed and each representative PNG is now under 250 KB.
 - Unused SVG backup assets were removed after confirming the UI no longer references them.
 - Flat illustration refresh: implemented with the built-in image generation tool. The remaining project PNG assets now use a flatter UI illustration style, with chroma-key backgrounds removed where generated, replacing the earlier 3D render look.
+- Information-structure cleanup: mobile Photo Review hero was compacted so upload/transcription work appears sooner, and secondary Records evidence/audit sections were converted to collapsible sections so core colony, cage, breeding, and genotyping work stays easier to scan.
+- Records navigation aid: a lightweight Records section shortcut bar was added so users can jump directly to Colony, Cage, Breeding, Genotyping, Evidence, and Audit areas without scanning the whole page.
+- Records navigation double-check: the Audit shortcut target was corrected to the Mouse Audit Trace section, and records anchors now use a top scroll margin so section headings are less likely to sit under the sticky header.
+- Mobile navigation density: the mobile sidebar was compacted to a three-column navigation grid with hidden count chips/footer text, reducing the amount of non-workflow chrome above the Photo Review content.
+- Mobile transcription flow: within Manual Photo Transcription, the mobile order now puts the correction form before the preview and photo inbox, so the minimum review/edit action is reachable without scrolling through every preserved source card first.
