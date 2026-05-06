@@ -43,11 +43,14 @@ def match_samples_to_mice(
     matches: list[dict[str, Any]] = []
     for sample in samples:
         matched_sample = deepcopy(sample)
-        candidates = [
-            mouse
-            for mouse in mice
-            if sample.get("sample_id") == mouse.get("display_id")
-        ]
+        sample_id = str(sample.get("sample_id") or "").strip()
+        candidates = []
+        if sample_id:
+            candidates = [
+                mouse
+                for mouse in mice
+                if sample_id == str(mouse.get("display_id") or "").strip()
+            ]
 
         if len(candidates) == 1:
             matched_sample["match_status"] = "matched"

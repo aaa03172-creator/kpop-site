@@ -125,3 +125,16 @@ def test_duplicate_sample_match_requires_review():
 
     assert match["match_status"] == "duplicate_mouse_match"
     assert match["mouse_id"] is None
+
+
+def test_blank_sample_id_stays_unmatched():
+    mice = [
+        {"mouse_id": "mouse_blank", "display_id": ""},
+        {"mouse_id": "mouse_missing"},
+    ]
+    samples = [{"sample_id": ""}, {}]
+
+    matches = match_samples_to_mice(samples, mice)
+
+    assert [match["match_status"] for match in matches] == ["unmatched", "unmatched"]
+    assert [match["mouse_id"] for match in matches] == [None, None]
