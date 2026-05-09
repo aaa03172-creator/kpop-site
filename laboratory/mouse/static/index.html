@@ -3880,6 +3880,9 @@
         const sourcePhoto = card.source_photo || {};
         const reviewItems = Array.isArray(card.review_items) ? card.review_items : [];
         const mouseRows = Array.isArray(card.mouse_rows) ? card.mouse_rows : [];
+        const actionHints = reviewItems
+          .map((item) => item.action_hint || {})
+          .filter((hint) => hint && hint.primary_label);
         return `
           <div class="focus-review-card">
             <h3>${escapeHtml(sourcePhoto.filename || card.parse_id || "Source pending")}</h3>
@@ -3888,6 +3891,15 @@
               ${reviewItems.slice(0, 3).map((item) => `<span class="chip">${escapeHtml(item.issue_label || item.issue || "Review item")}</span>`).join("")}
               ${mouseRows.slice(0, 3).map((mouse) => `<span class="chip">${escapeHtml(mouse.mouse_id || "mouse id pending")}</span>`).join("")}
             </div>
+            ${actionHints.length ? `
+              <div class="review-meta">
+                ${actionHints.slice(0, 3).map((hint) => `
+                  <span class="chip">${escapeHtml(hint.primary_label)}</span>
+                  <span class="chip">${escapeHtml(hint.mode || "review")}</span>
+                  <span class="chip">${escapeHtml(hint.requires_note ? "note required" : "note optional")}</span>
+                `).join("")}
+              </div>
+            ` : ""}
           </div>
         `;
       }).join("")}`;
