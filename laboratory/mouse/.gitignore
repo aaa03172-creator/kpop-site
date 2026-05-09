@@ -15,3 +15,13 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .worktrees/
+
+# Local MCP / agent tool configuration and UI reference scratch output
+.mcp.json
+.mcp/
+.cursor/mcp.json
+.cursor/**/mcp*.json
+.lazyweb/
+lazyweb-output/
+ui-reference-screenshots/
+docs/ui_references/screenshots/

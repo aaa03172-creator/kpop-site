@@ -12,6 +12,7 @@ Start with `docs/DOCUMENTATION_MAP.md` when deciding which project document to t
 - `final_mouse_colony_prd.md` is the primary adopted product reference.
 - `README.md` is the setup, command, and verification entry point.
 - Design, review, and implementation planning notes are supporting context unless explicitly adopted by the PRD.
+- `docs/ui_references.md` records developer-only UI reference research rules, including Lazyweb safety guidance for fake-data-only design research.
 - When documentation and implementation differ, check committed tests and call out the mismatch before changing behavior.
 
 ## Install
