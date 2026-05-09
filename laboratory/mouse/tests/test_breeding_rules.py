@@ -6,9 +6,11 @@ from app.breeding_rules import (
     infer_cage_type_candidate,
     infer_litter_event_candidate,
     infer_maintenance_group_candidate,
+    load_breeding_rule_set,
     review_current_pups,
     review_missing_birth_evidence,
     review_parent_replacement,
+    validate_breeding_rule_set,
 )
 
 
@@ -112,6 +114,89 @@ def test_strain_assumption_applies_only_to_matching_strain_scope():
 
     assert matching == "Tg"
     assert non_matching is None
+
+
+def test_default_breeding_rules_load_from_non_canonical_config():
+    rule_set = load_breeding_rule_set()
+
+    assert rule_set["boundary"] == "review item / workflow policy config"
+    assert rule_set["canonical"] is False
+    assert rule_set["rule_set_id"] == DEFAULT_BREEDING_RULE_SET["rule_set_id"]
+    assert apply_strain_assumption("ApoM Tg/Tg", "default_genotype_for_pups", rule_set) == "Tg"
+
+
+def test_breeding_rule_config_requires_reviewable_strain_assumptions():
+    invalid = {
+        "boundary": "review item / workflow policy config",
+        "canonical": False,
+        "rule_set_id": "bad",
+        "display_name": "Bad breeding rules",
+        "thresholds": DEFAULT_BREEDING_RULE_SET["thresholds"],
+        "strain_specific_assumptions": [
+            {
+                "assumption_key": "default_genotype_for_pups",
+                "strain_text": "ApoM Tg/Tg",
+                "value": "Tg",
+                "rule_strength": "adopted_policy",
+                "review_required_before_global_use": False,
+            }
+        ],
+    }
+
+    assert validate_breeding_rule_set(invalid) is False
+
+
+def test_breeding_rule_config_requires_all_runtime_thresholds():
+    invalid = {
+        "boundary": "review item / workflow policy config",
+        "canonical": False,
+        "rule_set_id": "missing_runtime_thresholds",
+        "display_name": "Missing runtime thresholds",
+        "thresholds": {"litter_separation_due_after_days": 30},
+        "strain_specific_assumptions": [
+            {
+                "assumption_key": "default_genotype_for_pups",
+                "strain_text": "ApoM Tg/Tg",
+                "value": "Tg",
+                "rule_strength": "adopted_policy",
+                "review_required_before_global_use": True,
+            }
+        ],
+    }
+
+    assert validate_breeding_rule_set(invalid) is False
+
+
+def test_breeding_rule_config_requires_declared_rule_strength():
+    invalid = {
+        "boundary": "review item / workflow policy config",
+        "canonical": False,
+        "rule_set_id": "missing_rule_strength",
+        "display_name": "Missing rule strength",
+        "thresholds": DEFAULT_BREEDING_RULE_SET["thresholds"],
+        "strain_specific_assumptions": [
+            {
+                "assumption_key": "default_genotype_for_pups",
+                "strain_text": "ApoM Tg/Tg",
+                "value": "Tg",
+                "review_required_before_global_use": True,
+            }
+        ],
+    }
+
+    assert validate_breeding_rule_set(invalid) is False
+
+
+def test_breeding_rule_config_requires_table_ready_policy_fields():
+    invalid = {
+        "boundary": "review item / workflow policy config",
+        "canonical": False,
+        "rule_set_id": "missing_policy_fields",
+        "thresholds": DEFAULT_BREEDING_RULE_SET["thresholds"],
+        "strain_specific_assumptions": DEFAULT_BREEDING_RULE_SET["strain_specific_assumptions"],
+    }
+
+    assert validate_breeding_rule_set(invalid) is False
 
 
 def test_missing_litter_evidence_needs_source_recency_before_no_birth_review():

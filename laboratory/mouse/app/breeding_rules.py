@@ -1,31 +1,95 @@
 from __future__ import annotations
 
+import json
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 
-DEFAULT_BREEDING_RULE_SET: dict[str, Any] = {
-    "rule_set_id": "breeding_rule_default_20260509",
-    "display_name": "Default breeding operation review rules",
-    "thresholds": {
-        "no_birth_review_after_days": 60,
-        "parent_replacement_review_after_days": 365,
-        "litter_separation_due_after_days": 30,
-        "litter_separation_overdue_after_days": 45,
-        "litter_separation_high_overdue_after_days": 60,
-        "schedule_due_soon_window_days": 30,
-        "separation_batch_max_dob_span_days": 14,
-    },
-    "strain_specific_assumptions": [
-        {
-            "assumption_key": "default_genotype_for_pups",
-            "strain_text": "ApoM Tg/Tg",
-            "value": "Tg",
-            "rule_strength": "adopted_policy",
-            "review_required_before_global_use": True,
-        }
-    ],
+ROOT = Path(__file__).resolve().parents[1]
+BREEDING_RULE_SET_PATH = ROOT / "config" / "breeding_rules.json"
+REQUIRED_THRESHOLD_KEYS = {
+    "no_birth_review_after_days",
+    "parent_replacement_review_after_days",
+    "litter_separation_due_after_days",
+    "litter_separation_overdue_after_days",
+    "litter_separation_high_overdue_after_days",
+    "schedule_due_soon_window_days",
+    "separation_batch_max_dob_span_days",
 }
+ALLOWED_RULE_STRENGTHS = {
+    "source_structure",
+    "evidence_candidate",
+    "review_trigger",
+    "adopted_policy",
+    "prohibited_automation",
+}
+
+
+def load_breeding_rule_set(path: Path = BREEDING_RULE_SET_PATH) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as file:
+        rule_set = json.load(file)
+    if not validate_breeding_rule_set(rule_set):
+        raise ValueError("Breeding rule configuration is invalid.")
+    return rule_set
+
+
+def validate_breeding_rule_set(rule_set: dict[str, Any]) -> bool:
+    if not isinstance(rule_set, dict):
+        return False
+    if rule_set.get("boundary") != "review item / workflow policy config":
+        return False
+    if rule_set.get("canonical") is not False:
+        return False
+    if not str(rule_set.get("rule_set_id") or "").strip():
+        return False
+    if not str(rule_set.get("display_name") or "").strip():
+        return False
+    policy_scope = rule_set.get("policy_scope")
+    if not isinstance(policy_scope, dict):
+        return False
+    if not str(policy_scope.get("scope_type") or "").strip():
+        return False
+    if rule_set.get("active") is not True:
+        return False
+    signals = rule_set.get("signals")
+    if not isinstance(signals, list):
+        return False
+    for signal in signals:
+        if not isinstance(signal, dict):
+            return False
+        if not str(signal.get("signal_key") or "").strip():
+            return False
+        if signal.get("rule_strength") not in ALLOWED_RULE_STRENGTHS:
+            return False
+    thresholds = rule_set.get("thresholds")
+    if not isinstance(thresholds, dict) or not thresholds:
+        return False
+    if not REQUIRED_THRESHOLD_KEYS.issubset(thresholds):
+        return False
+    for value in thresholds.values():
+        if not isinstance(value, int) or value < 0:
+            return False
+    assumptions = rule_set.get("strain_specific_assumptions")
+    if not isinstance(assumptions, list):
+        return False
+    for assumption in assumptions:
+        if not isinstance(assumption, dict):
+            return False
+        if not str(assumption.get("assumption_key") or "").strip():
+            return False
+        if not str(assumption.get("strain_text") or "").strip():
+            return False
+        if assumption.get("rule_strength") not in ALLOWED_RULE_STRENGTHS:
+            return False
+        if "value" not in assumption:
+            return False
+        if assumption.get("review_required_before_global_use") is not True:
+            return False
+    return True
+
+
+DEFAULT_BREEDING_RULE_SET: dict[str, Any] = load_breeding_rule_set()
 
 
 def infer_cage_type_candidate(evidence_rows: list[dict[str, Any]], signals: dict[str, bool] | None = None) -> dict[str, Any]:
