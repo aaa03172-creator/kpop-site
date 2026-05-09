@@ -754,6 +754,7 @@ def main() -> None:
                 assert_true("Photo worklist" in index_html and "next_action" in index_html, "Local UI should show photo-level batch release blockers.")
                 assert_true("open-batch-worklist-target" in index_html and "item.action_target_type" in index_html, "Local UI should link batch release worklist rows to the next review action.")
                 assert_true("manual_parse_id" in index_html and "scoped comparison review" in index_html, "Batch release action links should create scoped comparison review items.")
+                assert_true("create-batch-comparison-reviews" in index_html and "upload_batch_id" in index_html, "Batch release preview should create comparison reviews scoped to the selected upload batch.")
                 assert_true("/release-preview" in index_html and "Close Batch" in index_html, "Local UI should preview and close upload batches only after release checks.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -1439,6 +1440,16 @@ def main() -> None:
                 assert_true(
                     idempotent_comparison_review.json()["created_review_items"] == 0,
                     "Scoped evidence comparison review candidate creation should be idempotent.",
+                )
+                batch_scoped_comparison_review = client.post(
+                    "/api/evidence-comparison/review-candidates",
+                    json={"upload_batch_id": upload_batch_payload["upload_batch_id"]},
+                )
+                assert_true(
+                    batch_scoped_comparison_review.json()["scope"]["upload_batch_id"] == upload_batch_payload["upload_batch_id"]
+                    and batch_scoped_comparison_review.json()["scope"]["matched_comparisons"] == 1
+                    and batch_scoped_comparison_review.json()["existing_review_items"] == 1,
+                    "Upload-batch scoped comparison review creation should only touch comparisons from the selected batch.",
                 )
                 assert_true(
                     client.get("/api/mice").json() == mice_before_comparison,
