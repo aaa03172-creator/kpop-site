@@ -634,6 +634,10 @@ def main() -> None:
                 assert_true("Parsed Note Evidence" in index_html, "Local UI should expose parsed note evidence.")
                 assert_true("Card Snapshots" in index_html and "cardSnapshotRows" in index_html, "Local UI should expose card transcription snapshots.")
                 assert_true("Strain Registry" in index_html, "Local UI should expose strain registry.")
+                assert_true(
+                    "Linked gene/allele" in index_html and "strainAlleleSummary" in index_html,
+                    "Local UI should surface normalized strain gene/allele links.",
+                )
                 assert_true("Source Evidence" in index_html, "Local UI should expose source evidence.")
                 assert_true("Mouse Events" in index_html, "Local UI should expose mouse events.")
                 assert_true("Correction Log" in index_html, "Local UI should expose correction history.")
