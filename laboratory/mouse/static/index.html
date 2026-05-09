@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mouse Colony LIMS Local MVP</title>
+  <title>Mouse Colony LIMS - Photo Review Workbench</title>
   <style>
     :root {
       --bg: #f7faf9;
@@ -2179,11 +2179,11 @@
           <span class="nav-icon">CP</span><span>Evidence Comparison</span><span class="nav-count" id="navComparisonCount">0</span>
         </button>
         <button class="nav-button" type="button" data-view-target="exports">
-          <span class="nav-icon">EX</span><span>Exports</span><span class="nav-count" id="navExportCount">0</span>
+          <span class="nav-icon">EX</span><span>Export Center</span><span class="nav-count" id="navExportCount">0</span>
         </button>
         <div class="nav-label">Records</div>
         <button class="nav-button" type="button" data-view-target="records">
-          <span class="nav-icon">CR</span><span>Colony Records</span><span class="nav-count" id="navMouseCount">0</span>
+          <span class="nav-icon">CR</span><span>Candidate Records</span><span class="nav-count" id="navMouseCount">0</span>
         </button>
         <button class="nav-button" type="button" data-view-target="dashboard">
           <span class="nav-icon">DB</span><span>Dashboard</span><span class="nav-count" id="navDashboardCount">0</span>
@@ -2423,6 +2423,16 @@
         </div>
         <p class="muted" id="extractionProgressDetail">Waiting for upload.</p>
         <ul class="progress-list" id="extractionProgressList"></ul>
+      </div>
+      <h3>Upload batches</h3>
+      <p class="muted">Each photo set is tracked as a raw source batch before review or canonical mapping.</p>
+      <table>
+        <thead><tr><th>Batch</th><th>Photos</th><th>Transcription</th><th>Reviews</th><th>Mapping</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody id="uploadBatchRows"></tbody>
+      </table>
+      <div class="review-source-panel" id="uploadBatchReleasePanel">
+        <strong>No batch release preview loaded</strong>
+        <p class="muted">Preview a batch before closing it. Release changes only batch status, not canonical mouse state.</p>
       </div>
     </section>
 
@@ -2747,7 +2757,7 @@
     <section data-view="records">
       <h2>Photo Inbox</h2>
       <table>
-        <thead><tr><th>ID</th><th>File</th><th>Status</th><th>Uploaded</th><th>Action</th></tr></thead>
+        <thead><tr><th>ID</th><th>Batch</th><th>File</th><th>Status</th><th>Uploaded</th><th>Action</th></tr></thead>
         <tbody id="photoRows"></tbody>
       </table>
     </section>
@@ -2855,7 +2865,7 @@
     </section>
 
     <section class="full" data-view="records" id="records-colony">
-      <h2>Colony Records</h2>
+      <h2>Candidate Records</h2>
       <p>Current mouse-level candidate state from accepted source-backed note lines.</p>
       <table>
         <thead>
@@ -3235,7 +3245,7 @@
     </section>
 
     <section class="full" data-view="exports">
-      <h2>Export Readiness</h2>
+      <h2>Export Center</h2>
       <div class="visual-guide">
         <div class="visual-board export-visual-board" aria-label="Export readiness illustration">
           <div class="visual-board-item visual-board-arrow">
@@ -3606,11 +3616,11 @@
         subtitle: "Compare manual photo transcriptions against predecessor Excel views without writing canonical state."
       },
       exports: {
-        title: "Export Readiness",
+        title: "Export Center",
         subtitle: "Preview output files and keep final exports blocked while Focus Review items remain."
       },
       records: {
-        title: "Colony Records",
+        title: "Candidate Records",
         subtitle: "Inspect current source-backed records, cages, matings, litters, genotyping, and events."
       },
       dashboard: {
@@ -3640,7 +3650,7 @@
       if (["Upload Source Photo", "Fixture Parse Results", "Manual Photo Transcription", "Photo Inbox"].includes(heading)) return "photo";
       if (["Review Queue", "Source Evidence", "Correction Log"].includes(heading)) return "review";
       if (["Legacy Workbook Import", "Evidence Reconciliation", "Evidence Comparison", "Canonical Candidate Drafts"].includes(heading)) return "comparison";
-      if (["Search & CSV Export", "Export Readiness"].includes(heading)) return "exports";
+      if (["Search & CSV Export", "Export Readiness", "Export Center"].includes(heading)) return "exports";
       if (["My Assigned Strains", "Strain Registry", "Distribution Assignment Import"].includes(heading)) return "settings";
       return "records";
     }
@@ -3724,6 +3734,60 @@
       }[value] || value;
     }
 
+    function renderUploadBatchReleasePreview(preview) {
+      const panel = document.getElementById("uploadBatchReleasePanel");
+      if (!preview || !preview.batch) {
+        panel.innerHTML = `
+          <strong>No batch release preview loaded</strong>
+          <p class="muted">Preview a batch before closing it. Release changes only batch status, not canonical mouse state.</p>
+        `;
+        return;
+      }
+      const batch = preview.batch;
+      panel.innerHTML = `
+        <div class="section-kicker">
+          <div>
+            <h3>${escapeHtml(batch.batch_label || batch.upload_batch_id)}</h3>
+            <p class="muted">${escapeHtml(preview.note || "")}</p>
+          </div>
+          <span class="chip ${preview.ready ? "ok" : "warn"}">${escapeHtml(preview.release_status)}</span>
+        </div>
+        <div class="metric-grid">
+          <article><strong>${escapeHtml(String(batch.photo_count || 0))}</strong><span>photos</span></article>
+          <article><strong>${escapeHtml(String(batch.pending_transcription_count || 0))}</strong><span>pending transcription</span></article>
+          <article><strong>${escapeHtml(String(batch.open_review_count || 0))}</strong><span>open reviews</span></article>
+          <article><strong>${escapeHtml(`${batch.applied_candidate_count || 0}/${batch.canonical_candidate_count || 0}`)}</strong><span>applied candidates</span></article>
+        </div>
+        <table>
+          <thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead>
+          <tbody>
+            ${(preview.checklist || []).map((item) => row([
+              item.label,
+              item.passed ? "OK" : item.severity,
+              item.detail
+            ])).join("")}
+          </tbody>
+        </table>
+        <h3>Photo worklist</h3>
+        <table>
+          <thead><tr><th>Photo</th><th>Transcription</th><th>Reviews</th><th>Mapping</th><th>Next action</th><th>Open</th></tr></thead>
+          <tbody>
+            ${(preview.worklist || []).map((item) => `
+              <tr>
+                <td>${escapeHtml(item.original_filename || item.photo_id)}</td>
+                <td>${escapeHtml(item.transcription_count ? "available" : "missing")}</td>
+                <td>${escapeHtml(`${item.open_review_count || 0} open / ${item.total_review_count || 0} total`)}</td>
+                <td>${escapeHtml(`${item.applied_candidate_count || 0}/${item.canonical_candidate_count || 0} applied`)}</td>
+                <td>${escapeHtml(`${item.next_action || "--"}${item.blocker ? `: ${item.blocker}` : ""}`)}</td>
+                <td><button class="open-batch-worklist-target" type="button" data-target-type="${escapeHtml(item.action_target_type || "photo")}" data-target-id="${escapeHtml(item.action_target_id || item.photo_id)}" data-photo-id="${escapeHtml(item.photo_id)}">${escapeHtml(item.action_target_label || "Open")}</button></td>
+              </tr>
+            `).join("") || row(["No photos in this batch", "", "", "", "", ""])}
+          </tbody>
+        </table>
+        <button class="release-upload-batch" type="button" data-batch-id="${escapeHtml(batch.upload_batch_id)}" ${preview.ready ? "" : "disabled"}>Close Batch</button>
+      `;
+    }
+
     function renderReviewVocabulary(vocabulary) {
       const roles = (vocabulary?.roles || []).filter((role) => role.active !== false);
       const priorities = (vocabulary?.priorities || []).filter((priority) => priority.active !== false);
@@ -3781,7 +3845,7 @@
       const noteLabelControls = item.issue === "Unlabeled numeric note needs review"
         ? `
           <select class="note-label-decision" aria-label="Note label decision">
-            <option value="">No note label correction</option>
+            <option value="" selected disabled>Choose note label decision</option>
             <option value="count_note">Count note</option>
             <option value="mouse_item">Mouse ID</option>
             <option value="reviewed_note">Reviewed note</option>
@@ -3889,6 +3953,11 @@
       }
       noteInput.value = note;
       const resolvedValue = resolvedValueInput.value;
+      const noteLabelDecision = container.querySelector(".note-label-decision");
+      if (noteLabelDecision && !noteLabelDecision.value) {
+        noteLabelDecision.focus();
+        return null;
+      }
       const noteLabelCountValue = container.querySelector(".note-label-count")?.value || "";
       const earLabelCode = container.querySelector(".ear-label-code")?.value || "";
       if (item?.issue === "Ear label needs review" && !earLabelCode) {
@@ -3905,7 +3974,7 @@
         correction_before_value: button.dataset.currentValue || "",
         correction_after_value: resolvedValue || "",
         note_item_id: button.dataset.noteItemId || "",
-        note_label_decision: container.querySelector(".note-label-decision")?.value || "",
+        note_label_decision: noteLabelDecision?.value || "",
         note_label_mouse_id: container.querySelector(".note-label-mouse-id")?.value || "",
         note_label_count: noteLabelCountValue ? Number(noteLabelCountValue) : null,
         ear_label_code: earLabelCode
@@ -5272,7 +5341,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, photos, reviews, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -5284,6 +5353,7 @@
         api("/api/evidence-reconciliation"),
         api("/api/evidence-comparison"),
         api("/api/photo-review-workbench"),
+        api("/api/upload-batches"),
         api("/api/photos"),
         api("/api/review-items"),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
@@ -5317,7 +5387,7 @@
         : { query: "", mice: [], strains: [], reviews: [], sources: [] };
       document.getElementById("searchRows").innerHTML = searchResultRows(searchResults);
       document.getElementById("searchSummary").textContent = activeSearchQuery
-        ? `Search "${activeSearchQuery}" matched ${searchResults.mice.length} mice, ${searchResults.strains.length} strains, ${searchResults.reviews.length} review items, and ${searchResults.sources.length} source records. Colony Records is filtered to matching mice.`
+        ? `Search "${activeSearchQuery}" matched ${searchResults.mice.length} mice, ${searchResults.strains.length} strains, ${searchResults.reviews.length} review items, and ${searchResults.sources.length} source records. Candidate Records is filtered to matching mice.`
         : "No active search.";
       document.getElementById("assignedStrainRows").innerHTML = assignedStrains.map((strain) =>
         assignedStrainRow(strain)
@@ -5401,9 +5471,21 @@
         });
       });
       latestPhotos = photoWorkbench.rows || [];
+      document.getElementById("uploadBatchRows").innerHTML = (uploadBatches.rows || photoWorkbench.batches || []).map((batch) =>
+        `<tr>
+          <td>${escapeHtml(batch.batch_label || batch.upload_batch_id)}</td>
+          <td>${escapeHtml(`${batch.photo_count || 0}/${batch.expected_photo_count || 0}`)}</td>
+          <td>${escapeHtml(`${batch.transcribed_photo_count || 0} done / ${batch.pending_transcription_count || 0} pending`)}</td>
+          <td>${escapeHtml(`${batch.open_review_count || 0} open / ${batch.resolved_review_count || 0} resolved`)}</td>
+          <td>${escapeHtml(`${batch.applied_candidate_count || 0}/${batch.canonical_candidate_count || 0} applied`)}</td>
+          <td>${escapeHtml(batch.derived_status || batch.status || "--")}</td>
+          <td><button class="preview-upload-batch-release" type="button" data-batch-id="${escapeHtml(batch.upload_batch_id)}">Preview release</button></td>
+        </tr>`
+      ).join("") || row(["No upload batches yet", "", "", "", "", "", ""]);
       document.getElementById("workbenchPhotoCards").innerHTML = latestPhotos.slice(0, 8).map((photo) => `
         <button class="photo-worklist-card select-photo-review ${photo.photo_id === selectedTranscriptionPhotoId ? "active" : ""}" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">
           <strong>${escapeHtml(photo.original_filename)}</strong>
+          <span>${escapeHtml(photo.batch_label || "Unbatched source")}</span>
           <span>${escapeHtml(photo.next_action || photo.status || "--")}</span>
           <span>${escapeHtml(`${photo.note_line_count || 0} note lines / ${photo.open_review_count || 0} open review(s)`)}</span>
         </button>
@@ -5411,12 +5493,13 @@
       document.getElementById("photoRows").innerHTML = latestPhotos.map((photo) => `
         <tr>
           <td>${escapeHtml(photo.photo_id)}</td>
+          <td>${escapeHtml(photo.batch_label || photo.upload_batch_id || "--")}</td>
           <td>${escapeHtml(photo.original_filename)}</td>
           <td>${escapeHtml(`${photo.status} / ${photo.next_action} / ${photo.open_review_count || 0} open`)}</td>
           <td>${escapeHtml(photo.uploaded_at)}</td>
           <td><button class="select-photo-review" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">Use</button></td>
         </tr>
-      `).join("") || row(["No photos yet", "", "", "", ""]);
+      `).join("") || row(["No photos yet", "", "", "", "", ""]);
       document.getElementById("transcriptionPhotoId").innerHTML = latestPhotos.map((photo) =>
         `<option value="${escapeHtml(photo.photo_id)}">${escapeHtml(photo.original_filename)} (${escapeHtml(photo.status)})</option>`
       ).join("") || '<option value="">No photos uploaded</option>';
@@ -5436,6 +5519,12 @@
       });
       document.querySelectorAll(".photo-worklist-card").forEach((button) => {
         button.addEventListener("click", () => setTranscriptionPhoto(button.dataset.photoId));
+      });
+      document.querySelectorAll(".preview-upload-batch-release").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const preview = await api(`/api/upload-batches/${encodeURIComponent(button.dataset.batchId)}/release-preview`);
+          renderUploadBatchReleasePreview(preview);
+        });
       });
       document.getElementById("reviewStatusFilter").value = reviewStatusFilter;
       document.getElementById("reviewSeverityFilter").value = reviewSeverityFilter;
@@ -5738,6 +5827,7 @@
       const uploadedPhotos = [];
       let extracted = 0;
       let failed = 0;
+      let uploadBatch = null;
       uploadButton.disabled = true;
       reviewButton.disabled = true;
       setExtractionProgress({
@@ -5749,6 +5839,15 @@
         items: progressItems
       });
       try {
+        uploadBatch = await api("/api/upload-batches", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            batch_label: `Cage card batch ${new Date().toISOString().slice(0, 19)}`,
+            expected_photo_count: files.length,
+            note: "Created from multi-photo upload."
+          })
+        });
         for (let index = 0; index < files.length; index += 1) {
           const file = files[index];
           progressItems[index].status = "uploading";
@@ -5762,13 +5861,14 @@
           });
           const form = new FormData();
           form.append("file", file);
+          form.append("upload_batch_id", uploadBatch.upload_batch_id);
           const result = await api("/api/photos", { method: "POST", body: form });
           uploadedPhotos.push({ ...result, progressIndex: index });
           uploaded += 1;
           progressItems[index].status = currentAiStatus.available ? "queued extraction" : "stored";
         }
         document.getElementById("photoFile").value = "";
-        document.getElementById("uploadMessage").textContent = `Stored ${uploaded} photo(s) and opened review candidates.`;
+        document.getElementById("uploadMessage").textContent = `Stored ${uploaded} photo(s) in ${uploadBatch.batch_label} and opened review candidates.`;
         if (!uploadedPhotos.length) return;
         if (!currentAiStatus.available) {
           setExtractionProgress({
@@ -5780,7 +5880,7 @@
             items: progressItems
           });
           document.getElementById("uploadMessage").textContent =
-            `Stored ${uploaded} photo(s). AI extraction did not run because no API key is configured. Enter a session key, then use Extract & Save Review.`;
+            `Stored ${uploaded} photo(s) in ${uploadBatch.batch_label}. AI extraction did not run because no API key is configured. Enter a session key, then use Extract & Save Review.`;
           await refresh();
           return;
         }
@@ -5797,7 +5897,7 @@
             items: progressItems.map((item) => ({ ...item, status: item.status === "queued extraction" ? "stored" : item.status }))
           });
           document.getElementById("uploadMessage").textContent =
-            `Stored ${uploaded} photo(s). AI extraction was skipped; photos remain in Review Queue.`;
+            `Stored ${uploaded} photo(s) in ${uploadBatch.batch_label}. AI extraction was skipped; photos remain in Review Queue.`;
           await refresh();
           return;
         }
@@ -5839,8 +5939,8 @@
         items: progressItems
       });
       document.getElementById("uploadMessage").textContent = failed
-        ? `Stored ${uploaded} photo(s), saved ${extracted} extracted review transcription(s), ${failed} extraction failed.`
-        : `Stored ${uploaded} photo(s) and saved ${extracted} extracted review transcription(s).`;
+        ? `Stored ${uploaded} photo(s) in ${uploadBatch?.batch_label || "the upload batch"}, saved ${extracted} extracted review transcription(s), ${failed} extraction failed.`
+        : `Stored ${uploaded} photo(s) in ${uploadBatch?.batch_label || "the upload batch"} and saved ${extracted} extracted review transcription(s).`;
       await refresh();
       const firstExtracted = uploadedPhotos.find((photo) => progressItems[photo.progressIndex]?.status === "review saved");
       if (firstExtracted) {
@@ -5854,6 +5954,43 @@
       document.getElementById("uploadMessage").textContent =
         `Created ${result.created_review_candidates} photo review candidates; ${result.existing_review_candidates} already existed.`;
       await refresh();
+    });
+    document.getElementById("uploadBatchReleasePanel").addEventListener("click", async (event) => {
+      const targetButton = event.target.closest(".open-batch-worklist-target");
+      if (targetButton) {
+        const targetType = targetButton.dataset.targetType || "photo";
+        const targetId = targetButton.dataset.targetId || "";
+        const photoId = targetButton.dataset.photoId || targetId;
+        if (targetType === "review" && targetId) {
+          reviewStatusFilter = "all";
+          selectedReviewId = targetId;
+          setActiveView("review");
+          await refresh();
+          document.getElementById("uploadMessage").textContent = `Opened review ${targetId} from the batch worklist.`;
+          return;
+        }
+        if (targetType === "canonical_candidate" && targetId) {
+          setActiveView("comparison");
+          document.getElementById("uploadMessage").textContent = `Open canonical candidate ${targetId} in Candidate Drafts.`;
+          return;
+        }
+        if (photoId) {
+          setActiveView("photo");
+          setTranscriptionPhoto(photoId);
+          document.getElementById("uploadMessage").textContent = `Opened photo ${photoId} from the batch worklist.`;
+        }
+        return;
+      }
+      const button = event.target.closest(".release-upload-batch");
+      if (!button) return;
+      try {
+        const released = await api(`/api/upload-batches/${encodeURIComponent(button.dataset.batchId)}/release`, { method: "POST" });
+        renderUploadBatchReleasePreview(released);
+        document.getElementById("uploadMessage").textContent = `Closed ${released.batch.batch_label}.`;
+        await refresh();
+      } catch (error) {
+        document.getElementById("uploadMessage").textContent = `Batch cannot be closed yet: ${error.message}`;
+      }
     });
     document.getElementById("transcriptionPhotoId").addEventListener("change", async () => {
       setTranscriptionPhoto(document.getElementById("transcriptionPhotoId").value);

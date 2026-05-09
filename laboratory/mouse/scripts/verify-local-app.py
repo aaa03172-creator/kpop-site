@@ -385,6 +385,7 @@ def main() -> None:
             conn.close()
         assert_true(
             {
+                "upload_batch",
                 "photo_log",
                 "parse_result",
                 "review_queue",
@@ -498,6 +499,10 @@ def main() -> None:
                 row[1]
                 for row in conn.execute("PRAGMA table_info(export_log)").fetchall()
             }
+            photo_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(photo_log)").fetchall()
+            }
             same_display_count = conn.execute(
                 "SELECT COUNT(*) FROM mouse_master WHERE display_id = ?",
                 ("319",),
@@ -551,6 +556,10 @@ def main() -> None:
         assert_true(
             {"generated_by", "generated_role"}.issubset(export_columns),
             "Export Log should preserve who/which persona generated export views.",
+        )
+        assert_true(
+            "upload_batch_id" in photo_columns,
+            "Photo log should link raw source photos to an upload batch.",
         )
         assert_true(same_display_count == 2, "Mouse display IDs must remain non-unique identity candidates.")
         assert_true(
@@ -620,7 +629,8 @@ def main() -> None:
                 assert_true('data-view-target="photo"' in index_html and "Photo Review Workbench" in index_html, "Photo Review Workbench should be the default operational view.")
                 assert_true("reviewDetailPanel" in index_html and "inspect-review" in index_html, "Review Queue should expose a split list/detail workflow.")
                 assert_true("Review Note Evidence" in index_html and "reviewEvidencePanel" in index_html, "Review detail should expose linked note-line and card snapshot evidence.")
-                assert_true("Colony Records" in index_html, "Local UI should expose mouse records.")
+                assert_true("Candidate Records" in index_html, "Local UI should expose candidate mouse records.")
+                assert_true("Export Center" in index_html, "Local UI should frame workbook generation as an export center.")
                 assert_true("Parsed Note Evidence" in index_html, "Local UI should expose parsed note evidence.")
                 assert_true("Card Snapshots" in index_html and "cardSnapshotRows" in index_html, "Local UI should expose card transcription snapshots.")
                 assert_true("Strain Registry" in index_html, "Local UI should expose strain registry.")
@@ -739,6 +749,11 @@ def main() -> None:
                     "Photo review should make uncertain extracted fields actionable from the evidence panel.",
                 )
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
+                assert_true("uploadBatchRows" in index_html and "/api/upload-batches" in index_html, "Local UI should expose upload batch tracking.")
+                assert_true("uploadBatchReleasePanel" in index_html and "Preview release" in index_html, "Local UI should expose upload batch release checks.")
+                assert_true("Photo worklist" in index_html and "next_action" in index_html, "Local UI should show photo-level batch release blockers.")
+                assert_true("open-batch-worklist-target" in index_html and "item.action_target_type" in index_html, "Local UI should link batch release worklist rows to the next review action.")
+                assert_true("/release-preview" in index_html and "Close Batch" in index_html, "Local UI should preview and close upload batches only after release checks.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
                 assert_true("Mouse Detail" in index_html, "Local UI should expose the mouse detail visualization.")
@@ -945,13 +960,26 @@ def main() -> None:
                     client.get("/api/mice").json() == mice_before_legacy,
                     "Legacy workbook import should not write canonical mouse state.",
                 )
+                upload_batch = client.post(
+                    "/api/upload-batches",
+                    json={"batch_label": "Morning cage card set", "expected_photo_count": 2, "note": "Verification batch."},
+                )
+                assert_true(upload_batch.status_code == 200, f"Could not create upload batch: {upload_batch.text}")
+                upload_batch_payload = upload_batch.json()
+                assert_true(
+                    upload_batch_payload["source_layer"] == "raw source"
+                    and upload_batch_payload["expected_photo_count"] == 2,
+                    "Upload batch creation should classify the batch as raw source evidence.",
+                )
                 photo_upload = client.post(
                     "/api/photos",
+                    data={"upload_batch_id": upload_batch_payload["upload_batch_id"]},
                     files={"file": ("latest_card.jpg", io.BytesIO(b"fake local image bytes"), "image/jpeg")},
                 )
                 assert_true(photo_upload.status_code == 200, f"Could not upload source photo: {photo_upload.text}")
                 photo_payload = photo_upload.json()
                 assert_true(photo_payload["status"] == "review_pending", "Uploaded photos should enter manual review state.")
+                assert_true(photo_payload["upload_batch_id"] == upload_batch_payload["upload_batch_id"], "Uploaded photo should preserve its upload batch link.")
                 assert_true(photo_payload["review_candidate"]["review_id"], "Photo upload should create a review candidate.")
                 photo_image = client.get(f"/api/photos/{photo_payload['photo_id']}/image")
                 assert_true(photo_image.status_code == 200, "Uploaded photo raw evidence image should be retrievable locally.")
@@ -968,11 +996,52 @@ def main() -> None:
                 )
                 photo_workbench = client.get("/api/photo-review-workbench").json()
                 assert_true(photo_workbench["boundary"] == "export or view", "Photo review workbench should remain a review/export view.")
+                assert_true(
+                    photo_workbench["batch_count"] >= 1
+                    and any(batch["upload_batch_id"] == upload_batch_payload["upload_batch_id"] for batch in photo_workbench["batches"]),
+                    "Photo review workbench should summarize upload batches.",
+                )
                 assert_true(photo_workbench["pending_transcription_count"] >= 1, "Untranscribed photos should be queued for manual transcription.")
                 workbench_row = next(item for item in photo_workbench["rows"] if item["photo_id"] == photo_payload["photo_id"])
                 assert_true(
-                    workbench_row["next_action"] == "transcribe_photo" and workbench_row["image_url"].endswith("/image"),
+                    workbench_row["next_action"] == "transcribe_photo"
+                    and workbench_row["image_url"].endswith("/image")
+                    and workbench_row["upload_batch_id"] == upload_batch_payload["upload_batch_id"],
                     "Photo review workbench should point raw photos to transcription and local image evidence.",
+                )
+                upload_batches = client.get("/api/upload-batches").json()
+                selected_batch = next(item for item in upload_batches["rows"] if item["upload_batch_id"] == upload_batch_payload["upload_batch_id"])
+                assert_true(
+                    selected_batch["photo_count"] == 1
+                    and selected_batch["pending_transcription_count"] == 1
+                    and selected_batch["open_review_count"] >= 1,
+                    "Upload batch summary should count photos, transcription pending state, and open reviews.",
+                )
+                batch_release_preview = client.get(
+                    f"/api/upload-batches/{upload_batch_payload['upload_batch_id']}/release-preview"
+                )
+                assert_true(batch_release_preview.status_code == 200, "Upload batch release preview endpoint failed.")
+                batch_release_payload = batch_release_preview.json()
+                assert_true(
+                    batch_release_payload["boundary"] == "export or view"
+                    and batch_release_payload["ready"] is False
+                    and len(batch_release_payload["worklist"]) == 1
+                    and batch_release_payload["worklist"][0]["photo_id"] == photo_payload["photo_id"]
+                    and batch_release_payload["worklist"][0]["next_action"] == "transcribe_photo"
+                    and batch_release_payload["worklist"][0]["action_target_type"] == "photo"
+                    and batch_release_payload["worklist"][0]["action_target_id"] == photo_payload["photo_id"]
+                    and batch_release_payload["worklist"][0]["image_url"].endswith("/image")
+                    and any(item["key"] == "transcription_complete" for item in batch_release_payload["blockers"])
+                    and any(item["key"] == "canonical_mapping_applied" for item in batch_release_payload["blockers"])
+                    and any(item["key"] == "photo_worklist_clear" for item in batch_release_payload["blockers"]),
+                    "Upload batch release preview should identify unfinished transcription and missing canonical mapping at batch and photo level.",
+                )
+                blocked_batch_release = client.post(
+                    f"/api/upload-batches/{upload_batch_payload['upload_batch_id']}/release"
+                )
+                assert_true(
+                    blocked_batch_release.status_code == 409,
+                    "Upload batch release should not close a batch with blockers.",
                 )
                 blocked_ai_draft = client.post(
                     f"/api/photos/{photo_payload['photo_id']}/ai-transcription-draft",

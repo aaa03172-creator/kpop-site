@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+
 from app import db
 from app.main import (
     ReviewResolutionCreate,
@@ -860,6 +863,10 @@ def test_resolving_grouped_numeric_note_review_updates_all_numeric_notes(tmp_pat
                 "SELECT note_summary_json FROM card_snapshot WHERE card_snapshot_id = ?",
                 (snapshot_id,),
             ).fetchone()
+        review_after_resolution = next(
+            item for item in list_review_items()
+            if item["review_id"] == f"review_unlabeled_numeric_{parse_id}"
+        )
 
         assert result["status"] == "resolved"
         assert [row["parsed_type"] for row in rows] == ["count_note", "count_note", "count_note"]
@@ -868,6 +875,47 @@ def test_resolving_grouped_numeric_note_review_updates_all_numeric_notes(tmp_pat
         summary = json.loads(snapshot["note_summary_json"])
         assert summary["count_note_total"] == 3
         assert summary["needs_review_count"] == 0
+        assert review_after_resolution["note_item_id"] == f"note_{parse_id}_1"
+        assert review_after_resolution["review_note_raw_line"] == "1"
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_grouped_numeric_note_review_requires_label_decision(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "requires_decision", [{"raw": "1"}, {"raw": "2"}])
+
+        with pytest.raises(HTTPException) as exc_info:
+            resolve_review_item(
+                f"review_unlabeled_numeric_{parse_id}",
+                ReviewResolutionCreate(
+                    resolution_note="Resolve without classifying numeric evidence.",
+                    resolved_value="reviewed",
+                    note_item_id=f"note_{parse_id}_1",
+                ),
+            )
+
+        with db.connection() as conn:
+            review = conn.execute(
+                "SELECT status FROM review_queue WHERE review_id = ?",
+                (f"review_unlabeled_numeric_{parse_id}",),
+            ).fetchone()
+            remaining_review_notes = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM card_note_item_log
+                WHERE parse_id = ?
+                  AND parsed_type = 'unlabeled_numeric_note'
+                  AND needs_review = 1
+                """,
+                (parse_id,),
+            ).fetchone()
+
+        assert exc_info.value.status_code == 400
+        assert "note_label_decision" in exc_info.value.detail
+        assert review["status"] == "open"
+        assert remaining_review_notes["count"] == 2
     finally:
         db.DB_PATH = old_db_path
 

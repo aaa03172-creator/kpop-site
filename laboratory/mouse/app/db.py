@@ -197,6 +197,14 @@ def ensure_columns(conn: sqlite3.Connection, table_name: str, columns: dict[str,
 def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
     ensure_columns(
         conn,
+        "photo_log",
+        {
+            "upload_batch_id": "TEXT",
+            "raw_source_kind": "TEXT NOT NULL DEFAULT 'cage_card_photo'",
+        },
+    )
+    ensure_columns(
+        conn,
         "mouse_master",
         {
             "id_prefix": "TEXT NOT NULL DEFAULT ''",
@@ -349,13 +357,26 @@ def init_db() -> None:
     with connection() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS upload_batch (
+                upload_batch_id TEXT PRIMARY KEY,
+                batch_label TEXT NOT NULL,
+                expected_photo_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'open',
+                source_layer TEXT NOT NULL DEFAULT 'raw source',
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS photo_log (
                 photo_id TEXT PRIMARY KEY,
+                upload_batch_id TEXT,
                 original_filename TEXT NOT NULL,
                 stored_path TEXT NOT NULL,
                 uploaded_at TEXT NOT NULL,
                 status TEXT NOT NULL,
-                raw_source_kind TEXT NOT NULL DEFAULT 'cage_card_photo'
+                raw_source_kind TEXT NOT NULL DEFAULT 'cage_card_photo',
+                FOREIGN KEY (upload_batch_id) REFERENCES upload_batch(upload_batch_id)
             );
 
             CREATE TABLE IF NOT EXISTS parse_result (
@@ -846,6 +867,10 @@ def init_db() -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_card_note_item_log_photo_line
                 ON card_note_item_log(photo_id, line_number);
+            CREATE INDEX IF NOT EXISTS idx_photo_log_batch
+                ON photo_log(upload_batch_id, uploaded_at);
+            CREATE INDEX IF NOT EXISTS idx_upload_batch_time
+                ON upload_batch(created_at);
             CREATE INDEX IF NOT EXISTS idx_card_note_item_log_mouse
                 ON card_note_item_log(parsed_mouse_display_id);
             CREATE INDEX IF NOT EXISTS idx_mouse_master_display

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mouse Colony LIMS - Photo Inbox</title>
+  <title>Mouse Colony LIMS - Photo Review Workbench</title>
   <style>
     :root {
       --background: #f8f9ff;
@@ -186,6 +186,23 @@
       background: var(--surface);
       padding: 0 20px;
       flex-shrink: 0;
+    }
+
+    .topbar-title {
+      display: grid;
+      gap: 2px;
+      min-width: 190px;
+    }
+
+    .topbar-title strong {
+      font-size: 14px;
+      line-height: 18px;
+    }
+
+    .topbar-title span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 16px;
     }
 
     .search {
@@ -1367,6 +1384,58 @@
       color: var(--error);
     }
 
+    .focus-review-checklist {
+      display: grid;
+      gap: 8px;
+      border: 1px solid #c9d7ef;
+      border-radius: 6px;
+      background: #f7faff;
+      padding: 10px;
+    }
+
+    .focus-review-checklist h3 {
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 16px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .focus-review-checklist ul {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .focus-review-checklist li {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 6px;
+      align-items: start;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 16px;
+    }
+
+    .focus-review-checklist li::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      margin-top: 4px;
+      border-radius: 999px;
+      background: var(--secondary);
+    }
+
+    .focus-review-checklist li.blocker::before {
+      background: var(--error);
+    }
+
+    .focus-review-checklist strong {
+      color: var(--ink);
+    }
+
     .before-after {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1540,6 +1609,21 @@
         z-index: 20;
       }
 
+      .topbar-title {
+        min-width: 170px;
+      }
+
+      .topbar-title span {
+        white-space: normal;
+      }
+
+      .top-actions {
+        flex: 1;
+        min-width: 0;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+
       .mobile-nav {
         display: flex;
         position: sticky;
@@ -1606,19 +1690,23 @@
         <button class="nav-button" data-view="dashboard" type="button"><span class="nav-icon">D</span><span>Dashboard</span></button>
         <button class="nav-button" data-view="mouseDetail" type="button"><span class="nav-icon">ID</span><span>Mouse Detail</span></button>
         <button class="nav-button" data-view="strainDetail" type="button"><span class="nav-icon">G</span><span>Strain Detail</span></button>
-        <button class="nav-button active" data-view="inbox" type="button"><span class="nav-icon">P</span><span>Photo Inbox</span></button>
+        <button class="nav-button active" data-view="inbox" type="button"><span class="nav-icon">PH</span><span>Photo Review</span></button>
         <button class="nav-button" data-view="review" type="button"><span class="nav-icon">R</span><span>Review Queue</span></button>
-        <button class="nav-button" data-view="records" type="button"><span class="nav-icon">M</span><span>Colony Records</span></button>
+        <button class="nav-button" data-view="records" type="button"><span class="nav-icon">CR</span><span>Candidate Records</span></button>
         <button class="nav-button" data-view="exports" type="button"><span class="nav-icon">X</span><span>Exports</span></button>
         <button class="nav-button" data-view="settings" type="button"><span class="nav-icon">S</span><span>Settings</span></button>
       </nav>
       <div class="sidebar-footer">
-        Raw photos remain evidence. Excel remains an export view.
+        Raw photos stay evidence. Canonical state changes require review, and Excel remains an export view.
       </div>
     </aside>
 
     <div class="main">
       <header class="topbar">
+        <div class="topbar-title">
+          <strong>Photo Review Workbench</strong>
+          <span>Photos, review, candidate records, Excel export</span>
+        </div>
         <div class="search">
           <input id="searchInput" type="search" placeholder="Search photos, mouse IDs, raw text...">
         </div>
@@ -1643,9 +1731,9 @@
         <button class="nav-button" data-view="dashboard" type="button"><span class="nav-icon">D</span><span>Dashboard</span></button>
         <button class="nav-button" data-view="mouseDetail" type="button"><span class="nav-icon">ID</span><span>Mouse</span></button>
         <button class="nav-button" data-view="strainDetail" type="button"><span class="nav-icon">G</span><span>Strain</span></button>
-        <button class="nav-button active" data-view="inbox" type="button"><span class="nav-icon">P</span><span>Photo Inbox</span></button>
+        <button class="nav-button active" data-view="inbox" type="button"><span class="nav-icon">PH</span><span>Photo Review</span></button>
         <button class="nav-button" data-view="review" type="button"><span class="nav-icon">R</span><span>Review</span></button>
-        <button class="nav-button" data-view="records" type="button"><span class="nav-icon">M</span><span>Records</span></button>
+        <button class="nav-button" data-view="records" type="button"><span class="nav-icon">CR</span><span>Records</span></button>
         <button class="nav-button" data-view="exports" type="button"><span class="nav-icon">X</span><span>Exports</span></button>
         <button class="nav-button" data-view="settings" type="button"><span class="nav-icon">S</span><span>Settings</span></button>
       </nav>
@@ -1890,11 +1978,11 @@
           </div>
         </section>
 
-        <section class="content view active" id="inboxView" aria-label="Photo Inbox">
+        <section class="content view active" id="inboxView" aria-label="Photo Review Workbench">
           <div class="page-header">
             <div>
-              <h1>Photo Inbox</h1>
-              <p>Review parsed cage card photos while keeping raw values, normalized values, and evidence separate.</p>
+              <h1>Photo Review Workbench</h1>
+              <p>Start with raw cage-card photos, keep parsed values separate, and route uncertain mouse IDs, strain, DOB, mating, litter, and genotype evidence into review before candidate records or Excel export.</p>
             </div>
             <span class="layer-chip">Raw source + parsed result</span>
           </div>
@@ -1924,8 +2012,8 @@
           <div class="quick-start" aria-label="Quick workflow actions">
             <div class="quick-card">
               <div>
-                <strong>Fastest test path</strong>
-                <span>Load fixture parse results, open review, apply a correction, then check export blocks.</span>
+                <strong>Photo-to-export path</strong>
+                <span>Load fixture parse results, inspect cage-card evidence, apply a reviewed correction, then check export blockers.</span>
               </div>
               <button class="small-button" type="button" id="loadSampleInline">Load Sample</button>
             </div>
@@ -1990,11 +2078,11 @@
           </div>
         </section>
 
-        <section class="content view" id="recordsView" aria-label="Colony Records">
+        <section class="content view" id="recordsView" aria-label="Candidate Records">
           <div class="page-header">
             <div>
-              <h1>Colony Records</h1>
-              <p>Canonical mouse state stays traceable to source photos, parsed note lines, and accepted actions.</p>
+              <h1>Candidate Records</h1>
+              <p>Canonical candidate state stays traceable to source photos, parsed note lines, and accepted actions.</p>
             </div>
             <span class="layer-chip">Canonical structured state</span>
           </div>
@@ -2227,6 +2315,7 @@
                 <strong id="reviewIssue">No review needed</strong>
                 <p class="muted" id="reviewReason"></p>
               </div>
+              <div class="focus-review-checklist" id="focusReviewChecklist" aria-label="Focus Review checklist"></div>
               <div class="before-after">
                 <div class="value-box">
                   <span>Before</span>
@@ -3930,6 +4019,7 @@
 
     function renderDrawer() {
       const photo = selectedPhoto();
+      const showMovementResolution = isDuplicateActiveReview(photo);
       document.getElementById("drawerTitle").textContent = photo.id;
       document.getElementById("drawerMeta").textContent = `${photo.type} card - ${photo.uploaded} - ${statusLabels[photo.status]}`;
       document.getElementById("drawerLayer").textContent = photo.status === "auto" ? "Parsed result" : "Review item";
@@ -3945,10 +4035,19 @@
       document.getElementById("beforeValue").textContent = photo.currentValue;
       document.getElementById("afterValue").value = photo.suggestedValue;
       document.getElementById("dismissReason").value = photo.dismissReason || "";
+      document.getElementById("focusReviewChecklist").innerHTML = `
+        <h3>Focus Review Checks</h3>
+        <ul>
+          <li class="blocker"><span><strong>Export blocker</strong>: ${photo.status === "review" || photo.status === "conflict" ? "Blocks Excel export until reviewed." : "No longer blocking export."}</span></li>
+          <li><span><strong>Source photo evidence</strong>: ${escapeHtml(photo.id)} remains the raw source anchor.</span></li>
+          <li><span><strong>Parsed field</strong>: ${escapeHtml(photo.reviewField || "review item")} from ${escapeHtml(photo.type)} cage card.</span></li>
+          <li><span><strong>Before / after</strong>: ${escapeHtml(photo.currentValue || "--")} -> ${escapeHtml(photo.suggestedValue || "--")}.</span></li>
+          <li class="${showMovementResolution ? "blocker" : ""}"><span><strong>${showMovementResolution ? "Movement decision required" : "Movement decision"}</strong>: ${showMovementResolution ? "Resolve duplicate active mouse before acceptance." : "No duplicate movement blocker on this item."}</span></li>
+        </ul>
+      `;
       document.getElementById("reviewBox").style.display = photo.status === "auto" ? "none" : "grid";
       const movementBox = document.getElementById("movementBox");
       const movementButton = document.getElementById("resolveMovementButton");
-      const showMovementResolution = isDuplicateActiveReview(photo);
       movementBox.style.display = showMovementResolution ? "grid" : "none";
       movementButton.style.display = showMovementResolution ? "inline-flex" : "none";
       document.getElementById("movementResolutionType").value = photo.movementResolution?.type || "previous_snapshot_closed";

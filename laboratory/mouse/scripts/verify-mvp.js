@@ -138,6 +138,21 @@ async function main() {
   await page.reload();
   await page.waitForSelector("#inboxRows tr");
 
+  assert((await page.locator("title").textContent()) === "Mouse Colony LIMS - Photo Review Workbench", "Browser title should make Photo Review Workbench the first workflow.");
+  assert((await page.locator("#inboxView.active h1").textContent()) === "Photo Review Workbench", "Initial active view should be the Photo Review Workbench.");
+  assert((await page.locator(".sidebar .nav-button.active").first().textContent()).includes("Photo Review"), "Sidebar should open on Photo Review rather than a broad dashboard.");
+  assert((await page.locator(".topbar-title").filter({ hasText: "Photo Review Workbench" }).count()) === 1, "Top utility bar should name the active Photo Review workflow.");
+  assert((await page.locator("#recordsView h1").textContent()) === "Candidate Records", "Records view should be framed as candidate records.");
+  assert((await page.locator("#exportsView h1").textContent()) === "Export Center", "Export view should be framed as the Export Center.");
+
+  const mobilePage = await context.newPage();
+  await mobilePage.setViewportSize({ width: 390, height: 844 });
+  await mobilePage.goto(fileUrl(pagePath));
+  await mobilePage.waitForSelector("#inboxView.active");
+  const mobileOverflow = await mobilePage.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  assert(mobileOverflow <= 1, `Photo Review Workbench should not create mobile horizontal overflow; overflow=${mobileOverflow}.`);
+  await mobilePage.close();
+
   assert((await page.locator("#inboxRows tr").count()) >= 5, "Seed inbox rows did not render.");
   assert((await page.locator("#reviewSummary").textContent()).includes("3 pending"), "Initial review count is wrong.");
   assert(
@@ -306,7 +321,7 @@ async function main() {
   assert((await page.locator("#reviewRows tr").filter({ hasText: "Count mismatch" }).count()) >= 1, "Count mismatch validation did not create a review item.");
   assert((await page.locator("#reviewRows tr").filter({ hasText: "FIXTURE-DUPLICATE-ACTIVE" }).count()) === 1, "Duplicate active mouse validation did not create a review item.");
 
-  await page.getByRole("button", { name: "Colony Records" }).click();
+  await page.getByRole("button", { name: "Candidate Records" }).click();
   await page.waitForFunction(() =>
     [...document.querySelectorAll("#recordRows tr")].some((row) => row.textContent.includes("FIXTURE-AUTO-SEPARATED"))
   );
@@ -318,6 +333,12 @@ async function main() {
   await page.getByRole("button", { name: "Review Queue" }).click();
   await page.locator("#reviewRows tr").filter({ hasText: "FIXTURE-DUPLICATE-ACTIVE" }).click();
   const duplicateReviewCount = await page.locator("#reviewRows tr").count();
+  const focusChecklist = page.locator("#focusReviewChecklist");
+  assert((await focusChecklist.filter({ hasText: "Export blocker" }).count()) === 1, "Focus Review should show export blocker status in the review drawer.");
+  assert((await focusChecklist.filter({ hasText: "Source photo evidence" }).count()) === 1, "Focus Review should keep source evidence visible in the review drawer.");
+  assert((await focusChecklist.filter({ hasText: "Parsed field" }).count()) === 1, "Focus Review should show the parsed field being corrected.");
+  assert((await focusChecklist.filter({ hasText: "Before / after" }).count()) === 1, "Focus Review should show before/after correction context.");
+  assert((await focusChecklist.filter({ hasText: "Movement decision required" }).count()) === 1, "Duplicate active mouse reviews should show the movement decision requirement.");
   await page.locator("#afterValue").fill("Reviewed duplicate without movement");
   await page.getByRole("button", { name: "Apply Reviewed Changes" }).click();
   await page.waitForTimeout(50);
@@ -326,7 +347,7 @@ async function main() {
   await page.getByRole("button", { name: "Resolve Mouse Movement" }).click();
   await page.waitForTimeout(50);
   assert((await page.locator("#reviewRows tr").count()) === duplicateReviewCount - 1, "Duplicate active mouse resolution did not leave the review queue.");
-  await page.getByRole("button", { name: "Colony Records" }).click();
+  await page.getByRole("button", { name: "Candidate Records" }).click();
   assert((await page.locator("#recordRows tr").filter({ hasText: "FIXTURE-DUPLICATE-ACTIVE" }).count()) >= 1, "Resolved duplicate source did not create reviewed canonical candidates.");
   assert((await page.locator("#recordRows tr").filter({ hasText: "Closed by movement review" }).count()) >= 1, "Previous active source was not marked closed by movement review.");
 
@@ -338,7 +359,7 @@ async function main() {
   await page.waitForTimeout(50);
   assert((await page.locator("#reviewRows tr").count()) === beforeReviewCount - 1, "Reviewed correction did not leave the queue.");
 
-  await page.getByRole("button", { name: "Colony Records" }).click();
+  await page.getByRole("button", { name: "Candidate Records" }).click();
   assert((await page.locator("#recordRows tr").filter({ hasText: "Reviewed configured value" }).count()) >= 1, "Reviewed record candidate missing.");
 
   await page.getByRole("button", { name: "Review Queue" }).click();
@@ -352,13 +373,13 @@ async function main() {
   );
   await page.locator("#dismissReason").fill("Not actionable for this MVP slice");
   await page.getByRole("button", { name: "Dismiss With Reason" }).click();
-  await page.getByRole("button", { name: "Colony Records" }).click();
+  await page.getByRole("button", { name: "Candidate Records" }).click();
   assert(
     (await page.locator("#recordRows tr").filter({ hasText: dismissedSource }).count()) === 0,
     "Dismissed review item leaked into canonical candidates."
   );
 
-  await page.getByRole("button", { name: "Photo Inbox" }).click();
+  await page.getByRole("button", { name: "Photo Review" }).click();
   await page.setInputFiles("#photoInput", uploadPath);
   await page.waitForFunction(() =>
     [...document.querySelectorAll("#inboxRows tr")].some((row) => row.textContent.includes("UPLOAD-"))

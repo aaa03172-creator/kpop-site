@@ -161,6 +161,12 @@ class AiDraftSettingsUpdate(BaseModel):
     api_key: str = ""
 
 
+class UploadBatchCreate(BaseModel):
+    batch_label: str = ""
+    expected_photo_count: int = Field(default=0, ge=0)
+    note: str = ""
+
+
 class GenotypingUpdate(BaseModel):
     mouse_id: str = Field(min_length=1)
     sample_id: str = ""
@@ -456,6 +462,509 @@ def health() -> dict[str, Any]:
     }
 
 
+def create_upload_batch_record(
+    conn: Any,
+    *,
+    batch_label: str = "",
+    expected_photo_count: int = 0,
+    note: str = "",
+) -> dict[str, Any]:
+    now = utc_now()
+    upload_batch_id = new_id("batch")
+    label = batch_label.strip() or f"Cage card upload {now[:10]}"
+    conn.execute(
+        """
+        INSERT INTO upload_batch
+            (upload_batch_id, batch_label, expected_photo_count, status,
+             source_layer, note, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            upload_batch_id,
+            label,
+            max(0, expected_photo_count),
+            "open",
+            "raw source",
+            note.strip(),
+            now,
+            now,
+        ),
+    )
+    return {
+        "upload_batch_id": upload_batch_id,
+        "batch_label": label,
+        "expected_photo_count": max(0, expected_photo_count),
+        "status": "open",
+        "source_layer": "raw source",
+        "note": note.strip(),
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def upload_batch_payload(row: Any) -> dict[str, Any]:
+    photo_count = int(row["photo_count"] or 0)
+    pending = int(row["pending_transcription_count"] or 0)
+    open_reviews = int(row["open_review_count"] or 0)
+    open_comparisons = int(row["open_comparison_review_count"] or 0)
+    comparison_needed = int(row["comparison_needed_count"] or 0)
+    candidate_count = int(row["canonical_candidate_count"] or 0)
+    applied_candidate_count = int(row["applied_candidate_count"] or 0)
+    if row["status"] == "closed":
+        derived_status = "mapped_or_closed"
+    elif photo_count == 0 or pending:
+        derived_status = "upload_or_transcription_pending"
+    elif open_reviews or open_comparisons or comparison_needed:
+        derived_status = "review_pending"
+    elif candidate_count == 0 or applied_candidate_count < candidate_count:
+        derived_status = "ready_for_mapping"
+    else:
+        derived_status = "mapped_or_closed"
+    payload = dict(row)
+    payload["photo_count"] = photo_count
+    payload["transcribed_photo_count"] = int(payload["transcribed_photo_count"] or 0)
+    payload["pending_transcription_count"] = pending
+    payload["total_review_count"] = int(payload["total_review_count"] or 0)
+    payload["open_review_count"] = open_reviews
+    payload["resolved_review_count"] = max(0, payload["total_review_count"] - open_reviews)
+    payload["comparison_review_count"] = int(payload["comparison_review_count"] or 0)
+    payload["open_comparison_review_count"] = open_comparisons
+    payload["comparison_needed_count"] = comparison_needed
+    payload["canonical_candidate_count"] = candidate_count
+    payload["applied_candidate_count"] = applied_candidate_count
+    payload["derived_status"] = derived_status
+    payload["boundary"] = "raw source"
+    return payload
+
+
+def upload_batch_summary_row(conn: Any, upload_batch_id: str) -> Any:
+    row = conn.execute(
+        """
+        SELECT batch.upload_batch_id, batch.batch_label,
+               batch.expected_photo_count, batch.status,
+               batch.source_layer, batch.note, batch.created_at, batch.updated_at,
+               COUNT(photo.photo_id) AS photo_count,
+               SUM(CASE WHEN transcribed.photo_id IS NOT NULL THEN 1 ELSE 0 END) AS transcribed_photo_count,
+               SUM(CASE WHEN photo.photo_id IS NOT NULL AND transcribed.photo_id IS NULL THEN 1 ELSE 0 END) AS pending_transcription_count,
+               COALESCE(SUM(review_counts.total_reviews), 0) AS total_review_count,
+               COALESCE(SUM(review_counts.open_reviews), 0) AS open_review_count,
+               COALESCE(SUM(comparison_counts.comparison_reviews), 0) AS comparison_review_count,
+               COALESCE(SUM(comparison_counts.open_comparison_reviews), 0) AS open_comparison_review_count,
+               SUM(CASE WHEN transcribed.photo_id IS NOT NULL AND COALESCE(comparison_counts.comparison_reviews, 0) = 0 THEN 1 ELSE 0 END) AS comparison_needed_count,
+               COALESCE(candidate_counts.canonical_candidate_count, 0) AS canonical_candidate_count,
+               COALESCE(candidate_counts.applied_candidate_count, 0) AS applied_candidate_count,
+               MIN(photo.uploaded_at) AS first_photo_uploaded_at,
+               MAX(photo.uploaded_at) AS latest_photo_uploaded_at
+        FROM upload_batch batch
+        LEFT JOIN photo_log photo
+            ON photo.upload_batch_id = batch.upload_batch_id
+        LEFT JOIN (
+            SELECT DISTINCT photo_id
+            FROM parse_result
+            WHERE source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
+        ) transcribed ON transcribed.photo_id = photo.photo_id
+        LEFT JOIN (
+            SELECT parse.photo_id,
+                   COUNT(review.review_id) AS total_reviews,
+                   SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_reviews
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            GROUP BY parse.photo_id
+        ) review_counts ON review_counts.photo_id = photo.photo_id
+        LEFT JOIN (
+            SELECT parse.photo_id,
+                   COUNT(review.review_id) AS comparison_reviews,
+                   SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_comparison_reviews
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            WHERE review.issue LIKE 'Photo transcription%'
+            GROUP BY parse.photo_id
+        ) comparison_counts ON comparison_counts.photo_id = photo.photo_id
+        LEFT JOIN (
+            SELECT photo.upload_batch_id,
+                   COUNT(candidate.candidate_id) AS canonical_candidate_count,
+                   SUM(CASE WHEN candidate.status = 'applied' THEN 1 ELSE 0 END) AS applied_candidate_count
+            FROM photo_log photo
+            JOIN parse_result parse ON parse.photo_id = photo.photo_id
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            JOIN canonical_candidate candidate ON candidate.review_id = review.review_id
+            GROUP BY photo.upload_batch_id
+        ) candidate_counts ON candidate_counts.upload_batch_id = batch.upload_batch_id
+        WHERE batch.upload_batch_id = ?
+        GROUP BY batch.upload_batch_id
+        """,
+        (upload_batch_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Upload batch not found.")
+    return row
+
+
+def upload_batch_release_preview_payload(conn: Any, upload_batch_id: str) -> dict[str, Any]:
+    batch = upload_batch_payload(upload_batch_summary_row(conn, upload_batch_id))
+    worklist_rows = upload_batch_release_worklist(conn, upload_batch_id)
+    blockers = []
+    warnings = []
+
+    def add_check(key: str, label: str, passed: bool, detail: str, severity: str = "blocker") -> dict[str, Any]:
+        item = {"key": key, "label": label, "passed": passed, "detail": detail, "severity": severity}
+        if not passed:
+            if severity == "warning":
+                warnings.append(item)
+            else:
+                blockers.append(item)
+        return item
+
+    expected = int(batch["expected_photo_count"] or 0)
+    photo_count = int(batch["photo_count"] or 0)
+    worklist_blocker_count = sum(1 for item in worklist_rows if item["next_action"] != "ready_to_close")
+    checklist = [
+        add_check(
+            "has_photos",
+            "Batch has uploaded photos",
+            photo_count > 0,
+            f"{photo_count} uploaded photo(s).",
+        ),
+        add_check(
+            "expected_photo_count",
+            "Uploaded photo count matches expected count",
+            expected == 0 or photo_count == expected,
+            f"Expected {expected or 'unspecified'}, uploaded {photo_count}.",
+        ),
+        add_check(
+            "transcription_complete",
+            "Every photo has manual or AI transcription evidence",
+            int(batch["pending_transcription_count"]) == 0,
+            f"{batch['pending_transcription_count']} photo(s) still need transcription.",
+        ),
+        add_check(
+            "open_reviews_resolved",
+            "Open review blockers are resolved",
+            int(batch["open_review_count"]) == 0,
+            f"{batch['open_review_count']} open review item(s) remain.",
+        ),
+        add_check(
+            "comparison_reviews_created",
+            "Transcribed photos have comparison review coverage",
+            int(batch["comparison_needed_count"]) == 0,
+            f"{batch['comparison_needed_count']} transcribed photo(s) still need comparison review creation.",
+        ),
+        add_check(
+            "comparison_reviews_resolved",
+            "Comparison reviews are resolved",
+            int(batch["open_comparison_review_count"]) == 0,
+            f"{batch['open_comparison_review_count']} open comparison review item(s) remain.",
+        ),
+        add_check(
+            "canonical_mapping_applied",
+            "Canonical candidate mapping has been applied",
+            int(batch["canonical_candidate_count"]) > 0 and int(batch["applied_candidate_count"]) >= int(batch["canonical_candidate_count"]),
+            f"{batch['applied_candidate_count']} applied candidate(s) of {batch['canonical_candidate_count']} candidate(s).",
+        ),
+        add_check(
+            "photo_worklist_clear",
+            "Every photo-level release action is complete",
+            worklist_blocker_count == 0,
+            f"{worklist_blocker_count} photo-level action(s) remain in the release worklist.",
+        ),
+    ]
+    ready = not blockers
+    return {
+        "boundary": "export or view",
+        "source_layer": "raw source release check",
+        "ready": ready,
+        "release_status": "ready_to_close" if ready else "blocked",
+        "batch": batch,
+        "checklist": checklist,
+        "worklist": worklist_rows,
+        "blockers": blockers,
+        "warnings": warnings,
+        "note": "Release changes only upload_batch status; it does not write mouse, event, genotype, or other canonical colony state.",
+    }
+
+
+def upload_batch_release_worklist(conn: Any, upload_batch_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT photo.photo_id, photo.original_filename, photo.uploaded_at, photo.status,
+               COUNT(DISTINCT transcribed.parse_id) AS transcription_count,
+               COALESCE(review_counts.total_reviews, 0) AS total_review_count,
+               COALESCE(review_counts.open_reviews, 0) AS open_review_count,
+               COALESCE(comparison_counts.comparison_reviews, 0) AS comparison_review_count,
+               COALESCE(comparison_counts.open_comparison_reviews, 0) AS open_comparison_review_count,
+               COALESCE(candidate_counts.canonical_candidate_count, 0) AS canonical_candidate_count,
+               COALESCE(candidate_counts.applied_candidate_count, 0) AS applied_candidate_count
+        FROM photo_log photo
+        LEFT JOIN parse_result transcribed
+            ON transcribed.photo_id = photo.photo_id
+           AND transcribed.source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
+        LEFT JOIN (
+            SELECT parse.photo_id,
+                   COUNT(review.review_id) AS total_reviews,
+                   SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_reviews
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            GROUP BY parse.photo_id
+        ) review_counts ON review_counts.photo_id = photo.photo_id
+        LEFT JOIN (
+            SELECT parse.photo_id,
+                   COUNT(review.review_id) AS comparison_reviews,
+                   SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_comparison_reviews
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            WHERE review.issue LIKE 'Photo transcription%'
+            GROUP BY parse.photo_id
+        ) comparison_counts ON comparison_counts.photo_id = photo.photo_id
+        LEFT JOIN (
+            SELECT parse.photo_id,
+                   COUNT(candidate.candidate_id) AS canonical_candidate_count,
+                   SUM(CASE WHEN candidate.status = 'applied' THEN 1 ELSE 0 END) AS applied_candidate_count
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            JOIN canonical_candidate candidate ON candidate.review_id = review.review_id
+            GROUP BY parse.photo_id
+        ) candidate_counts ON candidate_counts.photo_id = photo.photo_id
+        WHERE photo.upload_batch_id = ?
+        GROUP BY photo.photo_id
+        ORDER BY photo.uploaded_at, photo.original_filename COLLATE NOCASE
+        """,
+        (upload_batch_id,),
+    ).fetchall()
+    worklist = []
+    for row in rows:
+        payload = dict(row)
+        photo_id = payload["photo_id"]
+        latest_transcription = conn.execute(
+            """
+            SELECT parse_id, source_name, parsed_at
+            FROM parse_result
+            WHERE photo_id = ?
+              AND source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
+            ORDER BY parsed_at DESC
+            LIMIT 1
+            """,
+            (photo_id,),
+        ).fetchone()
+        review_rows = conn.execute(
+            """
+            SELECT review.review_id, review.status, review.issue
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            WHERE parse.photo_id = ?
+            ORDER BY CASE WHEN review.status = 'open' THEN 0 ELSE 1 END,
+                     review.created_at,
+                     review.review_id
+            """,
+            (photo_id,),
+        ).fetchall()
+        comparison_review_rows = [
+            review for review in review_rows if str(review["issue"] or "").startswith("Photo transcription")
+        ]
+        candidate_rows = conn.execute(
+            """
+            SELECT candidate.candidate_id, candidate.status,
+                   candidate.proposed_mouse_display_id
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            JOIN canonical_candidate candidate ON candidate.review_id = review.review_id
+            WHERE parse.photo_id = ?
+            ORDER BY CASE WHEN candidate.status = 'applied' THEN 1 ELSE 0 END,
+                     candidate.created_at,
+                     candidate.candidate_id
+            """,
+            (photo_id,),
+        ).fetchall()
+        transcription_count = int(payload["transcription_count"] or 0)
+        open_review_count = int(payload["open_review_count"] or 0)
+        comparison_review_count = int(payload["comparison_review_count"] or 0)
+        open_comparison_review_count = int(payload["open_comparison_review_count"] or 0)
+        canonical_candidate_count = int(payload["canonical_candidate_count"] or 0)
+        applied_candidate_count = int(payload["applied_candidate_count"] or 0)
+        open_review = next((review for review in review_rows if review["status"] == "open"), None)
+        unapplied_candidate = next((candidate for candidate in candidate_rows if candidate["status"] != "applied"), None)
+        if transcription_count == 0:
+            next_action = "transcribe_photo"
+            blocker = "No manual or AI transcription evidence is attached."
+            action_target_type = "photo"
+            action_target_id = photo_id
+            action_target_label = "Open photo transcription"
+        elif comparison_review_count == 0:
+            next_action = "create_comparison_review"
+            blocker = "Create the photo transcription comparison review."
+            action_target_type = "parse_result" if latest_transcription is not None else "photo"
+            action_target_id = latest_transcription["parse_id"] if latest_transcription is not None else photo_id
+            action_target_label = "Create comparison review"
+        elif open_review_count or open_comparison_review_count:
+            next_action = "resolve_reviews"
+            blocker = f"{open_review_count} open review item(s) remain."
+            action_target_type = "review"
+            action_target_id = open_review["review_id"] if open_review is not None else ""
+            action_target_label = open_review["issue"] if open_review is not None else "Resolve reviews"
+        elif canonical_candidate_count == 0:
+            next_action = "map_canonical_candidate"
+            blocker = "No canonical candidate draft is linked to this photo."
+            action_target_type = "photo"
+            action_target_id = photo_id
+            action_target_label = "Open evidence mapping"
+        elif applied_candidate_count < canonical_candidate_count:
+            next_action = "apply_canonical_candidate"
+            blocker = f"{applied_candidate_count} of {canonical_candidate_count} canonical candidate(s) applied."
+            action_target_type = "canonical_candidate"
+            action_target_id = unapplied_candidate["candidate_id"] if unapplied_candidate is not None else ""
+            action_target_label = "Apply canonical candidate"
+        else:
+            next_action = "ready_to_close"
+            blocker = ""
+            action_target_type = "upload_batch"
+            action_target_id = upload_batch_id
+            action_target_label = "Ready"
+        worklist.append(
+            {
+                **payload,
+                "transcription_count": transcription_count,
+                "open_review_count": open_review_count,
+                "comparison_review_count": comparison_review_count,
+                "open_comparison_review_count": open_comparison_review_count,
+                "canonical_candidate_count": canonical_candidate_count,
+                "applied_candidate_count": applied_candidate_count,
+                "next_action": next_action,
+                "blocker": blocker,
+                "action_target_type": action_target_type,
+                "action_target_id": action_target_id,
+                "action_target_label": action_target_label,
+                "latest_transcription_parse_id": latest_transcription["parse_id"] if latest_transcription is not None else "",
+                "review_ids": [review["review_id"] for review in review_rows],
+                "open_review_ids": [review["review_id"] for review in review_rows if review["status"] == "open"],
+                "comparison_review_ids": [review["review_id"] for review in comparison_review_rows],
+                "candidate_ids": [candidate["candidate_id"] for candidate in candidate_rows],
+                "image_url": f"/api/photos/{quote(photo_id)}/image",
+                "boundary": "export or view",
+            }
+        )
+    return worklist
+
+
+@app.post("/api/upload-batches")
+def create_upload_batch(payload: UploadBatchCreate) -> dict[str, Any]:
+    with connection() as conn:
+        batch = create_upload_batch_record(
+            conn,
+            batch_label=payload.batch_label,
+            expected_photo_count=payload.expected_photo_count,
+            note=payload.note,
+        )
+    return batch
+
+
+@app.get("/api/upload-batches")
+def list_upload_batches() -> dict[str, Any]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT batch.upload_batch_id, batch.batch_label,
+                   batch.expected_photo_count, batch.status,
+                   batch.source_layer, batch.note, batch.created_at, batch.updated_at,
+                   COUNT(photo.photo_id) AS photo_count,
+                   SUM(CASE WHEN transcribed.photo_id IS NOT NULL THEN 1 ELSE 0 END) AS transcribed_photo_count,
+                   SUM(CASE WHEN photo.photo_id IS NOT NULL AND transcribed.photo_id IS NULL THEN 1 ELSE 0 END) AS pending_transcription_count,
+                   COALESCE(SUM(review_counts.total_reviews), 0) AS total_review_count,
+                   COALESCE(SUM(review_counts.open_reviews), 0) AS open_review_count,
+                   COALESCE(SUM(comparison_counts.comparison_reviews), 0) AS comparison_review_count,
+                   COALESCE(SUM(comparison_counts.open_comparison_reviews), 0) AS open_comparison_review_count,
+                   SUM(CASE WHEN transcribed.photo_id IS NOT NULL AND COALESCE(comparison_counts.comparison_reviews, 0) = 0 THEN 1 ELSE 0 END) AS comparison_needed_count,
+                   COALESCE(candidate_counts.canonical_candidate_count, 0) AS canonical_candidate_count,
+                   COALESCE(candidate_counts.applied_candidate_count, 0) AS applied_candidate_count,
+                   MIN(photo.uploaded_at) AS first_photo_uploaded_at,
+                   MAX(photo.uploaded_at) AS latest_photo_uploaded_at
+            FROM upload_batch batch
+            LEFT JOIN photo_log photo
+                ON photo.upload_batch_id = batch.upload_batch_id
+            LEFT JOIN (
+                SELECT DISTINCT photo_id
+                FROM parse_result
+                WHERE source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
+            ) transcribed ON transcribed.photo_id = photo.photo_id
+            LEFT JOIN (
+                SELECT parse.photo_id,
+                       COUNT(review.review_id) AS total_reviews,
+                       SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_reviews
+                FROM parse_result parse
+                JOIN review_queue review ON review.parse_id = parse.parse_id
+                GROUP BY parse.photo_id
+            ) review_counts ON review_counts.photo_id = photo.photo_id
+            LEFT JOIN (
+                SELECT parse.photo_id,
+                       COUNT(review.review_id) AS comparison_reviews,
+                       SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_comparison_reviews
+                FROM parse_result parse
+                JOIN review_queue review ON review.parse_id = parse.parse_id
+                WHERE review.issue LIKE 'Photo transcription%'
+                GROUP BY parse.photo_id
+            ) comparison_counts ON comparison_counts.photo_id = photo.photo_id
+            LEFT JOIN (
+                SELECT photo.upload_batch_id,
+                       COUNT(candidate.candidate_id) AS canonical_candidate_count,
+                       SUM(CASE WHEN candidate.status = 'applied' THEN 1 ELSE 0 END) AS applied_candidate_count
+                FROM photo_log photo
+                JOIN parse_result parse ON parse.photo_id = photo.photo_id
+                JOIN review_queue review ON review.parse_id = parse.parse_id
+                JOIN canonical_candidate candidate ON candidate.review_id = review.review_id
+                GROUP BY photo.upload_batch_id
+            ) candidate_counts ON candidate_counts.upload_batch_id = batch.upload_batch_id
+            GROUP BY batch.upload_batch_id
+            ORDER BY batch.created_at DESC
+            """
+        ).fetchall()
+        unbatched = conn.execute(
+            """
+            SELECT COUNT(*) AS photo_count
+            FROM photo_log
+            WHERE upload_batch_id IS NULL OR upload_batch_id = ''
+            """
+        ).fetchone()
+    batches = [upload_batch_payload(row) for row in rows]
+    return {
+        "boundary": "export or view",
+        "source_layer": "raw source summary",
+        "batch_count": len(batches),
+        "photo_count": sum(batch["photo_count"] for batch in batches) + int(unbatched["photo_count"] or 0),
+        "pending_transcription_count": sum(batch["pending_transcription_count"] for batch in batches),
+        "open_review_count": sum(batch["open_review_count"] for batch in batches),
+        "unbatched_photo_count": int(unbatched["photo_count"] or 0),
+        "rows": batches,
+    }
+
+
+@app.get("/api/upload-batches/{upload_batch_id}/release-preview")
+def upload_batch_release_preview(upload_batch_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        return upload_batch_release_preview_payload(conn, upload_batch_id)
+
+
+@app.post("/api/upload-batches/{upload_batch_id}/release")
+def release_upload_batch(upload_batch_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        preview = upload_batch_release_preview_payload(conn, upload_batch_id)
+        if not preview["ready"]:
+            raise HTTPException(status_code=409, detail=preview)
+        now = utc_now()
+        conn.execute(
+            """
+            UPDATE upload_batch
+            SET status = 'closed',
+                updated_at = ?
+            WHERE upload_batch_id = ?
+            """,
+            (now, upload_batch_id),
+        )
+        closed_preview = upload_batch_release_preview_payload(conn, upload_batch_id)
+    return {
+        **closed_preview,
+        "released": True,
+        "released_at": now,
+    }
+
+
 @app.post("/api/ai-draft-settings")
 def update_ai_draft_settings(payload: AiDraftSettingsUpdate) -> dict[str, Any]:
     global RUNTIME_OPENAI_API_KEY
@@ -473,10 +982,13 @@ def list_photos() -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT photo.photo_id, photo.original_filename, photo.stored_path,
+                   photo.upload_batch_id, batch.batch_label,
                    photo.uploaded_at, photo.status, photo.raw_source_kind,
                    COALESCE(review_counts.open_reviews, 0) AS open_review_count,
                    review_counts.latest_parse_id
             FROM photo_log photo
+            LEFT JOIN upload_batch batch
+                ON batch.upload_batch_id = photo.upload_batch_id
             LEFT JOIN (
                 SELECT parse.photo_id, COUNT(review.review_id) AS open_reviews,
                        MAX(parse.parse_id) AS latest_parse_id
@@ -502,7 +1014,7 @@ def photo_image_path(photo_id: str) -> tuple[Any, Path, str]:
     with connection() as conn:
         photo = conn.execute(
             """
-            SELECT photo_id, original_filename, stored_path, uploaded_at, status
+            SELECT photo_id, original_filename, stored_path, uploaded_at, status, upload_batch_id
             FROM photo_log
             WHERE photo_id = ?
             """,
@@ -1704,9 +2216,12 @@ def photo_review_workbench() -> dict[str, Any]:
     with connection() as conn:
         photos = conn.execute(
             """
-            SELECT photo_id, original_filename, uploaded_at, status, raw_source_kind
-            FROM photo_log
-            ORDER BY uploaded_at DESC
+            SELECT photo.photo_id, photo.original_filename, photo.upload_batch_id,
+                   batch.batch_label, photo.uploaded_at, photo.status, photo.raw_source_kind
+            FROM photo_log photo
+            LEFT JOIN upload_batch batch
+                ON batch.upload_batch_id = photo.upload_batch_id
+            ORDER BY photo.uploaded_at DESC
             """
         ).fetchall()
         rows = []
@@ -1782,6 +2297,8 @@ def photo_review_workbench() -> dict[str, Any]:
                 {
                     "source_layer": "export or view",
                     "photo_id": photo["photo_id"],
+                    "upload_batch_id": photo["upload_batch_id"] or "",
+                    "batch_label": photo["batch_label"] or "",
                     "original_filename": photo["original_filename"],
                     "uploaded_at": photo["uploaded_at"],
                     "status": photo["status"],
@@ -1799,12 +2316,16 @@ def photo_review_workbench() -> dict[str, Any]:
                     "next_action": next_action,
                 }
             )
+    batch_summary = list_upload_batches()
     return {
         "boundary": "export or view",
         "source_priority": ["raw source photo", "manual transcription", "review item", "canonical candidate"],
         "photo_count": len(rows),
         "pending_transcription_count": sum(1 for row in rows if row["next_action"] == "transcribe_photo"),
         "open_review_count": sum(row["open_review_count"] for row in rows),
+        "batch_count": batch_summary["batch_count"],
+        "unbatched_photo_count": batch_summary["unbatched_photo_count"],
+        "batches": batch_summary["rows"],
         "rows": rows,
     }
 
@@ -2365,6 +2886,12 @@ def resolve_note_label_correction(
     resolved_at: str,
 ) -> dict[str, Any] | None:
     decision = payload.note_label_decision.strip()
+    is_grouped_numeric_review_id = review_id == f"review_unlabeled_numeric_{parse_id}"
+    if is_grouped_numeric_review_id and not decision:
+        raise HTTPException(
+            status_code=400,
+            detail="note_label_decision is required for grouped numeric note reviews.",
+        )
     if not decision:
         return None
     allowed_decisions = {"mouse_item", "count_note", "reviewed_note", "ignored_note"}
@@ -2375,7 +2902,7 @@ def resolve_note_label_correction(
         )
 
     note_item_id = review_note_item_id(review_id, payload.note_item_id)
-    if review_id == f"review_unlabeled_numeric_{parse_id}" and not payload.note_item_id.strip():
+    if is_grouped_numeric_review_id and not payload.note_item_id.strip():
         first_numeric_note = conn.execute(
             """
             SELECT note_item_id
@@ -2407,7 +2934,7 @@ def resolve_note_label_correction(
     if note["parse_id"] != parse_id:
         raise HTTPException(status_code=409, detail="Review item and note item parse IDs do not match.")
     is_grouped_numeric_review = (
-        review_id == f"review_unlabeled_numeric_{parse_id}"
+        is_grouped_numeric_review_id
         and note["parsed_type"] == "unlabeled_numeric_note"
         and decision in {"count_note", "reviewed_note", "ignored_note"}
     )
@@ -4853,7 +5380,7 @@ def create_legacy_workbook_import(
 
 
 @app.post("/api/photos")
-def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
+def upload_photo(file: UploadFile = File(...), upload_batch_id: str = Form("")) -> dict[str, Any]:
     if not file.filename:
         raise HTTPException(status_code=400, detail="A filename is required.")
     photo_id = new_id("photo")
@@ -4861,20 +5388,44 @@ def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
     uploaded_at = utc_now()
     try:
         with connection() as conn:
+            batch_id = upload_batch_id.strip()
+            if batch_id:
+                batch = conn.execute(
+                    "SELECT upload_batch_id FROM upload_batch WHERE upload_batch_id = ?",
+                    (batch_id,),
+                ).fetchone()
+                if batch is None:
+                    raise HTTPException(status_code=404, detail="Upload batch not found.")
+                conn.execute(
+                    "UPDATE upload_batch SET updated_at = ? WHERE upload_batch_id = ?",
+                    (uploaded_at, batch_id),
+                )
+            else:
+                batch = create_upload_batch_record(
+                    conn,
+                    batch_label=f"Single photo upload - {file.filename}",
+                    expected_photo_count=1,
+                    note="Automatically created for a direct photo upload.",
+                )
+                batch_id = batch["upload_batch_id"]
             source_record_id = create_source_record(
                 conn,
                 source_type="photo",
                 source_uri=str(stored_path.relative_to(ROOT)),
                 source_label=file.filename,
-                raw_payload=json.dumps({"original_filename": file.filename}, ensure_ascii=False),
+                raw_payload=json.dumps(
+                    {"original_filename": file.filename, "upload_batch_id": batch_id},
+                    ensure_ascii=False,
+                ),
                 note="Uploaded cage card photo retained as raw source evidence.",
             )
             conn.execute(
                 """
-                INSERT INTO photo_log (photo_id, original_filename, stored_path, uploaded_at, status)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO photo_log
+                    (photo_id, upload_batch_id, original_filename, stored_path, uploaded_at, status)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (photo_id, file.filename, str(stored_path.relative_to(ROOT)), uploaded_at, "uploaded"),
+                (photo_id, batch_id, file.filename, str(stored_path.relative_to(ROOT)), uploaded_at, "uploaded"),
             )
             review_candidate = ensure_photo_review_candidate(
                 conn,
@@ -4893,6 +5444,7 @@ def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
         "stored_path": str(stored_path.relative_to(ROOT)),
         "uploaded_at": uploaded_at,
         "status": "review_pending",
+        "upload_batch_id": batch_id,
         "source_record_id": source_record_id,
         "review_candidate": review_candidate,
     }
@@ -5287,7 +5839,16 @@ def list_review_items() -> list[dict[str, Any]]:
                                 SELECT note.note_item_id
                                 FROM card_note_item_log note
                                 WHERE note.parse_id = review.parse_id
-                                  AND note.parsed_type = 'unlabeled_numeric_note'
+                                  AND (
+                                      note.parsed_type = 'unlabeled_numeric_note'
+                                      OR note.note_item_id IN (
+                                          SELECT correction.entity_id
+                                          FROM correction_log correction
+                                          WHERE correction.review_id = review.review_id
+                                            AND correction.entity_type = 'note_item'
+                                            AND correction.field_name = 'parsed_label'
+                                      )
+                                  )
                                 ORDER BY note.line_number
                                 LIMIT 1
                             )
