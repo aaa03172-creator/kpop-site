@@ -157,6 +157,13 @@ async function main() {
     "Mouse Timeline UI should consume the read-only read model and render only accepted events by default."
   );
   assert(
+    staticHtml.includes("/api/ui/mouse-pedigree") &&
+      staticHtml.includes("renderMousePedigreeReadModel") &&
+      staticHtml.includes("Pedigree / Lineage unavailable") &&
+      staticHtml.includes("pending_relationships"),
+    "Mouse Pedigree UI should consume the read-only read model without inferring uncertain relationships."
+  );
+  assert(
     staticHtml.includes("/api/ui/evidence-ledger") &&
       staticHtml.includes("renderEvidenceLedgerReadModel") &&
       staticHtml.includes("Evidence Ledger unavailable") &&
@@ -370,6 +377,55 @@ async function main() {
         attention_links: [{ label: "Open Focus Review", target_path: "/api/ui/focus-review", must_review: 1, quick_check: 0 }],
         empty_state: { message: "", fabricated_records: false }
       },
+      "/api/ui/mouse-pedigree": {
+        source_layer: "export or view",
+        page_question: "Where did this mouse come from?",
+        mode: "selected_path",
+        mouse: { mouse_id: "MT401", display_id: "MT401", status: "active", strain: "C57BL/6J", litter_id: "litter_static" },
+        relationship_summary: {
+          confirmed_relationships: 3,
+          pending_relationships: 1,
+          same_litter_siblings: 3,
+          offspring_events: 0,
+          must_review: 1,
+          quick_check: 0
+        },
+        nodes: {
+          father: {
+            node_type: "mouse",
+            relationship: "father",
+            mouse_id: "MT402",
+            display_id: "MT402",
+            status: "active",
+            strain: "C57BL/6J",
+            relationship_status: "confirmed",
+            source_layer: "canonical structured state"
+          },
+          mother: {
+            node_type: "pending_relationship",
+            relationship: "mother",
+            label: "Parent pending",
+            relationship_status: "pending_review",
+            not_inferred: true
+          },
+          mating: { node_type: "mating", mating_id: "mating_static", mating_label: "C-12 breeding pair", start_date: "2026-04-15", relationship_status: "confirmed", source_layer: "canonical structured state" },
+          litter: { node_type: "litter", litter_id: "litter_static", litter_label: "F1", birth_date: "2026-05-01", relationship_status: "confirmed", source_layer: "canonical structured state" },
+          selected_mouse: { node_type: "mouse", relationship: "selected_mouse", mouse_id: "MT401", display_id: "MT401", status: "active", strain: "C57BL/6J", relationship_status: "selected", source_layer: "canonical structured state" },
+          same_litter_siblings: [
+            { node_type: "mouse", relationship: "same_litter_sibling", mouse_id: "MT403", display_id: "MT403", status: "active", strain: "C57BL/6J", relationship_status: "confirmed", source_layer: "canonical structured state" },
+            { node_type: "mouse", relationship: "same_litter_sibling", mouse_id: "MT404", display_id: "MT404", status: "active", strain: "C57BL/6J", relationship_status: "confirmed", source_layer: "canonical structured state" },
+            { node_type: "mouse", relationship: "same_litter_sibling", mouse_id: "MT405", display_id: "MT405", status: "active", strain: "C57BL/6J", relationship_status: "confirmed", source_layer: "canonical structured state" }
+          ]
+        },
+        evidence_rows: [
+          { field: "mother_id", value: "Parent pending", status: "pending_review", source_layer: "review item", source: { source_record_id: "", label: "Open Focus Review", source_type: "review" } },
+          { field: "father_id", value: "MT402", status: "confirmed", source_layer: "canonical structured state", source: { source_record_id: "source_static", label: "Reviewed mating cage C-12", source_type: "manual_review" } },
+          { field: "litter_id", value: "litter_static", status: "confirmed", source_layer: "canonical structured state", source: { source_record_id: "source_static", label: "Reviewed mating cage C-12", source_type: "manual_review" } },
+          { field: "mating_id", value: "mating_static", status: "confirmed", source_layer: "canonical structured state", source: { source_record_id: "source_static", label: "Reviewed mating cage C-12", source_type: "manual_review" } }
+        ],
+        attention_links: [{ label: "Open Focus Review", target_path: "/api/ui/focus-review", must_review: 1, quick_check: 0 }],
+        empty_state: { message: "", fabricated_records: false }
+      },
       "/api/ui/evidence-ledger": {
         source_layer: "export or view",
         page_question: "What evidence supports this record?",
@@ -510,6 +566,18 @@ async function main() {
   assert(
     (await staticPage.locator("#mouseTimelineReadModel").filter({ hasText: "born" }).filter({ hasText: "canonical structured state" }).count()) === 1,
     "Static Mouse Timeline should show accepted canonical events without review-item detail."
+  );
+  assert(
+    (await staticPage.locator("#mousePedigreeReadModel").filter({ hasText: "Pedigree / Lineage" }).filter({ hasText: "MT401" }).count()) === 1,
+    "Static app startup should render the Mouse Pedigree read model from /api/ui/mouse-pedigree."
+  );
+  assert(
+    (await staticPage.locator("#mousePedigreeReadModel").filter({ hasText: "Parent pending" }).filter({ hasText: "Same litter siblings" }).count()) === 1,
+    "Static Mouse Pedigree should show pending relationships and same-litter siblings without inference."
+  );
+  assert(
+    (await staticPage.locator("#mousePedigreeReadModel").filter({ hasText: "Open Focus Review" }).filter({ hasText: "Unconfirmed relationships are not inferred" }).count()) === 1,
+    "Static Mouse Pedigree should link pending relationships to Focus Review and state the non-inference rule."
   );
   assert(
     (await staticPage.locator("#evidenceLedgerReadModel").filter({ hasText: "Evidence items 1" }).filter({ hasText: "evidence-card.png" }).count()) === 1,

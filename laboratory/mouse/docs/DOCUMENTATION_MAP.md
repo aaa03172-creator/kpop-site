@@ -96,6 +96,7 @@ Plans are execution guides. They are not canonical product truth after implement
 | `docs/superpowers/plans/2026-05-09-evidence-first-alignment-stabilization.md` | implementation plan | Evidence-first alignment stabilization plan. |
 | `docs/superpowers/plans/2026-05-09-labeling-rule-ui.md` | implementation plan | Labeling rule UI plan. |
 | `docs/superpowers/plans/2026-05-09-low-fatigue-colony-ui.md` | implementation plan | Low-fatigue colony UI plan. |
+| `docs/superpowers/plans/2026-05-09-mouse-pedigree-lineage-mvp.md` | implementation plan | Mouse pedigree / lineage read model MVP plan. |
 | `docs/superpowers/plans/2026-05-09-strain-gene-allele-registry.md` | implementation plan | Strain/gene/allele registry plan. |
 
 ## Known Documentation Mismatches

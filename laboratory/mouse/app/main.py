@@ -550,6 +550,13 @@ def mouse_timeline_empty_state() -> dict[str, Any]:
     }
 
 
+def mouse_pedigree_empty_state() -> dict[str, Any]:
+    return {
+        "message": "Choose a mouse to view accepted pedigree relationships.",
+        "fabricated_records": False,
+    }
+
+
 def evidence_ledger_empty_state() -> dict[str, Any]:
     return {
         "message": "No photo evidence items are available yet.",
@@ -8048,6 +8055,260 @@ def ui_mouse_timeline(mouse_id: str = "") -> dict[str, Any]:
         "empty_state": mouse_timeline_empty_state(),
     }
 
+
+@app.get("/api/ui/mouse-pedigree")
+def ui_mouse_pedigree(mouse_id: str = "") -> dict[str, Any]:
+    selected_mouse_id = mouse_id.strip()
+    with connection() as conn:
+        attention_counts = open_review_attention_counts(conn)
+        must_review = int(attention_counts.get("must_review", 0))
+        quick_check = int(attention_counts.get("quick_check", 0))
+        if not selected_mouse_id:
+            return {
+                "source_layer": "export or view",
+                "page_question": "Where did this mouse come from?",
+                "mode": "selected_path",
+                "mouse": None,
+                "relationship_summary": {
+                    "confirmed_relationships": 0,
+                    "pending_relationships": 0,
+                    "same_litter_siblings": 0,
+                    "offspring_events": 0,
+                    "must_review": must_review,
+                    "quick_check": quick_check,
+                },
+                "nodes": {},
+                "evidence_rows": [],
+                "attention_links": [],
+                "empty_state": mouse_pedigree_empty_state(),
+            }
+
+        mouse = conn.execute(
+            """
+            SELECT mouse_id, display_id, status, raw_strain_text, father_id, mother_id, litter_id
+            FROM mouse_master
+            WHERE mouse_id = ? OR display_id = ?
+            """,
+            (selected_mouse_id, selected_mouse_id),
+        ).fetchone()
+        if mouse is None:
+            raise HTTPException(status_code=404, detail="Mouse not found.")
+        father = conn.execute(
+            "SELECT mouse_id, display_id, status, raw_strain_text FROM mouse_master WHERE mouse_id = ?",
+            (mouse["father_id"],),
+        ).fetchone() if mouse["father_id"] else None
+        mother = conn.execute(
+            "SELECT mouse_id, display_id, status, raw_strain_text FROM mouse_master WHERE mouse_id = ?",
+            (mouse["mother_id"],),
+        ).fetchone() if mouse["mother_id"] else None
+        litter = conn.execute(
+            """
+            SELECT l.litter_id, l.litter_label, l.mating_id, l.birth_date,
+                   l.source_record_id, m.mating_label, m.status AS mating_status,
+                   m.source_record_id AS mating_source_record_id
+            FROM litter_registry l
+            LEFT JOIN mating_registry m ON m.mating_id = l.mating_id
+            WHERE l.litter_id = ?
+            """,
+            (mouse["litter_id"],),
+        ).fetchone() if mouse["litter_id"] else None
+        sibling_rows = conn.execute(
+            """
+            SELECT mouse_id, display_id, status, raw_strain_text, sex
+            FROM mouse_master
+            WHERE litter_id = ? AND mouse_id <> ? AND status = 'active'
+            ORDER BY display_id, mouse_id
+            LIMIT 12
+            """,
+            (mouse["litter_id"], mouse["mouse_id"]),
+        ).fetchall() if mouse["litter_id"] else []
+        offspring_events = conn.execute(
+            "SELECT COUNT(*) AS child_count FROM mouse_master WHERE father_id = ? OR mother_id = ?",
+            (mouse["mouse_id"], mouse["mouse_id"]),
+        ).fetchone()["child_count"]
+        source_ids = set()
+        if litter is not None:
+            source_ids.update(
+                source_id
+                for source_id in [litter["source_record_id"], litter["mating_source_record_id"]]
+                if source_id
+            )
+        source_rows: dict[str, dict[str, Any]] = {}
+        if source_ids:
+            placeholders = ", ".join("?" for _ in source_ids)
+            rows = conn.execute(
+                f"""
+                SELECT source_record_id, source_type, source_label
+                FROM source_record
+                WHERE source_record_id IN ({placeholders})
+                """,
+                sorted(source_ids),
+            ).fetchall()
+            source_rows = {row["source_record_id"]: dict(row) for row in rows}
+
+    def mouse_node(row: Any, relationship: str) -> dict[str, Any]:
+        return {
+            "node_type": "mouse",
+            "relationship": relationship,
+            "mouse_id": row["mouse_id"],
+            "display_id": row["display_id"],
+            "status": row["status"],
+            "strain": row["raw_strain_text"],
+            "relationship_status": "confirmed",
+            "source_layer": "canonical structured state",
+        }
+
+    def pending_parent_node(relationship: str) -> dict[str, Any]:
+        return {
+            "node_type": "pending_relationship",
+            "relationship": relationship,
+            "label": "Parent pending",
+            "relationship_status": "pending_review",
+            "not_inferred": True,
+        }
+
+    def evidence_source(source_record_id: str) -> dict[str, str]:
+        source = source_rows.get(source_record_id, {})
+        return {
+            "source_record_id": source_record_id,
+            "label": source.get("source_label", ""),
+            "source_type": source.get("source_type", ""),
+        }
+
+    lineage_source_record_id = ""
+    if litter is not None:
+        lineage_source_record_id = litter["mating_source_record_id"] or litter["source_record_id"] or ""
+
+    nodes: dict[str, Any] = {
+        "selected_mouse": {
+            "node_type": "mouse",
+            "relationship": "selected",
+            "mouse_id": mouse["mouse_id"],
+            "display_id": mouse["display_id"],
+            "status": mouse["status"],
+            "strain": mouse["raw_strain_text"],
+            "relationship_status": "selected",
+            "source_layer": "canonical structured state",
+        },
+        "father": mouse_node(father, "father") if father else pending_parent_node("father"),
+        "mother": mouse_node(mother, "mother") if mother else pending_parent_node("mother"),
+        "same_litter_siblings": [
+            {
+                "node_type": "mouse",
+                "relationship": "same_litter_sibling",
+                "mouse_id": row["mouse_id"],
+                "display_id": row["display_id"],
+                "status": row["status"],
+                "strain": row["raw_strain_text"],
+                "sex": row["sex"] or "",
+                "relationship_status": "confirmed",
+                "source_layer": "canonical structured state",
+            }
+            for row in sibling_rows
+        ],
+    }
+    if litter is not None:
+        nodes["mating"] = {
+            "node_type": "mating",
+            "relationship": "source_mating",
+            "mating_id": litter["mating_id"] or "",
+            "mating_label": litter["mating_label"] or "",
+            "status": litter["mating_status"] or "",
+            "relationship_status": "confirmed",
+            "source_layer": "canonical structured state",
+        }
+        nodes["litter"] = {
+            "node_type": "litter",
+            "relationship": "source_litter",
+            "litter_id": litter["litter_id"],
+            "litter_label": litter["litter_label"],
+            "mating_id": litter["mating_id"] or "",
+            "birth_date": litter["birth_date"],
+            "relationship_status": "confirmed",
+            "source_layer": "canonical structured state",
+        }
+
+    evidence_rows = []
+    for field_name, row in [("mother_id", mother), ("father_id", father)]:
+        if row:
+            evidence_rows.append(
+                {
+                    "field": field_name,
+                    "value": row["mouse_id"],
+                    "status": "confirmed",
+                    "source_layer": "canonical structured state",
+                    "source": evidence_source(lineage_source_record_id),
+                }
+            )
+        else:
+            evidence_rows.append(
+                {
+                    "field": field_name,
+                    "value": "Parent pending",
+                    "status": "pending_review",
+                    "source_layer": "review item",
+                    "source": {
+                        "source_record_id": "",
+                        "label": "Open Focus Review",
+                        "source_type": "review",
+                    },
+                }
+            )
+    if litter is not None:
+        evidence_rows.append(
+            {
+                "field": "litter_id",
+                "value": litter["litter_id"],
+                "status": "confirmed",
+                "source_layer": "canonical structured state",
+                "source": evidence_source(lineage_source_record_id),
+            }
+        )
+        if litter["mating_id"]:
+            evidence_rows.append(
+                {
+                    "field": "mating_id",
+                    "value": litter["mating_id"],
+                    "status": "confirmed",
+                    "source_layer": "canonical structured state",
+                    "source": evidence_source(lineage_source_record_id),
+                }
+            )
+
+    attention_links = []
+    if must_review or quick_check:
+        attention_links.append(
+            {
+                "label": "Open Focus Review",
+                "target_path": "/api/ui/focus-review",
+                "must_review": must_review,
+                "quick_check": quick_check,
+            }
+        )
+    return {
+        "source_layer": "export or view",
+        "page_question": "Where did this mouse come from?",
+        "mode": "selected_path",
+        "mouse": {
+            "mouse_id": mouse["mouse_id"],
+            "display_id": mouse["display_id"],
+            "status": mouse["status"],
+            "strain": mouse["raw_strain_text"],
+            "litter_id": mouse["litter_id"] or "",
+        },
+        "relationship_summary": {
+            "confirmed_relationships": sum(1 for row in evidence_rows if row["status"] == "confirmed"),
+            "pending_relationships": sum(1 for row in evidence_rows if row["status"] == "pending_review"),
+            "same_litter_siblings": len(sibling_rows),
+            "offspring_events": int(offspring_events),
+            "must_review": must_review,
+            "quick_check": quick_check,
+        },
+        "nodes": nodes,
+        "evidence_rows": evidence_rows,
+        "attention_links": attention_links,
+        "empty_state": mouse_pedigree_empty_state(),
+    }
 
 @app.get("/api/ui/evidence-ledger")
 def ui_evidence_ledger(source_photo_id: str = "", linked_mouse_id: str = "") -> dict[str, Any]:
