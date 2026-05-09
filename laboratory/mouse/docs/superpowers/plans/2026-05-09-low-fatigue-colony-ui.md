@@ -1,5 +1,13 @@
 # Low-Fatigue Colony UI Implementation Plan
 
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Implement the low-fatigue MouseDB UI direction in small, evidence-backed slices without fabricating colony state.
+
+**Architecture:** Start with a read-only Focus Review view model derived from existing review, parse, photo, card snapshot, and evidence tables. Render only DB-backed review data in the static UI, then add broader pages later when accepted-state or export/evidence read models can support them without becoming canonical editing surfaces.
+
+**Tech Stack:** FastAPI, SQLite, static HTML/CSS/JavaScript, Playwright verification through `scripts/verify-mvp.js`, Python API tests through `pytest`.
+
 ## Document Status
 
 Layer classification: implementation planning / non-canonical project documentation.
@@ -72,6 +80,16 @@ Candidate endpoint:
 
 - `GET /api/ui/focus-review`
 
+Implementation steps:
+
+- [ ] Write `tests/test_low_fatigue_ui_contracts.py` with a seeded photo/card review scenario using existing DB tables and helper functions.
+- [ ] Run `python -m pytest tests/test_low_fatigue_ui_contracts.py -q` and confirm it fails because `/api/ui/focus-review` does not exist.
+- [ ] Add a read-only helper in `app/main.py` that groups open review items by `parse_result.photo_id` and source card/photo evidence.
+- [ ] Add `GET /api/ui/focus-review` returning `source_layer: "export or view"`, workload counts for `must_review` and `quick_check`, source photo metadata, mouse rows, evidence links, and collapsed section counts.
+- [ ] Run `python -m pytest tests/test_low_fatigue_ui_contracts.py tests/test_review_attention.py -q` and confirm the new API contract and existing attention logic pass.
+- [ ] Run `python scripts/verify-local-app.py` and confirm the local app still initializes.
+- [ ] Check `git status --short` and confirm changed files are limited to `app/main.py` and `tests/test_low_fatigue_ui_contracts.py` for this slice.
+
 Acceptance criteria:
 
 - Focused pytest for the new read model passes.
@@ -104,16 +122,37 @@ Verification:
 - Extend `scripts/verify-mvp.js` with DOM assertions that rendered cards expose attention text, `data-attention-level`, and accessible actions.
 - Confirm evidence actions remain visible.
 
+Implementation steps:
+
+- [ ] Add failing assertions to `scripts/verify-mvp.js` for `Focus Review`, `Needs quick confirmation`, `Apply confirmed rows only`, source photo controls, and `data-attention-level`.
+- [ ] Run `npm test` and confirm it fails on the new UI assertions.
+- [ ] Update `static/index.html` to render the Focus Review read model into card-level groups with source photo, mouse rows, suggested decision, and collapsed evidence affordances.
+- [ ] Keep fallback states honest: loading, empty, or error text only; no fabricated mouse IDs, dates, strains, or review counts.
+- [ ] Mirror the static page to `index.html` if the project continues to keep both entrypoints synchronized.
+- [ ] Run `npm test` and confirm the static UI assertions pass.
+- [ ] Run `python scripts/verify-local-app.py` and confirm server-side local verification still passes.
+- [ ] Check `git status --short` and confirm changed files are limited to `static/index.html`, `index.html`, `scripts/verify-mvp.js`, and any API files intentionally changed by Slice 1.
+
 ## Later Slices
 
 Implement these only after the required source data exists or the read model can derive it from accepted records:
 
-- Colony State: accepted current state only, with links to Focus Review for unresolved blockers.
-- Colony Schedule: derived from accepted events and configurable rules; external calendar remains a mirror.
-- Mouse Timeline: accepted events only by default; proposed events remain in Focus Review.
-- Related Mice/Pedigree: derived from accepted mating, litter, and parent-child events.
-- Evidence Ledger: evidence search and trace status from existing source/evidence tables.
-- Excel Export: workbook preview from accepted structured state and existing export preview helpers.
+- [ ] Colony State: accepted current state only, with links to Focus Review for unresolved blockers.
+- [ ] Colony Schedule: derived from accepted events and configurable rules; external calendar remains a mirror.
+- [ ] Mouse Timeline: accepted events only by default; proposed events remain in Focus Review.
+- [ ] Related Mice/Pedigree: derived from accepted mating, litter, and parent-child events.
+- [ ] Evidence Ledger: evidence search and trace status from existing source/evidence tables.
+- [ ] Excel Export: workbook preview from accepted structured state and existing export preview helpers.
+
+For each later slice:
+
+- [ ] Write a focused API contract test before implementation.
+- [ ] Prove the test fails for the missing endpoint or missing field.
+- [ ] Implement a read-only endpoint with explicit `source_layer`.
+- [ ] Add static UI rendering only for real endpoint data or honest empty states.
+- [ ] Add Playwright assertions for the visible workflow language and boundary cues.
+- [ ] Run the targeted Python test, `npm test`, and `python scripts/verify-local-app.py`.
+- [ ] Re-check `git status --short` and stage only files that belong to that slice.
 
 ## Explicit Non-Goals
 
