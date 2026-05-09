@@ -780,6 +780,149 @@ Convenience and polish:
 - make destructive or high-risk actions reversible or explicitly confirmed;
 - remember filters and sort choices per user where appropriate.
 
+## Visual Design And State Cues
+
+### Visual Priority System
+
+Purpose: make urgency visible without making the whole product feel alarming.
+
+Rules:
+
+- use red only for blockers that require action before accepted state changes or final export;
+- use amber for quick confirmation, pending sync, or low-risk attention;
+- use green for accepted, linked, ready, or completed states;
+- use gray for trace-only, superseded, disabled, or secondary information;
+- do not use color alone to communicate state; pair color with text, icon, or shape.
+
+Implementation:
+
+- reserve the strongest border/background treatment for the currently active item;
+- use small chips instead of large colored panels for most statuses;
+- keep red badges numerically small and specific, such as `3 blockers`;
+- avoid turning every uncertain OCR value into an alert.
+
+### Page-Level Visual Hierarchy
+
+Purpose: make each page answer one question at a glance.
+
+Rules:
+
+- page title should be paired with the page question, for example `Focus Review` and `What needs my decision today?`;
+- first row should show only the summary needed for that page;
+- primary action should be visually obvious but not oversized;
+- secondary links should be quiet text or small outline buttons;
+- evidence-heavy content should start collapsed except in `Evidence Ledger`.
+
+Implementation:
+
+- use consistent top spacing, heading size, and control placement across pages;
+- avoid hero-scale type inside operational screens;
+- avoid nested cards; use tables, panels, drawers, and accordions instead;
+- maintain stable dimensions for sidebars, tab bars, icon buttons, chips, and table rows.
+
+### Row And Card Highlighting
+
+Purpose: show exactly where attention is needed.
+
+Rules:
+
+- if one mouse row is problematic, highlight that row, not the entire card;
+- if the source photo itself is unreliable, highlight the card-level container;
+- if an export row is blocked, show the blocked row and provide a link to the matching review item;
+- if a schedule task is blocked by review, show the task as blocked but keep its underlying due date readable.
+
+Implementation:
+
+- use a subtle tinted row background plus left accent line for selected or blocked rows;
+- keep warning chips close to the field or row they describe;
+- use hover states to reveal row actions only when actions are secondary;
+- keep primary row actions visible for `Must Review` rows.
+
+### Motion And Transitions
+
+Purpose: make state changes understandable without adding visual noise.
+
+Rules:
+
+- use short, restrained transitions for accordion expansion, drawer open/close, row apply, and status changes;
+- avoid decorative animation and persistent motion;
+- never animate source evidence in a way that makes handwriting harder to inspect.
+
+Implementation:
+
+- after `Confirm`, briefly show a row-level saved state and move the row to confirmed position only if it does not disorient the user;
+- after `Apply confirmed rows only`, keep unresolved rows visible and show exactly what was applied;
+- when a blocker is resolved, update connected badges and export readiness in place;
+- use loading skeletons that match final table/card dimensions.
+
+### Density And Spacing
+
+Purpose: keep the app efficient without becoming cramped.
+
+Rules:
+
+- use compact tables for structured state and review rows;
+- use more generous spacing around source photos and decision summaries;
+- keep schedule cards readable at a glance;
+- keep export grid dense enough to resemble a workbook.
+
+Implementation:
+
+- provide comfortable row heights for repeated review work;
+- use line clamping for long filenames, OCR snippets, and note text;
+- preserve column widths across filters and tabs;
+- prevent badge and button text from wrapping awkwardly.
+
+### Icons And Microcopy
+
+Purpose: make routine actions recognizable.
+
+Rules:
+
+- use familiar icons for zoom, rotate, open, filter, settings, calendar sync, evidence link, warning, and export;
+- label icon-only controls with tooltips;
+- use lab workflow language: photos, cage cards, mouse IDs, mating, litter, genotype, review, Excel export;
+- avoid implementation language such as internal IDs or parser state unless the user opens diagnostics.
+
+Implementation:
+
+- use `Open source photo`, not `Open artifact`;
+- use `Open supporting evidence`, not `View full timeline in Evidence Ledger`;
+- use `Needs quick confirmation`, not `Low risk`;
+- use `Preview only`, not `Editable export`.
+
+### Responsive Behavior
+
+Purpose: keep critical workflows usable on narrower screens without flattening all detail.
+
+Rules:
+
+- desktop is the primary review surface;
+- tablet/narrow layouts should preserve source photo plus active row context;
+- phone layouts may focus on schedule/checklist views before full review workflows.
+
+Implementation:
+
+- collapse left navigation to icons on narrower widths;
+- stack source photo above mouse rows when horizontal space is limited;
+- convert multi-column schedule to grouped lists on narrow screens;
+- keep Excel workbook preview horizontally scrollable rather than collapsing important columns away.
+
+### Visual QA Checklist
+
+Use this checklist before accepting implementation:
+
+- source photo is large enough to inspect or one click from zoom;
+- `Must Review` and `Quick Check` are visually distinct;
+- `Trace Only` does not look like required work;
+- unresolved row, card, task, and export blockers are visually traceable across pages;
+- accepted-state pages do not look like review queues;
+- external calendar sync appears secondary to in-app schedule;
+- Excel preview looks like a workbook but not an editable database;
+- evidence links are visible without expanding all raw evidence;
+- empty, loading, and error states do not shift layout abruptly;
+- color is never the only indicator of status.
+
 ## Implementation Notes
 
 Before implementation, map each UI object to a data boundary:
