@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+
 from app import db
 from app import main as app_main
 
@@ -352,3 +355,39 @@ def test_export_log_api_exposes_structured_provenance(tmp_path: Path) -> None:
         }
     finally:
         db.DB_PATH = old_db_path
+
+
+def test_artifact_preview_reads_json_under_artifact_root(tmp_path: Path, monkeypatch) -> None:
+    artifact_root = tmp_path / "mousedb_artifacts"
+    artifact_path = artifact_root / "export_manifests" / "manifest.json"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "artifact_type": "export_manifest",
+                "source_layer": "export or view",
+                "manifest_id": "export_manifest_test",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_main, "ARTIFACT_ROOT", artifact_root)
+
+    preview = app_main.get_artifact_preview(str(artifact_path))
+
+    assert preview["artifact_type"] == "export_manifest"
+    assert preview["source_layer"] == "export or view"
+    assert preview["relative_path"] == "export_manifests/manifest.json"
+    assert preview["artifact"]["manifest_id"] == "export_manifest_test"
+
+
+def test_artifact_preview_blocks_paths_outside_artifact_root(tmp_path: Path, monkeypatch) -> None:
+    artifact_root = tmp_path / "mousedb_artifacts"
+    outside_path = tmp_path / "outside.json"
+    outside_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(app_main, "ARTIFACT_ROOT", artifact_root)
+
+    with pytest.raises(HTTPException) as exc_info:
+        app_main.get_artifact_preview(str(outside_path))
+
+    assert exc_info.value.status_code == 400

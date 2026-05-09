@@ -9945,6 +9945,46 @@ def parse_export_log_provenance(note: str) -> dict[str, str]:
     return provenance
 
 
+def resolve_artifact_preview_path(path: str) -> Path:
+    requested = Path(str(path or ""))
+    if not str(requested).strip():
+        raise HTTPException(status_code=400, detail="Artifact path is required.")
+    if requested.is_absolute():
+        artifact_path = requested
+    else:
+        path_text = requested.as_posix()
+        if path_text == ARTIFACT_ROOT.name or path_text.startswith(f"{ARTIFACT_ROOT.name}/"):
+            artifact_path = ROOT / requested
+        else:
+            artifact_path = ARTIFACT_ROOT / requested
+    artifact_root = ARTIFACT_ROOT.resolve()
+    resolved_path = artifact_path.resolve()
+    try:
+        resolved_path.relative_to(artifact_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Artifact path must stay under mousedb_artifacts.") from exc
+    if resolved_path.suffix.lower() != ".json":
+        raise HTTPException(status_code=400, detail="Only JSON artifacts can be previewed.")
+    if not resolved_path.exists() or not resolved_path.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found.")
+    return resolved_path
+
+
+@app.get("/api/artifacts/preview")
+def get_artifact_preview(path: str) -> dict[str, Any]:
+    artifact_path = resolve_artifact_preview_path(path)
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    relative_path = artifact_path.relative_to(ARTIFACT_ROOT.resolve()).as_posix()
+    return {
+        "artifact_path": str(artifact_path),
+        "relative_path": relative_path,
+        "artifact_type": str(artifact.get("artifact_type") or ""),
+        "source_layer": str(artifact.get("source_layer") or ""),
+        "artifact": artifact,
+        "boundary": "export or view",
+    }
+
+
 @app.get("/api/export-log")
 def list_export_log() -> list[dict[str, Any]]:
     with connection() as conn:
