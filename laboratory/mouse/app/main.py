@@ -37,6 +37,7 @@ from scripts.parse_legacy_workbooks import parse_workbook
 STATIC_DIR = ROOT / "static"
 FIXTURE_PATH = ROOT / "fixtures" / "sample_parse_results.json"
 ROI_PRESET_PATH = ROOT / "config" / "roi_presets.json"
+ARTIFACT_ROOT = ROOT / "mousedb_artifacts"
 RUNTIME_OPENAI_API_KEY = ""
 ROI_CACHE_LOCK = threading.RLock()
 
@@ -3224,6 +3225,223 @@ def list_canonical_candidates() -> list[dict[str, Any]]:
     return result
 
 
+def safe_artifact_slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return slug.strip("._") or "artifact"
+
+
+def unique_nonempty(values: list[Any]) -> list[str]:
+    result: list[str] = []
+    seen = set()
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result
+
+
+def persist_proposed_changeset_artifact(
+    preview: dict[str, Any],
+    *,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    created_at = created_at or utc_now()
+    candidate_id = str(preview.get("candidate_id") or "")
+    artifact_id = f"proposed_changeset_{safe_artifact_slug(candidate_id)}"
+    proposed_mice = preview.get("proposed_mice") if isinstance(preview.get("proposed_mice"), list) else []
+    source_photo_ids = unique_nonempty([item.get("source_photo_id") for item in proposed_mice if isinstance(item, dict)])
+    note_item_ids = unique_nonempty([item.get("source_note_item_id") for item in proposed_mice if isinstance(item, dict)])
+    card_snapshot_ids = unique_nonempty([item.get("card_snapshot_id") for item in proposed_mice if isinstance(item, dict)])
+    legacy_row_ids = unique_nonempty([preview.get("legacy_row_id")])
+
+    proposed_writes = []
+    for item in proposed_mice:
+        if not isinstance(item, dict):
+            continue
+        evidence_refs = unique_nonempty(
+            [item.get("source_note_item_id"), item.get("source_photo_id"), item.get("card_snapshot_id")]
+        )
+        operation = "insert" if item.get("will_create_mouse") else "update"
+        proposed_writes.append(
+            {
+                "target_layer": "canonical structured state",
+                "target_table": "mouse_master",
+                "target_id": item.get("mouse_id") or "",
+                "operation": operation,
+                "field": "",
+                "before_value": None,
+                "after_value": {
+                    "display_id": item.get("display_id") or "",
+                    "status": item.get("status") or "",
+                    "source_note_item_id": item.get("source_note_item_id") or "",
+                    "source_photo_id": item.get("source_photo_id") or "",
+                },
+                "risk": "medium",
+                "evidence_refs": evidence_refs,
+                "review_required": False,
+            }
+        )
+        if item.get("will_create_event"):
+            proposed_writes.append(
+                {
+                    "target_layer": "canonical structured state",
+                    "target_table": "mouse_event",
+                    "target_id": "",
+                    "operation": "event_insert",
+                    "field": "",
+                    "before_value": None,
+                    "after_value": {
+                        "event_type": "canonical_candidate_applied",
+                        "mouse_id": item.get("mouse_id") or "",
+                        "related_entity_type": "canonical_candidate",
+                        "related_entity_id": candidate_id,
+                    },
+                    "risk": "medium",
+                    "evidence_refs": evidence_refs,
+                    "review_required": False,
+                }
+            )
+
+    blockers = [
+        {
+            "check_key": "canonical_apply_preview_blocker",
+            "severity": "high",
+            "message": str(blocker),
+            "evidence_refs": [],
+        }
+        for blocker in preview.get("blockers", [])
+    ]
+    artifact = {
+        "artifact_id": artifact_id,
+        "artifact_type": "proposed_changeset",
+        "source_layer": "export or view",
+        "created_at": created_at,
+        "created_by": "local_user",
+        "status": "blocked" if blockers else "draft",
+        "canonical_candidate_id": candidate_id,
+        "review_id": str(preview.get("review_id") or ""),
+        "parse_id": str(preview.get("parse_id") or ""),
+        "source_refs": {
+            "photo_ids": source_photo_ids,
+            "note_item_ids": note_item_ids,
+            "card_snapshot_ids": card_snapshot_ids,
+            "legacy_row_ids": legacy_row_ids,
+            "source_record_ids": [],
+        },
+        "proposed_writes": proposed_writes,
+        "blockers": blockers,
+        "validation_report_id": "",
+        "notes": "Generated from canonical candidate apply preview. This artifact is not canonical state.",
+    }
+    target_dir = ARTIFACT_ROOT / "proposed_changesets"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = target_dir / f"{safe_artifact_slug(candidate_id)}.json"
+    artifact_path.write_text(json.dumps(artifact, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {
+        "artifact_id": artifact_id,
+        "artifact_path": str(artifact_path),
+        "artifact": artifact,
+        "boundary": "export or view",
+    }
+
+
+def validation_report_status(checks: list[dict[str, Any]]) -> str:
+    if any(check.get("status") == "blocked" for check in checks):
+        return "blocked"
+    if any(check.get("status") == "warning" for check in checks):
+        return "warning"
+    return "pass"
+
+
+def build_canonical_apply_validation_report(
+    preview: dict[str, Any],
+    *,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    created_at = created_at or utc_now()
+    candidate_id = str(preview.get("candidate_id") or "")
+    proposed_mice = preview.get("proposed_mice") if isinstance(preview.get("proposed_mice"), list) else []
+    duplicate_risks = preview.get("duplicate_risks") if isinstance(preview.get("duplicate_risks"), list) else []
+    source_photo_ids = unique_nonempty([item.get("source_photo_id") for item in proposed_mice if isinstance(item, dict)])
+    note_item_ids = unique_nonempty([item.get("source_note_item_id") for item in proposed_mice if isinstance(item, dict)])
+    mouse_ids = unique_nonempty([item.get("mouse_id") for item in proposed_mice if isinstance(item, dict)])
+    missing_trace = [
+        item
+        for item in proposed_mice
+        if isinstance(item, dict) and (not item.get("source_note_item_id") or not item.get("source_photo_id"))
+    ]
+    checks = [
+        {
+            "check_key": "duplicate_active_mouse_id",
+            "status": "blocked" if duplicate_risks else "pass",
+            "severity": "high" if duplicate_risks else "low",
+            "message": (
+                "Active duplicate display IDs must be resolved before canonical apply."
+                if duplicate_risks
+                else "No active duplicate mouse IDs found for proposed mice."
+            ),
+            "target_refs": unique_nonempty([risk.get("candidate_mouse_id") for risk in duplicate_risks if isinstance(risk, dict)]),
+            "evidence_refs": unique_nonempty([risk.get("existing_source_note_item_id") for risk in duplicate_risks if isinstance(risk, dict)]),
+            "recommended_action": "Resolve duplicate active mouse IDs in Review Queue before applying.",
+        },
+        {
+            "check_key": "missing_source_trace",
+            "status": "blocked" if missing_trace or not proposed_mice else "pass",
+            "severity": "high" if missing_trace or not proposed_mice else "low",
+            "message": (
+                "One or more proposed mouse writes are missing source photo or note-line trace."
+                if missing_trace
+                else (
+                    "Candidate has no proposed mouse writes with source traces."
+                    if not proposed_mice
+                    else "All proposed mouse writes keep source photo and note-line trace."
+                )
+            ),
+            "target_refs": unique_nonempty([item.get("mouse_id") for item in missing_trace if isinstance(item, dict)]),
+            "evidence_refs": unique_nonempty(source_photo_ids + note_item_ids),
+            "recommended_action": "Return to photo review or candidate mapping before applying.",
+        },
+    ]
+    report = {
+        "report_id": f"validation_report_{safe_artifact_slug(candidate_id)}",
+        "artifact_type": "validation_report",
+        "source_layer": "export or view",
+        "created_at": created_at,
+        "created_by": "local_user",
+        "scope": "canonical_apply",
+        "status": validation_report_status(checks),
+        "related_artifact_id": f"proposed_changeset_{safe_artifact_slug(candidate_id)}",
+        "canonical_candidate_id": candidate_id,
+        "export_id": "",
+        "state_watermark": str(preview.get("candidate_status") or ""),
+        "source_refs": {
+            "photo_ids": source_photo_ids,
+            "parse_ids": unique_nonempty([preview.get("parse_id")]),
+            "review_ids": unique_nonempty([preview.get("review_id")]),
+            "note_item_ids": note_item_ids,
+            "mouse_ids": mouse_ids,
+        },
+        "checks": checks,
+        "summary": "Canonical apply validation report generated from apply preview; no canonical state was written.",
+    }
+    return report
+
+
+def persist_validation_report_artifact(report: dict[str, Any]) -> dict[str, Any]:
+    candidate_id = str(report.get("canonical_candidate_id") or report.get("report_id") or "candidate")
+    target_dir = ARTIFACT_ROOT / "validation_reports"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = target_dir / f"{safe_artifact_slug(candidate_id)}.json"
+    artifact_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {
+        "report_id": report["report_id"],
+        "artifact_path": str(artifact_path),
+        "artifact": report,
+        "boundary": "export or view",
+    }
+
+
 def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str, Any]:
     candidate = conn.execute(
         """
@@ -3443,6 +3661,21 @@ def canonical_candidate_audit_view(conn: Any, candidate_id: str) -> dict[str, An
 def preview_canonical_candidate_apply(candidate_id: str) -> dict[str, Any]:
     with connection() as conn:
         return canonical_candidate_apply_preview(conn, candidate_id)
+
+
+@app.post("/api/canonical-candidates/{candidate_id}/proposed-changeset-artifact")
+def create_canonical_candidate_changeset_artifact(candidate_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        preview = canonical_candidate_apply_preview(conn, candidate_id)
+    return persist_proposed_changeset_artifact(preview)
+
+
+@app.post("/api/canonical-candidates/{candidate_id}/validation-report-artifact")
+def create_canonical_candidate_validation_report_artifact(candidate_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        preview = canonical_candidate_apply_preview(conn, candidate_id)
+    report = build_canonical_apply_validation_report(preview)
+    return persist_validation_report_artifact(report)
 
 
 @app.get("/api/canonical-candidates/{candidate_id}/audit")

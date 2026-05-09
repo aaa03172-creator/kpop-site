@@ -560,6 +560,38 @@ def init_db() -> None:
                 FOREIGN KEY (source_photo_id) REFERENCES photo_log(photo_id)
             );
 
+            CREATE TABLE IF NOT EXISTS photo_evidence_item (
+                photo_evidence_id TEXT PRIMARY KEY,
+                source_photo_id TEXT NOT NULL,
+                parse_id TEXT,
+                card_snapshot_id TEXT,
+                note_item_id TEXT,
+                card_type TEXT NOT NULL DEFAULT '',
+                evidence_kind TEXT NOT NULL,
+                roi_label TEXT NOT NULL DEFAULT '',
+                bbox_json TEXT NOT NULL DEFAULT '{}',
+                observed_raw_text TEXT NOT NULL DEFAULT '',
+                ocr_text TEXT NOT NULL DEFAULT '',
+                parsed_value TEXT NOT NULL DEFAULT '',
+                confidence REAL NOT NULL DEFAULT 0,
+                interpretation TEXT NOT NULL DEFAULT '',
+                needs_review INTEGER NOT NULL DEFAULT 1,
+                review_reason TEXT NOT NULL DEFAULT '',
+                linked_mouse_id TEXT,
+                linked_cage_id TEXT,
+                linked_event_id TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (source_photo_id) REFERENCES photo_log(photo_id),
+                FOREIGN KEY (parse_id) REFERENCES parse_result(parse_id),
+                FOREIGN KEY (card_snapshot_id) REFERENCES card_snapshot(card_snapshot_id),
+                FOREIGN KEY (note_item_id) REFERENCES card_note_item_log(note_item_id),
+                FOREIGN KEY (linked_mouse_id) REFERENCES mouse_master(mouse_id),
+                FOREIGN KEY (linked_cage_id) REFERENCES cage_registry(cage_id),
+                FOREIGN KEY (linked_event_id) REFERENCES mouse_event(event_id)
+            );
+
             CREATE TABLE IF NOT EXISTS strain_target_genotype (
                 target_id TEXT PRIMARY KEY,
                 strain_text TEXT NOT NULL,
@@ -903,6 +935,16 @@ def init_db() -> None:
                 ON mouse_event(mouse_id, event_date);
             CREATE INDEX IF NOT EXISTS idx_genotyping_record_mouse
                 ON genotyping_record(mouse_id, sample_id);
+            CREATE INDEX IF NOT EXISTS idx_photo_evidence_source_photo
+                ON photo_evidence_item(source_photo_id, evidence_kind);
+            CREATE INDEX IF NOT EXISTS idx_photo_evidence_parse
+                ON photo_evidence_item(parse_id, status);
+            CREATE INDEX IF NOT EXISTS idx_photo_evidence_note
+                ON photo_evidence_item(note_item_id);
+            CREATE INDEX IF NOT EXISTS idx_photo_evidence_mouse
+                ON photo_evidence_item(linked_mouse_id, status);
+            CREATE INDEX IF NOT EXISTS idx_photo_evidence_event
+                ON photo_evidence_item(linked_event_id);
             CREATE INDEX IF NOT EXISTS idx_strain_target_genotype_strain
                 ON strain_target_genotype(strain_text, active);
             CREATE INDEX IF NOT EXISTS idx_genotype_status_master_active

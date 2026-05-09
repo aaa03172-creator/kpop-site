@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mousedb.local/schemas/validation_report.schema.json",
+  "title": "MouseDB Validation Report Artifact",
+  "description": "Deterministic self-check report for canonical apply or export readiness. The report is review evidence and does not write canonical state by itself.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_id",
+    "artifact_type",
+    "source_layer",
+    "created_at",
+    "scope",
+    "status",
+    "checks"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_type": {
+      "const": "validation_report"
+    },
+    "source_layer": {
+      "const": "export or view"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_by": {
+      "type": "string",
+      "default": "local_user"
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["canonical_apply", "export", "review_batch", "photo_parse"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pass", "warning", "blocked"]
+    },
+    "related_artifact_id": {
+      "type": "string"
+    },
+    "canonical_candidate_id": {
+      "type": "string"
+    },
+    "export_id": {
+      "type": "string"
+    },
+    "state_watermark": {
+      "description": "Optional max timestamp, hash, or version marker for the canonical/reviewed state inspected by this report.",
+      "type": "string"
+    },
+    "source_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "photo_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "parse_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "review_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "note_item_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "mouse_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "default": {}
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check_key", "status", "severity", "message"],
+        "properties": {
+          "check_key": {
+            "type": "string",
+            "enum": [
+              "duplicate_active_mouse_id",
+              "impossible_date",
+              "genotype_conflict",
+              "cage_mismatch",
+              "ambiguous_ear_label",
+              "uncertain_strike_status",
+              "count_mismatch",
+              "missing_source_trace",
+              "open_focus_review_blocker"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "warning", "blocked"]
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_refs": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "recommended_action": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "string"
+    }
+  }
+}

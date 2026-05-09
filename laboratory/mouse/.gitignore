@@ -6,6 +6,7 @@ tmp-note-evidence*.png
 tmp-critical-*.png
 tmp-image-cleanup-*.png
 data/
+mousedb_artifacts/
 .venv/
 .env
 .env.*

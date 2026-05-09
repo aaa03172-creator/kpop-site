@@ -4,7 +4,7 @@
 
 Layer classification: implementation planning / non-canonical project note.
 
-This document turns the current PRD, design notes, Korean extension design, reference adoption notes, and CLI-first MouseDB review into an implementation sequence. It does not define canonical schema or final product behavior. Canonical product behavior should continue to follow `final_mouse_colony_prd.md`, with `design.md`, `mouse_strain_colony_system_design_ko.md`, `reference_adoption_notes.md`, `mousedb_cli_first_review_ko.md`, and `AGENTS.md` used as supporting guidance.
+This document turns the current PRD, design notes, Korean extension design, reference adoption notes, CLI-first MouseDB review, and artifact workflow review into an implementation sequence. It does not define canonical schema or final product behavior. Canonical product behavior should continue to follow `final_mouse_colony_prd.md`, with `design.md`, `mouse_strain_colony_system_design_ko.md`, `reference_adoption_notes.md`, `mousedb_cli_first_review_ko.md`, `mousedb_open_design_artifact_workflow_review_ko.md`, and `AGENTS.md` used as supporting guidance.
 
 ## Target Slice
 
@@ -15,8 +15,10 @@ Build one end-to-end workflow around a single cage card photo:
 3. Display raw and normalized values side by side.
 4. Route uncertain values into review.
 5. Apply a reviewed correction with before/after traceability.
-6. Show the resulting canonical candidate state.
-7. Generate a minimal Excel export preview.
+6. Preview the canonical candidate changes before commit.
+7. Run deterministic validation gates.
+8. Show the resulting canonical candidate state.
+9. Generate a minimal Excel export preview with provenance.
 
 The slice should prove the core product loop before adding broad dashboard features.
 
@@ -34,7 +36,10 @@ The slice should prove the core product loop before adding broad dashboard featu
 | Low-confidence strain alias | review item | Do not create new strain automatically. |
 | User correction | review item plus action log | Preserve before and after values. |
 | Mouse/card/event candidate | canonical structured state candidate | Must remain traceable to source photo and note line. |
+| Proposed changeset artifact | export or view | Durable preview of proposed canonical writes; not canonical by itself. |
+| Validation report artifact | export or view | Deterministic self-check result for apply/export readiness. |
 | Separation workbook preview | export or view | Generated from structured records, not source of truth. |
+| Export manifest | export or view | Links generated workbook to accepted state, source evidence, validation report, and query/filter. |
 | OCR retry result | cache or parsed result | Must not create duplicate canonical records. |
 
 ## Recommended File/Module Shape
@@ -49,10 +54,11 @@ The current prototype is static HTML. If the project moves into application code
 | `parse_pipeline` | OCR, ROI extraction, raw field parsing, confidence. |
 | `normalization` | Date normalization, strain alias matching, genotype matching. |
 | `validation` | Required fields, count consistency, date logic, active conflict checks. |
+| `artifact_store` | Persist selected reviewable generated artifacts such as proposed changesets, validation reports, and export manifests. |
 | `review_queue` | Create review items and preserve issue context. |
 | `action_log` | Record user corrections, before/after values, and inferred changes. |
-| `canonical_writer` | Apply reviewed or policy-approved changes to structured state. |
-| `exporter` | Produce Excel previews and exports. |
+| `canonical_writer` | Apply reviewed or policy-approved changes to structured state after preview and validation pass. |
+| `exporter` | Produce Excel previews, export manifests, validation reports, and exports. |
 
 These names are planning labels, not required final file names.
 
@@ -188,6 +194,9 @@ Minimum behavior:
 - For newly separated mice, initialize genotyping workflow fields as not sampled with next action sample needed when genotyping is required.
 - Store line-level note evidence in `card_note_item_log` before writing mouse-level state.
 - Store current individual state in `mouse_master`, while preserving movement/death/genotype changes as action/event history.
+- Show an apply preview before writing canonical state.
+- Persist a proposed changeset artifact when the preview needs durable review or handoff.
+- Run a deterministic validation report before apply, including duplicate active mouse ID, impossible date, genotype conflict, cage mismatch, ambiguous ear label, uncertain strike status, count mismatch, and missing source trace checks.
 - Apply state changes and related event/action log writes in a single transaction.
 - Record litter weaning as a reviewed canonical state change on `litter_registry`, with one `weaned` mouse event per affected offspring and a before/after `litter_weaned` action log entry.
 
@@ -201,6 +210,8 @@ Acceptance checks:
 - Internal IDs stay hidden from ordinary user-facing UI.
 - Partial writes cannot leave current mouse state updated without the corresponding event/action log, or vice versa.
 - Event/action log entries preserve source evidence and before/after values when correcting or inferring high-risk state changes.
+- Apply preview is labeled as export/view and does not change `mouse_master` or event state.
+- Validation blockers prevent canonical apply until reviewed or corrected.
 
 ### Step 5A: Genotyping Worklist Planning
 
@@ -238,6 +249,8 @@ Minimum behavior:
 - Show blocked export count.
 - Show stale or failed export state.
 - Record export attempt in export log.
+- Generate or link a validation report before final export.
+- Preserve an export manifest or equivalent provenance record that links the workbook to accepted state, source evidence, validation report, query/filter, and expected filename.
 - Generate final Excel-style outputs only when the user explicitly requests an export.
 - Download `.xlsx` files from the current workbook preview using the lab filename pattern.
 - Show expected filenames before download so the user can verify date, strain, and workbook type.
@@ -250,6 +263,7 @@ Acceptance checks:
 - Export does not become the only source of truth.
 - Export behavior is upload-driven and on-demand, not tied to a monthly schedule or automated email handoff.
 - Preview rows preserve traceability in the web UI even when traceability columns are not part of the lab workbook template.
+- Export log or manifest can explain which accepted state and validation report produced the file.
 
 ## Initial Test Fixtures
 
@@ -289,6 +303,8 @@ Current verification command:
 - Per-field confidence is visible.
 - Source photo remains visible during review.
 - Review actions show before and after values.
+- Canonical candidate apply preview shows proposed writes and blockers before commit.
+- Validation reports show pass/warning/blocked checks in the review/export workflow.
 - Export Center shows blocked review item count.
 - Settings shows My Assigned Strains plus configurable strain, genotype, date/rule, and export template masters.
 - External OCR or LLM use is presented as approval-gated or local-only by default.
@@ -301,6 +317,8 @@ Current verification command:
 - Do not delete raw source photos because parsing quality is poor.
 - Do not treat Excel as the canonical database.
 - Do not create canonical records from OCR-only values unless explicit auto-fill policy allows it.
+- Do not adopt open-design as a MouseDB product runtime dependency; only borrow local-first artifact workflow patterns where they improve correctness and reviewability.
+- Do not let generated artifacts, AI output, or external design/runtime tools bypass review queue, canonical candidate preview, validation report, and transactional apply.
 - Treat labeling session rules as configurable workflow policy. Do not hard-code ApoM-specific numbering, ear-label, crossed-out, or genotyping-target behavior into generic parsers.
 - Treat breeding operation rules as configurable workflow policy. Use workbook-derived thresholds and notes for reviewable next-action suggestions, not automatic sacrifice, parent replacement, strain-specific genotype assumptions, or proof-by-missing-evidence.
 - Treat any future LLM output as parsed/intermediate data, not canonical truth.
@@ -322,11 +340,11 @@ The fixture-backed photo intake, manual transcription, comparison, review blocke
 
 Next build target:
 
-1. Add an app shell with persistent sidebar and top utility bar.
-2. Make Photo Review Workbench the first visible workflow.
-3. Convert the current long page into focused view containers without changing API behavior.
-4. Keep raw photo preview, manual transcription, evidence comparison, review queue, candidate apply/audit/void, and export readiness reachable from the shell.
-5. Preserve the rule that raw photo, manual transcription, and comparison views do not create canonical state.
-6. Run the existing local verification after the restructuring.
+1. Persist proposed changeset artifacts from the existing canonical candidate apply-preview response when the user requests a durable review record.
+2. Add deterministic validation report generation for canonical candidate apply and final export readiness.
+3. Link generated or blocked exports to a validation report and state watermark in the export provenance path.
+4. Keep the artifact files local, reviewable, and non-canonical; do not add an open-design runtime dependency.
+5. After this artifact/provenance slice is stable, continue with the app shell and Photo Review Workbench restructuring.
+6. Run the existing local verification after each slice.
 
-This keeps the next implementation focused on workflow clarity and product polish while preserving the evidence-to-review-to-export loop.
+This keeps the next implementation focused on correctness and provenance before product polish, while preserving the evidence-to-review-to-export loop.
