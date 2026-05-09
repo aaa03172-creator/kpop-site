@@ -333,6 +333,12 @@ async function main() {
   await page.getByRole("button", { name: "Review Queue" }).click();
   await page.locator("#reviewRows tr").filter({ hasText: "FIXTURE-DUPLICATE-ACTIVE" }).click();
   const duplicateReviewCount = await page.locator("#reviewRows tr").count();
+  const focusChecklist = page.locator("#focusReviewChecklist");
+  assert((await focusChecklist.filter({ hasText: "Export blocker" }).count()) === 1, "Focus Review should show export blocker status in the review drawer.");
+  assert((await focusChecklist.filter({ hasText: "Source photo evidence" }).count()) === 1, "Focus Review should keep source evidence visible in the review drawer.");
+  assert((await focusChecklist.filter({ hasText: "Parsed field" }).count()) === 1, "Focus Review should show the parsed field being corrected.");
+  assert((await focusChecklist.filter({ hasText: "Before / after" }).count()) === 1, "Focus Review should show before/after correction context.");
+  assert((await focusChecklist.filter({ hasText: "Movement decision required" }).count()) === 1, "Duplicate active mouse reviews should show the movement decision requirement.");
   await page.locator("#afterValue").fill("Reviewed duplicate without movement");
   await page.getByRole("button", { name: "Apply Reviewed Changes" }).click();
   await page.waitForTimeout(50);
