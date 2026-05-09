@@ -829,6 +829,29 @@ def main() -> None:
                     and strains[0]["alleles"][0]["gene_symbol"] == "Pvalb",
                     "Strain list should expose normalized strain-allele links while preserving legacy text fields.",
                 )
+                gene_update = client.patch(
+                    f"/api/genes/{genes[0]['gene_id']}",
+                    json={"full_name": "Parvalbumin", "description": "Curated strain registry metadata."},
+                )
+                allele_update = client.patch(
+                    f"/api/alleles/{alleles[0]['allele_id']}",
+                    json={"description": "IRES-Cre driver allele", "allele_type": "transgene"},
+                )
+                assert_true(gene_update.status_code == 200 and allele_update.status_code == 200, "Could not update gene/allele metadata.")
+                updated_gene = client.get("/api/genes").json()[0]
+                updated_allele = client.get("/api/alleles").json()[0]
+                assert_true(
+                    updated_gene["gene_symbol"] == "Pvalb"
+                    and updated_gene["full_name"] == "Parvalbumin"
+                    and updated_gene["description"] == "Curated strain registry metadata.",
+                    "Gene metadata updates should preserve raw symbol while exposing curated text.",
+                )
+                assert_true(
+                    updated_allele["allele_name"] == "Pvalb-IRES-Cre"
+                    and updated_allele["description"] == "IRES-Cre driver allele"
+                    and updated_allele["allele_type"] == "transgene",
+                    "Allele metadata updates should preserve raw allele symbol while exposing curated text.",
+                )
                 source_records = client.get("/api/source-records").json()
                 assert_true(
                     any(item["source_type"] == "manual_entry" for item in source_records),

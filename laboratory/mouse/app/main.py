@@ -91,6 +91,20 @@ class StrainRegistryCreate(BaseModel):
     source_record_id: str | None = None
 
 
+class GeneRegistryUpdate(BaseModel):
+    full_name: str = ""
+    description: str = ""
+    external_reference: str = ""
+
+
+class AlleleRegistryUpdate(BaseModel):
+    description: str = ""
+    allele_type: str = ""
+    inheritance: str = ""
+    zygosity_options: str = ""
+    genotyping_protocol: str = ""
+
+
 class CorrectionCreate(BaseModel):
     entity_type: str = Field(min_length=1)
     entity_id: str = Field(min_length=1)
@@ -2519,6 +2533,20 @@ def get_or_create_gene_master(conn: Any, gene_symbol: str, source_record_id: str
     return gene_id
 
 
+def gene_payload(row: Any) -> dict[str, Any]:
+    return {
+        "gene_id": row["gene_id"],
+        "gene_symbol": row["gene_symbol"],
+        "full_name": row["display_name"],
+        "organism": "mouse",
+        "description": row["description"],
+        "external_reference": row["external_reference"],
+        "source_record_id": row["source_record_id"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def get_or_create_allele_master(
     conn: Any,
     *,
@@ -2563,6 +2591,23 @@ def get_or_create_allele_master(
         (allele_id, clean_symbol, "", gene_id, source_record_id, 1, now, now),
     )
     return allele_id
+
+
+def allele_payload(row: Any) -> dict[str, Any]:
+    return {
+        "allele_id": row["allele_id"],
+        "gene_id": row["gene_id"] or "",
+        "gene_symbol": row["gene_symbol"] or "",
+        "allele_name": row["allele_symbol"],
+        "allele_type": row["allele_type"],
+        "description": row["display_name"],
+        "inheritance": row["inheritance"],
+        "zygosity_options": row["zygosity_options"],
+        "genotyping_protocol": row["genotyping_protocol"],
+        "source_record_id": row["source_record_id"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
 
 
 def link_strain_allele_master(
@@ -2644,26 +2689,57 @@ def list_genes() -> list[dict[str, Any]]:
     with connection() as conn:
         rows = conn.execute(
             """
-            SELECT gene_id, gene_symbol, display_name, source_record_id, created_at, updated_at
+            SELECT gene_id, gene_symbol, display_name, description, external_reference,
+                   source_record_id, created_at, updated_at
             FROM gene_master
             WHERE active = 1
             ORDER BY gene_symbol COLLATE NOCASE
             """
         ).fetchall()
-    return [
-        {
-            "gene_id": row["gene_id"],
-            "gene_symbol": row["gene_symbol"],
-            "full_name": row["display_name"],
-            "organism": "mouse",
-            "description": "",
-            "external_reference": "",
-            "source_record_id": row["source_record_id"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
-        for row in rows
-    ]
+    return [gene_payload(row) for row in rows]
+
+
+@app.patch("/api/genes/{gene_id}")
+def update_gene(gene_id: str, payload: GeneRegistryUpdate) -> dict[str, Any]:
+    updated_at = utc_now()
+    with connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT gene_id
+            FROM gene_master
+            WHERE gene_id = ? AND active = 1
+            """,
+            (gene_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Gene not found.")
+        conn.execute(
+            """
+            UPDATE gene_master
+            SET display_name = ?,
+                description = ?,
+                external_reference = ?,
+                updated_at = ?
+            WHERE gene_id = ?
+            """,
+            (
+                normalized_registry_text(payload.full_name),
+                normalized_registry_text(payload.description),
+                normalized_registry_text(payload.external_reference),
+                updated_at,
+                gene_id,
+            ),
+        )
+        row = conn.execute(
+            """
+            SELECT gene_id, gene_symbol, display_name, description, external_reference,
+                   source_record_id, created_at, updated_at
+            FROM gene_master
+            WHERE gene_id = ?
+            """,
+            (gene_id,),
+        ).fetchone()
+    return gene_payload(row)
 
 
 @app.get("/api/alleles")
@@ -2672,7 +2748,9 @@ def list_alleles() -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT allele.allele_id, allele.gene_id, gene.gene_symbol,
-                   allele.allele_symbol, allele.display_name, allele.source_record_id,
+                   allele.allele_symbol, allele.display_name, allele.allele_type,
+                   allele.inheritance, allele.zygosity_options, allele.genotyping_protocol,
+                   allele.source_record_id,
                    allele.created_at, allele.updated_at
             FROM allele_master allele
             LEFT JOIN gene_master gene ON gene.gene_id = allele.gene_id
