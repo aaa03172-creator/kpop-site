@@ -3344,6 +3344,10 @@
               </table>
             </div>
           </article>
+          <article class="export-preview-panel">
+            <h3>Artifact preview</h3>
+            <pre id="artifactPreviewJson">No artifact selected</pre>
+          </article>
         </div>
       </div>
     </section>
@@ -3387,6 +3391,11 @@
       return `<tr>${cells.map((cell) => `<td>${text(cell).replace(/[&<>"']/g, (ch) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
       }[ch]))}</td>`).join("")}</tr>`;
+    }
+
+    function artifactPreviewButton(path, label) {
+      if (!path) return `<span class="muted">--</span>`;
+      return `<button type="button" class="artifact-preview-button" data-artifact-path="${escapeHtml(path)}">${escapeHtml(label)}</button>`;
     }
 
     function escapeHtml(value) {
@@ -5329,21 +5338,35 @@
           item.review_reason || item.display_id || item.parse_id || "--"
         ])
       ).join("") || row(["No Focus Review blockers", "", "", "", ""]);
-      document.getElementById("exportLogRows").innerHTML = exportLog.map((item) =>
-        row([
-          item.filename,
-          item.export_type,
-          item.status,
-          item.row_count,
-          item.blocked_review_count,
-          item.export_manifest_path || "--",
-          item.validation_report_id || "--",
-          item.state_watermark || "--",
-          item.generated_role || "Data / Export Manager",
-          item.exported_at,
-          item.query || "--"
-        ])
-      ).join("") || row(["No exports generated yet", "", "", "", "", "", "", "", "", "", ""]);
+      document.getElementById("exportLogRows").innerHTML = exportLog.map((item) => `
+        <tr>
+          <td>${escapeHtml(item.filename)}</td>
+          <td>${escapeHtml(item.export_type)}</td>
+          <td>${escapeHtml(item.status)}</td>
+          <td>${escapeHtml(item.row_count)}</td>
+          <td>${escapeHtml(item.blocked_review_count)}</td>
+          <td>${artifactPreviewButton(item.export_manifest_path, "Manifest")}</td>
+          <td>${artifactPreviewButton(item.validation_report_path || "", "Report")}<span class="muted">${item.validation_report_path ? "" : escapeHtml(item.validation_report_id || "--")}</span></td>
+          <td>${escapeHtml(item.state_watermark || "--")}</td>
+          <td>${escapeHtml(item.generated_role || "Data / Export Manager")}</td>
+          <td>${escapeHtml(item.exported_at)}</td>
+          <td>${escapeHtml(item.query || "--")}</td>
+        </tr>
+      `).join("") || row(["No exports generated yet", "", "", "", "", "", "", "", "", "", ""]);
+      document.querySelectorAll("#exportLogRows .artifact-preview-button").forEach((button) => {
+        button.addEventListener("click", () => showArtifactPreview(button.dataset.artifactPath || ""));
+      });
+    }
+
+    async function showArtifactPreview(path) {
+      const preview = document.getElementById("artifactPreviewJson");
+      preview.textContent = "Loading artifact...";
+      try {
+        const payload = await api(`/api/artifacts/preview?path=${encodeURIComponent(path)}`);
+        preview.textContent = JSON.stringify(payload.artifact, null, 2);
+      } catch (error) {
+        preview.textContent = apiErrorMessage(error);
+      }
     }
 
     async function refresh() {

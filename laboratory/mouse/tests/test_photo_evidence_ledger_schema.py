@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 
 from app import db
-from app.main import PhotoManualTranscriptionCreate, create_photo_manual_transcription, review_item_audit_view
+from app.main import (
+    PhotoManualTranscriptionCreate,
+    apply_canonical_candidate,
+    create_photo_manual_transcription,
+    review_item_audit_view,
+)
 
 
 def test_photo_evidence_item_schema_links_photo_parse_and_note(tmp_path: Path) -> None:
@@ -343,5 +349,172 @@ def test_manual_transcription_links_review_to_photo_evidence_and_audit(tmp_path:
             and item["observed_raw_text"] == "318 R0"
             for item in audit["photo_evidence_items"]
         )
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_canonical_candidate_apply_links_note_evidence_to_created_event(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_apply_evidence",
+                    "apply-card.jpg",
+                    "data/photos/test/apply-card.jpg",
+                    "2026-05-09T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_apply_evidence",
+                    "photo_apply_evidence",
+                    "manual_photo_transcription",
+                    "{}",
+                    "2026-05-09T00:00:01Z",
+                    "review",
+                    88,
+                    1,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, status, created_at, resolved_at, resolution_note)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_apply_evidence",
+                    "parse_apply_evidence",
+                    "Medium",
+                    "Evidence comparison resolved",
+                    json.dumps({"manual": {"display_id": "318", "strain": "ApoM Tg/Tg", "dob": "2026-04-01"}}),
+                    "{}",
+                    "Reviewer accepted photo-backed note line.",
+                    "resolved",
+                    "2026-05-09T00:00:02Z",
+                    "2026-05-09T00:00:03Z",
+                    "Accepted.",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO canonical_candidate
+                    (candidate_id, review_id, parse_id, proposed_mouse_display_id,
+                     proposed_strain, proposed_dob, proposed_count, candidate_payload,
+                     status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "candidate_apply_evidence",
+                    "review_apply_evidence",
+                    "parse_apply_evidence",
+                    "318",
+                    "ApoM Tg/Tg",
+                    "2026-04-01",
+                    "1",
+                    json.dumps({"display_id": "318", "strain": "ApoM Tg/Tg", "dob": "2026-04-01"}),
+                    "draft",
+                    "2026-05-09T00:00:04Z",
+                    "2026-05-09T00:00:04Z",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, photo_id, parse_id, card_type, line_number,
+                     raw_line_text, strike_status, parsed_type, interpreted_status,
+                     parsed_mouse_display_id, parsed_ear_label_raw,
+                     parsed_ear_label_confidence, parsed_ear_label_review_status,
+                     confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "note_apply_evidence",
+                    "photo_apply_evidence",
+                    "parse_apply_evidence",
+                    "Separated",
+                    1,
+                    "318 R0",
+                    "none",
+                    "mouse_item",
+                    "active",
+                    "318",
+                    "R0",
+                    92,
+                    "verified",
+                    92,
+                    0,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO photo_evidence_item
+                    (photo_evidence_id, source_photo_id, parse_id, note_item_id,
+                     card_type, evidence_kind, roi_label, observed_raw_text,
+                     parsed_value, confidence, interpretation, needs_review,
+                     status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "pe_apply_note",
+                    "photo_apply_evidence",
+                    "parse_apply_evidence",
+                    "note_apply_evidence",
+                    "Separated",
+                    "note_line",
+                    "note_line_1",
+                    "318 R0",
+                    "318",
+                    92,
+                    "Reviewer accepted mouse note line.",
+                    0,
+                    "review_open",
+                    "2026-05-09T00:00:05Z",
+                    "2026-05-09T00:00:05Z",
+                ),
+            )
+
+        result = apply_canonical_candidate("candidate_apply_evidence")
+
+        with db.connection() as conn:
+            event = conn.execute(
+                """
+                SELECT event_id, details
+                FROM mouse_event
+                WHERE related_entity_id = ?
+                """,
+                ("candidate_apply_evidence",),
+            ).fetchone()
+            evidence = conn.execute(
+                """
+                SELECT linked_event_id, status
+                FROM photo_evidence_item
+                WHERE photo_evidence_id = ?
+                """,
+                ("pe_apply_note",),
+            ).fetchone()
+
+        details = json.loads(event["details"])
+        assert result["created_events"] == 1
+        assert details["photo_evidence_id"] == "pe_apply_note"
+        assert details["source_photo_id"] == "photo_apply_evidence"
+        assert evidence["linked_event_id"] == event["event_id"]
+        assert evidence["status"] == "linked"
     finally:
         db.DB_PATH = old_db_path

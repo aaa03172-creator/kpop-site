@@ -21,7 +21,7 @@ def main() -> None:
     index_html = INDEX_PATH.read_text(encoding="utf-8")
     main_py = MAIN_PATH.read_text(encoding="utf-8")
 
-    for number in range(1, 21):
+    for number in range(1, 27):
         acceptance_id = f"A{number:02d}"
         assert_true(acceptance_id in matrix, f"Acceptance matrix is missing {acceptance_id}.")
 
@@ -37,6 +37,11 @@ def main() -> None:
         "A13": ["canonical_candidate_voided", "Re-voiding a voided canonical candidate should be blocked"],
         "A17": ["blocked_review_items", "review_blockers"],
         "A18": ["Ready CSV export should succeed", "Ready separation XLSX export should succeed"],
+        "A22": ["photo_evidence_item", "review_evidence_link"],
+        "A23": ["Genotype result confirmation requires evidence"],
+        "A24": ["High-risk mouse events require evidence"],
+        "A25": ["validation_report"],
+        "A26": ["export_manifest"],
     }
     combined = "\n".join([matrix, local_verify, index_html, main_py])
     for acceptance_id, tokens in evidence_checks.items():

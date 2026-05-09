@@ -2792,6 +2792,34 @@ def main() -> None:
                     and workbook_export_log["state_watermark"],
                     "Workbook export log should expose manifest, validation report, and state watermark provenance.",
                 )
+                manifest_preview = client.get(
+                    "/api/artifacts/preview",
+                    params={"path": workbook_export_log["export_manifest_path"]},
+                )
+                assert_true(manifest_preview.status_code == 200, f"Could not preview export manifest artifact: {manifest_preview.text}")
+                manifest_preview_payload = manifest_preview.json()
+                assert_true(
+                    manifest_preview_payload["artifact_type"] == "export_manifest"
+                    and manifest_preview_payload["source_layer"] == "export or view"
+                    and manifest_preview_payload["artifact"]["validation_report_id"],
+                    "Artifact preview should expose the export manifest JSON without treating it as canonical state.",
+                )
+                assert_true(
+                    workbook_export_log["validation_report_path"].endswith(".json"),
+                    "Workbook export log should expose the validation report artifact path from its manifest.",
+                )
+                report_preview = client.get(
+                    "/api/artifacts/preview",
+                    params={"path": workbook_export_log["validation_report_path"]},
+                )
+                assert_true(report_preview.status_code == 200, f"Could not preview export validation report artifact: {report_preview.text}")
+                report_preview_payload = report_preview.json()
+                assert_true(
+                    report_preview_payload["artifact_type"] == "validation_report"
+                    and report_preview_payload["source_layer"] == "export or view"
+                    and report_preview_payload["artifact"]["scope"] == "export",
+                    "Artifact preview should expose the export validation report JSON as a review artifact.",
+                )
                 ready_export_log = next(item for item in ready_logs if item["export_type"] == "mouse_csv")
                 assert_true(ready_export_log["status"] == "generated", "Ready export should create a generated export log entry.")
                 assert_true(
