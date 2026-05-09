@@ -471,6 +471,35 @@ def review_check_targets(item: dict[str, Any], parse_payload: dict[str, Any] | N
     return targets[:5]
 
 
+def focus_review_workload_summary(review_items: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {"must_review": 0, "quick_check": 0}
+    for item in review_items:
+        if item.get("status") != "open":
+            continue
+        level = str(item.get("attention_level") or "")
+        if level in counts:
+            counts[level] += 1
+    return counts
+
+
+def focus_review_issue_label(item: dict[str, Any]) -> str:
+    issue = str(item.get("issue") or "").lower()
+    if "duplicate active" in issue:
+        return "Duplicate active"
+    if item.get("attention_level") == "must_review":
+        return "Must review"
+    if item.get("attention_level") == "quick_check":
+        return "Quick check"
+    return "Trace only"
+
+
+def focus_review_empty_state() -> dict[str, Any]:
+    return {
+        "message": "No Focus Review items are currently open.",
+        "fabricated_records": False,
+    }
+
+
 def ai_draft_status() -> dict[str, Any]:
     key_source = "session" if RUNTIME_OPENAI_API_KEY else ("environment" if os.environ.get("OPENAI_API_KEY") else "missing")
     return {
@@ -7058,6 +7087,116 @@ def list_review_items() -> list[dict[str, Any]]:
         payload.pop("parse_confidence", None)
         result.append(payload)
     return result
+
+
+@app.get("/api/ui/focus-review")
+def ui_focus_review() -> dict[str, Any]:
+    reviews = [item for item in list_review_items() if item.get("status") == "open"]
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in reviews:
+        group_key = str(item.get("parse_id") or item.get("photo_id") or item.get("review_id") or "")
+        grouped.setdefault(group_key, []).append(item)
+
+    with connection() as conn:
+        parse_ids = [key for key in grouped if key]
+        note_rows_by_parse: dict[str, list[dict[str, Any]]] = {}
+        snapshot_by_parse: dict[str, dict[str, Any]] = {}
+        if parse_ids:
+            placeholders = ",".join("?" for _ in parse_ids)
+            note_rows = conn.execute(
+                f"""
+                SELECT note_item_id, parse_id, card_snapshot_id, line_number, raw_line_text,
+                       parsed_mouse_display_id, interpreted_status, needs_review
+                FROM card_note_item_log
+                WHERE parse_id IN ({placeholders})
+                ORDER BY parse_id, line_number, note_item_id
+                """,
+                parse_ids,
+            ).fetchall()
+            for row in note_rows:
+                note_rows_by_parse.setdefault(str(row["parse_id"]), []).append(dict(row))
+
+            snapshot_rows = conn.execute(
+                f"""
+                SELECT card_snapshot_id, parse_id, photo_id, card_type, card_id_raw,
+                       raw_strain_text, matched_strain_text, sex_raw, sex_normalized,
+                       count_value, dob_raw, status
+                FROM card_snapshot
+                WHERE parse_id IN ({placeholders})
+                ORDER BY updated_at DESC, card_snapshot_id
+                """,
+                parse_ids,
+            ).fetchall()
+            for row in snapshot_rows:
+                snapshot_by_parse.setdefault(str(row["parse_id"]), dict(row))
+
+    cards: list[dict[str, Any]] = []
+    for parse_id, items in grouped.items():
+        first = items[0]
+        note_rows = note_rows_by_parse.get(parse_id, [])
+        snapshot = snapshot_by_parse.get(parse_id, {})
+        mouse_rows = [
+            {
+                "mouse_id": row["parsed_mouse_display_id"],
+                "raw_line": row["raw_line_text"],
+                "interpreted_status": row["interpreted_status"],
+                "needs_review": bool(row["needs_review"]),
+                "note_item_id": row["note_item_id"],
+            }
+            for row in note_rows
+            if row.get("parsed_mouse_display_id")
+        ]
+        cards.append(
+            {
+                "parse_id": parse_id,
+                "source_layer": "export or view",
+                "source_photo": {
+                    "photo_id": first.get("photo_id") or "",
+                    "filename": first.get("original_filename") or "",
+                    "image_url": first.get("image_url") or "",
+                    "source_photo_role": "primary_evidence" if first.get("photo_id") else "not_available",
+                    "open_source_photo_label": "Open source photo",
+                },
+                "card_snapshot": {
+                    "card_snapshot_id": snapshot.get("card_snapshot_id", ""),
+                    "card_type": snapshot.get("card_type", ""),
+                    "card_id_raw": snapshot.get("card_id_raw", ""),
+                    "raw_strain_text": snapshot.get("raw_strain_text", ""),
+                    "matched_strain_text": snapshot.get("matched_strain_text", ""),
+                    "status": snapshot.get("status", ""),
+                },
+                "review_count": len(items),
+                "review_items": [
+                    {
+                        "review_id": item.get("review_id"),
+                        "issue": item.get("issue"),
+                        "issue_label": focus_review_issue_label(item),
+                        "attention_level": item.get("attention_level"),
+                        "attention_reason": item.get("attention_reason"),
+                        "review_check_targets": item.get("review_check_targets", []),
+                        "evidence_preview": item.get("evidence_preview") or item.get("suggested_value") or "",
+                    }
+                    for item in items
+                ],
+                "mouse_rows": mouse_rows,
+                "collapsed_sections": {
+                    "evidence": int(bool(first.get("photo_id"))) + int(bool(snapshot)) + len(note_rows),
+                    "raw_ocr": 1 if first.get("source_name") else 0,
+                    "note_lines": len(mouse_rows),
+                    "proposed_events": 0,
+                    "review_history": len(items),
+                },
+                "actions": ["Apply confirmed rows only", "Hold card", "Open source photo"],
+            }
+        )
+
+    return {
+        "source_layer": "export or view",
+        "page_question": "What needs my decision today?",
+        "workload_summary": focus_review_workload_summary(reviews),
+        "cards": cards,
+        "empty_state": focus_review_empty_state(),
+    }
 
 
 @app.get("/api/review-items/{review_id}/audit")
