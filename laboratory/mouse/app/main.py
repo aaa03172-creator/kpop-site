@@ -733,30 +733,91 @@ def upload_batch_release_worklist(conn: Any, upload_batch_id: str) -> list[dict[
     worklist = []
     for row in rows:
         payload = dict(row)
+        photo_id = payload["photo_id"]
+        latest_transcription = conn.execute(
+            """
+            SELECT parse_id, source_name, parsed_at
+            FROM parse_result
+            WHERE photo_id = ?
+              AND source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
+            ORDER BY parsed_at DESC
+            LIMIT 1
+            """,
+            (photo_id,),
+        ).fetchone()
+        review_rows = conn.execute(
+            """
+            SELECT review.review_id, review.status, review.issue
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            WHERE parse.photo_id = ?
+            ORDER BY CASE WHEN review.status = 'open' THEN 0 ELSE 1 END,
+                     review.created_at,
+                     review.review_id
+            """,
+            (photo_id,),
+        ).fetchall()
+        comparison_review_rows = [
+            review for review in review_rows if str(review["issue"] or "").startswith("Photo transcription")
+        ]
+        candidate_rows = conn.execute(
+            """
+            SELECT candidate.candidate_id, candidate.status,
+                   candidate.proposed_mouse_display_id
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            JOIN canonical_candidate candidate ON candidate.review_id = review.review_id
+            WHERE parse.photo_id = ?
+            ORDER BY CASE WHEN candidate.status = 'applied' THEN 1 ELSE 0 END,
+                     candidate.created_at,
+                     candidate.candidate_id
+            """,
+            (photo_id,),
+        ).fetchall()
         transcription_count = int(payload["transcription_count"] or 0)
         open_review_count = int(payload["open_review_count"] or 0)
         comparison_review_count = int(payload["comparison_review_count"] or 0)
         open_comparison_review_count = int(payload["open_comparison_review_count"] or 0)
         canonical_candidate_count = int(payload["canonical_candidate_count"] or 0)
         applied_candidate_count = int(payload["applied_candidate_count"] or 0)
+        open_review = next((review for review in review_rows if review["status"] == "open"), None)
+        unapplied_candidate = next((candidate for candidate in candidate_rows if candidate["status"] != "applied"), None)
         if transcription_count == 0:
             next_action = "transcribe_photo"
             blocker = "No manual or AI transcription evidence is attached."
+            action_target_type = "photo"
+            action_target_id = photo_id
+            action_target_label = "Open photo transcription"
         elif comparison_review_count == 0:
             next_action = "create_comparison_review"
             blocker = "Create the photo transcription comparison review."
+            action_target_type = "parse_result" if latest_transcription is not None else "photo"
+            action_target_id = latest_transcription["parse_id"] if latest_transcription is not None else photo_id
+            action_target_label = "Create comparison review"
         elif open_review_count or open_comparison_review_count:
             next_action = "resolve_reviews"
             blocker = f"{open_review_count} open review item(s) remain."
+            action_target_type = "review"
+            action_target_id = open_review["review_id"] if open_review is not None else ""
+            action_target_label = open_review["issue"] if open_review is not None else "Resolve reviews"
         elif canonical_candidate_count == 0:
             next_action = "map_canonical_candidate"
             blocker = "No canonical candidate draft is linked to this photo."
+            action_target_type = "photo"
+            action_target_id = photo_id
+            action_target_label = "Open evidence mapping"
         elif applied_candidate_count < canonical_candidate_count:
             next_action = "apply_canonical_candidate"
             blocker = f"{applied_candidate_count} of {canonical_candidate_count} canonical candidate(s) applied."
+            action_target_type = "canonical_candidate"
+            action_target_id = unapplied_candidate["candidate_id"] if unapplied_candidate is not None else ""
+            action_target_label = "Apply canonical candidate"
         else:
             next_action = "ready_to_close"
             blocker = ""
+            action_target_type = "upload_batch"
+            action_target_id = upload_batch_id
+            action_target_label = "Ready"
         worklist.append(
             {
                 **payload,
@@ -768,6 +829,15 @@ def upload_batch_release_worklist(conn: Any, upload_batch_id: str) -> list[dict[
                 "applied_candidate_count": applied_candidate_count,
                 "next_action": next_action,
                 "blocker": blocker,
+                "action_target_type": action_target_type,
+                "action_target_id": action_target_id,
+                "action_target_label": action_target_label,
+                "latest_transcription_parse_id": latest_transcription["parse_id"] if latest_transcription is not None else "",
+                "review_ids": [review["review_id"] for review in review_rows],
+                "open_review_ids": [review["review_id"] for review in review_rows if review["status"] == "open"],
+                "comparison_review_ids": [review["review_id"] for review in comparison_review_rows],
+                "candidate_ids": [candidate["candidate_id"] for candidate in candidate_rows],
+                "image_url": f"/api/photos/{quote(photo_id)}/image",
                 "boundary": "export or view",
             }
         )
