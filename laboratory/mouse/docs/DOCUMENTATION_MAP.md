@@ -19,6 +19,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | Agent and implementation guardrails | `AGENTS.md` |
 | CLI usage, setup, tests, and runtime summary | `README.md` |
 | UI/workflow design direction | `design.md` |
+| Developer-only UI reference safety | `docs/ui_references.md` |
 | Current state and mismatch summary | `docs/superpowers/specs/2026-05-09-current-state-design-implementation-review.md` |
 | MVP acceptance status | `mvp_acceptance_matrix_ko.md` |
 | First end-to-end implementation sequence | `mvp_vertical_slice_plan.md` |
@@ -40,6 +41,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | File | Layer | Use |
 | --- | --- | --- |
 | `design.md` | design guidance / non-canonical product documentation | UI and workflow direction for evidence-first review, correction, and exports. |
+| `docs/ui_references.md` | design guidance / non-canonical reference policy | Developer-only UI reference research rules, including Lazyweb fake-data-only usage and local MCP/token safety. |
 | `mouse_strain_colony_system_design_ko.md` | design guidance / non-canonical project document | Broader strain registry and colony tracking design. |
 | `reference_adoption_notes.md` | design guidance / non-canonical reference adoption note | External references filtered for this project. |
 | `mouse_open_source_research_adoption_ko.md` | design guidance / non-canonical reference adoption note | Open-source mouse colony research adoption notes. |
