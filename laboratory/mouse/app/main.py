@@ -3920,6 +3920,49 @@ def load_labeling_rule_sample_mapping(conn: Any, rule_set_id: str) -> str:
     return str(row["sample_mapping"] or "").strip() if row else ""
 
 
+@app.get("/api/labeling-rule-sets")
+def list_labeling_rule_sets() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT rule_set_id, display_name, applies_to_strain_text, session_date,
+                   numbering_order, mouse_number_scope, ear_sequence_scope,
+                   crossed_out_handling, sample_mapping, genotyping_target, active
+            FROM labeling_rule_set
+            ORDER BY active DESC, session_date DESC, display_name
+            """
+        ).fetchall()
+        sequence_rows = conn.execute(
+            """
+            SELECT rule_set_id, ear_label_code
+            FROM labeling_rule_ear_sequence
+            ORDER BY rule_set_id, sequence_index
+            """
+        ).fetchall()
+
+    sequences: dict[str, list[str]] = {}
+    for row in sequence_rows:
+        sequences.setdefault(str(row["rule_set_id"]), []).append(str(row["ear_label_code"]))
+
+    return [
+        {
+            "rule_set_id": row["rule_set_id"],
+            "display_name": row["display_name"],
+            "applies_to_strain_text": row["applies_to_strain_text"],
+            "session_date": row["session_date"],
+            "numbering_order": row["numbering_order"],
+            "mouse_number_scope": row["mouse_number_scope"],
+            "ear_sequence_scope": row["ear_sequence_scope"],
+            "crossed_out_handling": row["crossed_out_handling"],
+            "sample_mapping": row["sample_mapping"],
+            "genotyping_target": row["genotyping_target"],
+            "active": bool(row["active"]),
+            "ear_label_sequence": sequences.get(str(row["rule_set_id"]), []),
+        }
+        for row in rows
+    ]
+
+
 def active_mouse_note_count(record: dict[str, Any]) -> int:
     card_type = str(record.get("type") or "unknown").lower()
     notes = record.get("notes") if isinstance(record.get("notes"), list) else []

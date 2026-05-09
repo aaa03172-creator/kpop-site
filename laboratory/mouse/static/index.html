@@ -440,6 +440,32 @@
       gap: 10px;
       align-items: end;
     }
+    .rule-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 8px;
+      margin: 8px 0 14px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fbfa;
+    }
+    .rule-summary span,
+    .rule-summary strong {
+      display: block;
+      overflow-wrap: anywhere;
+    }
+    .rule-summary span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .rule-summary strong {
+      margin-top: 2px;
+      font-size: 12px;
+    }
     .review-controls {
       display: grid;
       grid-template-columns: repeat(3, minmax(120px, 1fr));
@@ -3049,6 +3075,10 @@
           <select id="requestGenotypingMouse"></select>
         </label>
         <label>
+          Labeling rule
+          <select id="requestLabelingRuleSet"></select>
+        </label>
+        <label>
           Sample ID
           <input id="requestSampleId" type="text" placeholder="Tail-MT321">
         </label>
@@ -3058,6 +3088,7 @@
         </label>
         <button id="requestGenotypingButton" type="button">Request Genotyping</button>
       </div>
+      <div class="rule-summary" id="requestLabelingRuleSummary" aria-label="Selected labeling rule policy"></div>
       <p class="muted" id="requestGenotypingMessage"></p>
       <div class="form-grid">
         <label>
@@ -3318,6 +3349,7 @@
     let photoPreviewFitMode = true;
     let roiPreviewRequestId = 0;
     let currentAiStatus = { available: false };
+    let selectedLabelingRuleSetId = "";
     async function api(path, options) {
       const response = await fetch(path, options);
       if (!response.ok) {
@@ -3325,6 +3357,16 @@
         throw new Error(detail || response.statusText);
       }
       return response.json();
+    }
+
+    function apiErrorMessage(error) {
+      const raw = String(error?.message || error || "Request failed.");
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed.detail || raw;
+      } catch (_err) {
+        return raw;
+      }
     }
 
     function text(value) {
@@ -4770,6 +4812,43 @@
       `;
     }
 
+    function labelingRuleOption(rule) {
+      const active = rule.active ? "active" : "inactive";
+      const date = rule.session_date || "no date";
+      return `<option value="${escapeHtml(rule.rule_set_id)}">${escapeHtml(rule.display_name)} (${escapeHtml(date)}, ${escapeHtml(active)})</option>`;
+    }
+
+    function renderLabelingRuleSummary(rule) {
+      if (!rule) {
+        return `
+          <div><span>Rule</span><strong>No labeling rule selected</strong></div>
+          <div><span>Sample mapping</span><strong>Manual review</strong></div>
+        `;
+      }
+      const sequence = (rule.ear_label_sequence || []).slice(0, 6).join(" -> ") || "--";
+      return `
+        <div><span>Rule</span><strong>${escapeHtml(rule.display_name)}</strong></div>
+        <div><span>Strain/session</span><strong>${escapeHtml(rule.applies_to_strain_text || "--")} / ${escapeHtml(rule.session_date || "--")}</strong></div>
+        <div><span>Sample mapping</span><strong>${escapeHtml(rule.sample_mapping || "review")}</strong></div>
+        <div><span>Default target</span><strong>${escapeHtml(rule.genotyping_target || "--")}</strong></div>
+        <div><span>Crossed-out lines</span><strong>${escapeHtml(rule.crossed_out_handling || "review")}</strong></div>
+        <div><span>Ear sequence</span><strong>${escapeHtml(sequence)}</strong></div>
+      `;
+    }
+
+    function updateLabelingRuleControls(rules) {
+      const select = document.getElementById("requestLabelingRuleSet");
+      const activeRules = (rules || []).filter((rule) => rule.active);
+      const visibleRules = activeRules.length ? activeRules : (rules || []);
+      if (!selectedLabelingRuleSetId || !visibleRules.some((rule) => rule.rule_set_id === selectedLabelingRuleSetId)) {
+        selectedLabelingRuleSetId = visibleRules[0]?.rule_set_id || "";
+      }
+      select.innerHTML = visibleRules.map(labelingRuleOption).join("") || `<option value="">No labeling rule</option>`;
+      select.value = selectedLabelingRuleSetId;
+      const selectedRule = visibleRules.find((rule) => rule.rule_set_id === selectedLabelingRuleSetId);
+      document.getElementById("requestLabelingRuleSummary").innerHTML = renderLabelingRuleSummary(selectedRule);
+    }
+
     function renderNoteEvidenceOverview(noteItems) {
       const total = noteItems.length;
       const mouseLines = noteItems.filter((item) => item.parsed_type === "mouse_item").length;
@@ -5193,7 +5272,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, photos, reviews, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, photos, reviews, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -5219,6 +5298,7 @@
         api("/api/review-vocabulary"),
         api("/api/experiment-readiness"),
         api("/api/genotyping-dashboard"),
+        api("/api/labeling-rule-sets"),
         api("/api/export-preview"),
         api("/api/export-log")
       ]);
@@ -5574,6 +5654,7 @@
       document.getElementById("requestGenotypingMouse").innerHTML = mice.map((mouse) =>
         `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.next_action || "")}</option>`
       ).join("");
+      updateLabelingRuleControls(labelingRuleSets);
       document.getElementById("genotypingMouse").innerHTML = mice.map((mouse) =>
         `<option value="${escapeHtml(mouse.mouse_id)}">${escapeHtml(mouse.display_id)} ${escapeHtml(mouse.ear_label_raw || "")}</option>`
       ).join("");
@@ -6311,21 +6392,31 @@
         document.getElementById("requestGenotypingMessage").textContent = "Choose a mouse first.";
         return;
       }
-      const requested = await api("/api/genotyping/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mouse_id: mouseId,
-          sample_id: document.getElementById("requestSampleId").value.trim(),
-          target_name: document.getElementById("requestTargetName").value.trim(),
-          note: "Requested from local Genotyping Worklist."
-        })
-      });
-      document.getElementById("requestGenotypingMessage").textContent =
-        `Requested sample ${requested.sample_id || "--"}; source evidence ${requested.source_record_id}.`;
-      document.getElementById("requestSampleId").value = "";
-      document.getElementById("requestTargetName").value = "";
-      await refresh();
+      try {
+        const requested = await api("/api/genotyping/request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mouse_id: mouseId,
+            sample_id: document.getElementById("requestSampleId").value.trim(),
+            target_name: document.getElementById("requestTargetName").value.trim(),
+            labeling_rule_set_id: selectedLabelingRuleSetId,
+            note: "Requested from local Genotyping Worklist."
+          })
+        });
+        document.getElementById("requestGenotypingMessage").textContent =
+          `Requested sample ${requested.sample_id || "--"}; source evidence ${requested.source_record_id}.`;
+        document.getElementById("requestSampleId").value = "";
+        document.getElementById("requestTargetName").value = "";
+        await refresh();
+      } catch (error) {
+        document.getElementById("requestGenotypingMessage").textContent = apiErrorMessage(error);
+      }
+    });
+
+    document.getElementById("requestLabelingRuleSet").addEventListener("change", (event) => {
+      selectedLabelingRuleSetId = event.target.value;
+      refresh();
     });
 
     document.getElementById("genotypingButton").addEventListener("click", async () => {

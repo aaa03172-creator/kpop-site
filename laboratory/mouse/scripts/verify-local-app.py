@@ -637,6 +637,8 @@ def main() -> None:
                 assert_true("Create Offspring" in index_html, "Local UI should expose litter offspring generation.")
                 assert_true("Complete Weaning" in index_html, "Local UI should expose litter weaning completion.")
                 assert_true("Request Genotyping" in index_html, "Local UI should expose genotyping request workflow.")
+                assert_true("requestLabelingRuleSet" in index_html, "Local UI should expose labeling rule selection for genotyping requests.")
+                assert_true("/api/labeling-rule-sets" in index_html, "Local UI should fetch labeling rule policy.")
                 assert_true("Target genotype" in index_html, "Local UI should expose configurable target genotype rules.")
                 assert_true("genotypingDashboard" in index_html, "Local UI should expose genotyping dashboard cards.")
                 assert_true("genotypeStatusRows" in index_html and "Genotype status vocabulary" in index_html, "Local UI should expose genotype status vocabulary.")

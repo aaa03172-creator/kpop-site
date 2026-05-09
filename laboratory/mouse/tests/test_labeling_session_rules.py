@@ -14,6 +14,7 @@ from app.labeling_rules import (
 from app.main import (
     GenotypingRequestCreate,
     create_card_snapshot,
+    list_labeling_rule_sets,
     request_genotyping,
     write_note_items_and_mouse_candidates,
 )
@@ -360,6 +361,24 @@ def test_genotyping_request_uses_rule_set_default_target_without_overwriting_sam
         assert record["mouse_id"] == "mouse_24"
         assert record["sample_id"] == "24"
         assert record["target_name"] == "ApoM-tg"
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_labeling_rule_api_lists_active_rule_with_sequence(tmp_path):
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+
+        rules = list_labeling_rule_sets()
+
+        [rule] = [item for item in rules if item["rule_set_id"] == "label_rule_apom_tgtg_20260506"]
+        assert rule["display_name"] == "ApoM Tg/Tg 2026-05-06"
+        assert rule["active"] is True
+        assert rule["sample_mapping"] == "sample_id_equals_mouse_display_id"
+        assert rule["genotyping_target"] == "ApoM-tg"
+        assert rule["ear_label_sequence"][:2] == ["R_PRIME", "L_PRIME"]
     finally:
         db.DB_PATH = old_db_path
 
