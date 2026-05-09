@@ -1618,6 +1618,8 @@ Labeling session rule sets are configurable parsed/intermediate workflow policy,
 
 Rule application must preserve raw note text, raw ear-label tokens, raw sample IDs, and source photo links. Expected ear-label codes, inferred dead candidates, and genotyping target defaults should remain traceable processing assumptions until existing review/canonical writer paths accept them with before/after evidence.
 
+When a selected rule set declares that sample IDs equal mouse display IDs, genotyping submission should verify the sample ID against active mouse display IDs before writing a genotyping record or updating the mouse's latest sample state. Unmatched, duplicate, or different-mouse matches must be blocked or routed to review rather than silently attached to the requested mouse.
+
 ## 19. Risks And Mitigations
 
 | Risk | Mitigation |
