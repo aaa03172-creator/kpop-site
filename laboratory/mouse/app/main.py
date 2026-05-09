@@ -3313,8 +3313,36 @@ def list_corrections() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def optional_existing_source_record_id(conn: Any, source_record_id: str | None) -> str | None:
+    clean_id = str(source_record_id or "").strip()
+    if not clean_id:
+        return None
+    exists = conn.execute(
+        "SELECT 1 FROM source_record WHERE source_record_id = ?",
+        (clean_id,),
+    ).fetchone()
+    if exists is None:
+        raise HTTPException(status_code=400, detail="source_record_id does not exist.")
+    return clean_id
+
+
+def optional_existing_review_id(conn: Any, review_id: str | None) -> str | None:
+    clean_id = str(review_id or "").strip()
+    if not clean_id:
+        return None
+    exists = conn.execute(
+        "SELECT 1 FROM review_queue WHERE review_id = ?",
+        (clean_id,),
+    ).fetchone()
+    if exists is None:
+        raise HTTPException(status_code=400, detail="review_id does not exist.")
+    return clean_id
+
+
 def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -> str:
     correction_id = new_id("correction")
+    source_record_id = optional_existing_source_record_id(conn, payload.source_record_id)
+    review_id = optional_existing_review_id(conn, payload.review_id)
     conn.execute(
         """
         INSERT INTO correction_log
@@ -3331,8 +3359,8 @@ def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -
             payload.before_value,
             payload.after_value,
             payload.reason,
-            payload.source_record_id,
-            payload.review_id,
+            source_record_id,
+            review_id,
             corrected_at,
         ),
     )
