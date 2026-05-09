@@ -543,6 +543,13 @@ def colony_schedule_empty_state() -> dict[str, Any]:
     }
 
 
+def mouse_timeline_empty_state() -> dict[str, Any]:
+    return {
+        "message": "Choose a mouse to view accepted timeline events.",
+        "fabricated_records": False,
+    }
+
+
 def colony_litter_action_hint(
     birth_date: str,
     rule_set: dict[str, Any],
@@ -7875,6 +7882,163 @@ def ui_colony_schedule(as_of: str = "") -> dict[str, Any]:
             "note": "External calendar sync can mirror accepted schedule tasks later; it is not canonical.",
         },
         "empty_state": colony_schedule_empty_state(),
+    }
+
+
+@app.get("/api/ui/mouse-timeline")
+def ui_mouse_timeline(mouse_id: str = "") -> dict[str, Any]:
+    selected_mouse_id = mouse_id.strip()
+    with connection() as conn:
+        attention_counts = open_review_attention_counts(conn)
+        if not selected_mouse_id:
+            must_review = int(attention_counts.get("must_review", 0))
+            quick_check = int(attention_counts.get("quick_check", 0))
+            return {
+                "source_layer": "export or view",
+                "page_question": "How did this mouse get here?",
+                "mouse": None,
+                "summary": {
+                    "accepted_events": 0,
+                    "source_records": 0,
+                    "must_review": must_review,
+                    "quick_check": quick_check,
+                },
+                "lineage": {"father": None, "mother": None, "litter": None},
+                "events": [],
+                "attention_links": [],
+                "empty_state": mouse_timeline_empty_state(),
+            }
+
+        mouse = conn.execute(
+            """
+            SELECT mouse_id, display_id, status, raw_strain_text, father_id, mother_id, litter_id
+            FROM mouse_master
+            WHERE mouse_id = ? OR display_id = ?
+            """,
+            (selected_mouse_id, selected_mouse_id),
+        ).fetchone()
+        if mouse is None:
+            raise HTTPException(status_code=404, detail="Mouse not found.")
+
+        event_rows = conn.execute(
+            """
+            SELECT event_id, mouse_id, event_type, event_date, related_entity_type,
+                   related_entity_id, source_record_id, details, created_by, created_at
+            FROM mouse_event
+            WHERE mouse_id = ?
+            ORDER BY event_date, created_at, event_id
+            """,
+            (mouse["mouse_id"],),
+        ).fetchall()
+        litter = (
+            conn.execute(
+                """
+                SELECT l.litter_id, l.litter_label, l.mating_id, m.mating_label,
+                       l.birth_date
+                FROM litter_registry l
+                LEFT JOIN mating_registry m ON m.mating_id = l.mating_id
+                WHERE l.litter_id = ?
+                """,
+                (mouse["litter_id"],),
+            ).fetchone()
+            if mouse["litter_id"]
+            else None
+        )
+        father = (
+            conn.execute(
+                "SELECT mouse_id, display_id, status, raw_strain_text FROM mouse_master WHERE mouse_id = ?",
+                (mouse["father_id"],),
+            ).fetchone()
+            if mouse["father_id"]
+            else None
+        )
+        mother = (
+            conn.execute(
+                "SELECT mouse_id, display_id, status, raw_strain_text FROM mouse_master WHERE mouse_id = ?",
+                (mouse["mother_id"],),
+            ).fetchone()
+            if mouse["mother_id"]
+            else None
+        )
+        source_ids = sorted({row["source_record_id"] for row in event_rows if row["source_record_id"]})
+        source_rows: dict[str, dict[str, Any]] = {}
+        if source_ids:
+            placeholders = ", ".join("?" for _ in source_ids)
+            rows = conn.execute(
+                f"""
+                SELECT source_record_id, source_type, source_label
+                FROM source_record
+                WHERE source_record_id IN ({placeholders})
+                """,
+                source_ids,
+            ).fetchall()
+            source_rows = {row["source_record_id"]: dict(row) for row in rows}
+
+    must_review = int(attention_counts.get("must_review", 0))
+    quick_check = int(attention_counts.get("quick_check", 0))
+    events = []
+    for row in event_rows:
+        source = source_rows.get(row["source_record_id"] or "", {})
+        events.append(
+            {
+                "event_id": row["event_id"],
+                "event_type": row["event_type"],
+                "event_date": row["event_date"],
+                "label": row["event_type"],
+                "source_layer": "canonical structured state",
+                "related_entity": {
+                    "entity_type": row["related_entity_type"] or "",
+                    "entity_id": row["related_entity_id"] or "",
+                },
+                "source_evidence": {
+                    "source_record_id": row["source_record_id"] or "",
+                    "source_label": source.get("source_label", ""),
+                    "source_type": source.get("source_type", ""),
+                },
+            }
+        )
+
+    attention_links = []
+    if must_review or quick_check:
+        attention_links.append(
+            {
+                "label": "Open Focus Review",
+                "target_path": "/api/ui/focus-review",
+                "must_review": must_review,
+                "quick_check": quick_check,
+            }
+        )
+
+    return {
+        "source_layer": "export or view",
+        "page_question": "How did this mouse get here?",
+        "mouse": {
+            "mouse_id": mouse["mouse_id"],
+            "display_id": mouse["display_id"],
+            "status": mouse["status"],
+            "strain": mouse["raw_strain_text"],
+            "litter_id": mouse["litter_id"] or "",
+        },
+        "summary": {
+            "accepted_events": len(events),
+            "source_records": len(source_rows),
+            "must_review": must_review,
+            "quick_check": quick_check,
+        },
+        "lineage": {
+            "father": dict(father) if father else None,
+            "mother": dict(mother) if mother else None,
+            "litter": {
+                "litter_id": litter["litter_id"],
+                "litter_label": litter["litter_label"],
+                "mating_id": litter["mating_id"],
+                "mating_label": litter["mating_label"],
+                "birth_date": litter["birth_date"],
+            } if litter else None,
+        },
+        "events": events,
+        "attention_links": attention_links,
+        "empty_state": mouse_timeline_empty_state(),
     }
 
 
