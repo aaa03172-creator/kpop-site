@@ -151,6 +151,16 @@ OPENAI_PARSE_ASSIST_MODEL=gpt-5.2
 
 `.env.local` is ignored by Git. Alternatively, set `OPENAI_API_KEY` in your shell or Windows user environment before starting the server.
 
+## Cage Card Safety Evals
+
+`evals/cage_card_skill_gym/` is a non-canonical offline verification layer. It contains review/test probes for cage-card workflow safety, such as raw photo grounding, Excel-as-view handling, review routing, traceability, and no direct canonical writes from uncertain OCR or imported rows.
+
+It does not change runtime behavior, database schema, API contracts, `AGENTS.md`, or product workflow. Use it as a guardrail before changing extraction guidance, review rules, or future skill instructions:
+
+```powershell
+npm run test:cage-card-skill-gym
+```
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
@@ -171,6 +181,7 @@ The repository also keeps the browser prototype and local FastAPI scaffold check
 ```powershell
 npm test
 npm run test:local
+npm run test:cage-card-skill-gym
 npm run test:python
 npm run verify
 ```

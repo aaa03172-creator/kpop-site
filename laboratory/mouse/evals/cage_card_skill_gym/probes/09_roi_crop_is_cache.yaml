@@ -1,0 +1,14 @@
+{
+  "probe_id": "roi_crop_is_cache_not_raw_source",
+  "taxonomy": "photo_roi_grounding",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "A generated ROI crop is used to help read fields from an original cage-card photo.",
+  "expected": {
+    "boundary": "cache",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_or_approved_only"
+  }
+}
