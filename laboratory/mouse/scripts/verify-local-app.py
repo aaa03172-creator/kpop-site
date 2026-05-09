@@ -2101,6 +2101,13 @@ def main() -> None:
                     any(item["category"] in {"note_line", "mouse_event", "review"} for item in audit_payload["timeline"]),
                     "Mouse audit trace should combine note, event, or review evidence in one timeline.",
                 )
+                genotyping_evidence_record_id = genotyping_target.get("source_record_id") or (
+                    audit_payload["source_records"][0]["source_record_id"] if audit_payload["source_records"] else ""
+                )
+                assert_true(
+                    bool(genotyping_evidence_record_id),
+                    "Genotyping result verification needs source evidence for the target mouse.",
+                )
                 target_rule = client.post(
                     "/api/strain-target-genotypes",
                     json={
@@ -2314,9 +2321,13 @@ def main() -> None:
                         "sample_id": "MT321",
                         "raw_result": "Tg/Tg",
                         "normalized_result": "Tg/Tg",
+                        "source_record_id": genotyping_evidence_record_id,
                     },
                 )
-                assert_true(genotyping_update.status_code == 200, "Could not update genotyping workflow state.")
+                assert_true(
+                    genotyping_update.status_code == 200,
+                    f"Could not update genotyping workflow state: {genotyping_update.status_code} {genotyping_update.text}",
+                )
                 genotyping_payload = genotyping_update.json()
                 assert_true(genotyping_payload["genotyping_status"] == "resulted", "Genotyping result should mark mouse resulted.")
                 assert_true(genotyping_payload["target_match_status"] == "matches_target", "Genotyping result should use configured target matching.")
@@ -2771,6 +2782,15 @@ def main() -> None:
                 assert_true(
                     any(item["export_type"] == "animal_sheet_xlsx" and item["status"] == "generated" for item in ready_logs),
                     "Export log should record generated animal sheet XLSX exports.",
+                )
+                workbook_export_log = next(
+                    item for item in ready_logs if item["export_type"] == "separation_xlsx" and item["status"] == "generated"
+                )
+                assert_true(
+                    workbook_export_log["export_manifest_path"].endswith(".json")
+                    and workbook_export_log["validation_report_id"].startswith("validation_report_export_separation_xlsx")
+                    and workbook_export_log["state_watermark"],
+                    "Workbook export log should expose manifest, validation report, and state watermark provenance.",
                 )
                 ready_export_log = next(item for item in ready_logs if item["export_type"] == "mouse_csv")
                 assert_true(ready_export_log["status"] == "generated", "Ready export should create a generated export log entry.")

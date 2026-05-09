@@ -12,12 +12,14 @@ Adopted project documents:
 - `open_source_acceleration_candidates_ko.md`: non-canonical technical reference note for open-source libraries that may reduce implementation time or improve local performance.
 - `open_source_acceleration_doublecheck_ko.md`: non-canonical double-check note that prioritizes acceleration candidates after license, fit, and MVP-risk review.
 - `roi_card_extraction_plan_ko.md`: non-canonical implementation planning note for ROI-based cage-card extraction and reviewable field evidence.
+- `pvm_photo_evidence_ledger_adoption_ko.md`: non-canonical adoption review that translates Persistent Visual Memory into a MouseDB workflow-level Photo Evidence Ledger, not model training or VLM internals.
 - `wet_lab_operational_review_ko.md`: non-canonical operational review note from a wet-lab workflow perspective.
 - `ui_image_usage_improvement_plan_ko.md`: non-canonical UI review note for reducing decorative image noise while preserving evidence-first workflows.
 - `review_burden_reduction_plan_ko.md`: non-canonical workflow planning note for separating Focus Review blockers from quick checks and trace-only uncertainty.
 - `selective_normalization_controls_plan_ko.md`: non-canonical workflow planning note for keeping raw evidence separate while using bounded selection controls for normalized/reviewed values.
 - `mvp_vertical_slice_plan.md`: non-canonical implementation planning note for the first end-to-end workflow.
 - `mousedb_cli_first_review_ko.md`: non-canonical review note for a standalone CLI-first MouseDB core that can later be called by PaperPipe, a personal Research Assistant, API, or MCP server.
+- `mousedb_open_design_artifact_workflow_review_ko.md`: non-canonical architecture review that rejects open-design as a MouseDB runtime dependency while adopting structure-only artifact lifecycle, preview-before-commit, validation report, and export provenance patterns.
 
 ## 1. Product Summary
 
@@ -30,7 +32,8 @@ The system does not replace the lab workflow. Researchers will continue writing 
 3. Auto-fill mouse, cage/card, mating, litter, genotype, and event records.
 4. Run validation checks to catch likely errors.
 5. Send only uncertain or conflicting items to a review queue.
-6. Export/update records in the existing lab Excel formats.
+6. Preview proposed canonical changes before applying them.
+7. Export/update records in the existing lab Excel formats.
 
 The intended first version is for the user's own assigned strains, but the design must not hard-code strain names, genotype categories, protocols, or date rules.
 
@@ -1493,6 +1496,15 @@ Exports are generated on demand by the user, not automatically on a monthly sche
 
 The system may show a manual handoff checklist, but MVP should not automate email sending.
 
+Export logs should also preserve provenance for the generated artifact when available:
+
+- the validation report or readiness check used before export;
+- the canonical state watermark, source max timestamp, or equivalent state marker used to generate the file;
+- source photo IDs, note item IDs, card snapshot IDs, or imported workbook row IDs represented in the export;
+- the export preview query/filter and expected filename shown to the user before download.
+
+If final export is blocked, the blocked export log entry should preserve the intended filename, blocker count, and blocker preview without creating a misleading workbook artifact.
+
 ## 16. MVP Scope
 
 ### 16.1 MVP 1: Personal Usable System
@@ -1509,6 +1521,8 @@ Must include:
 - note item log,
 - action log,
 - review queue,
+- preview-before-commit for canonical candidates,
+- validation report for canonical apply and final export readiness,
 - dashboard,
 - separation export,
 - animalsheet export.
@@ -1582,7 +1596,10 @@ The system must store:
 - confidence,
 - validation issues,
 - action logs,
-- export history.
+- export history,
+- proposed changeset artifacts when a durable apply preview is needed,
+- validation report artifacts for canonical apply and export readiness,
+- export manifests that connect generated files to source evidence and accepted state.
 
 For CLI-first MouseDB tables and commands, source/evidence traceability should be included from the beginning where feasible. Important canonical records and events should be able to reference a source photo, note item, imported Excel row, manual entry, or CLI action.
 
@@ -1595,6 +1612,8 @@ Minimum traceability fields to consider on imported, parsed, canonical, or event
 - `raw_value` where applicable,
 - `normalized_value` where applicable.
 
+File-backed artifacts should be used selectively for reviewable generated outputs, not as a parallel database. A project-local artifact root may contain proposed changesets, validation reports, review batches, export manifests, and generated exports. Real lab photos, real workbook exports, and generated reports from real data should not be committed by default.
+
 ### 18.3 Safety
 
 Every auto-filled value should be traceable to:
@@ -1605,6 +1624,8 @@ Every auto-filled value should be traceable to:
 - action log entry.
 
 State-changing operations that update current structured state and create history must be transactional. For example, cage movement should update the mouse's current cage and create a movement event in the same transaction. Genotype recording should create the genotype result and the related mouse event together. Partial writes are not acceptable for mouse-relevant state changes.
+
+High-risk state changes should use preview-before-commit. Parsed photo drafts, imported workbook rows, AI suggestions, and inferred movements should create review items or canonical candidates first. The user should be able to inspect the proposed writes, source evidence, blockers, and validation report before `mouse_master`, cage, mating, litter, genotype, or event state is updated.
 
 MouseEvent or action log entries should be append-only by default. Corrections and inferred state changes should preserve previous and new values instead of silently rewriting history.
 
@@ -1629,6 +1650,26 @@ Workbook notes and animal sheet patterns may suggest defaults such as mating par
 Rule conflicts should be resolved by evidence strength, source recency, and accepted policy scope. Missing workbook/photo evidence should not be treated as proof that an event did not happen; unresolved or biologically unlikely cases should become review items with the conflicting fields and assumed rule shown.
 
 Strain-specific notes such as "all pups are Tg" must remain strain-specific candidate configuration. They should not become global genotype logic because inheritance patterns, genotype categories, and management targets differ by strain and cross.
+
+### 18.6 Artifact Workflow And External Runtime Adoption
+
+MouseDB should not adopt open-design as a product runtime dependency for MVP. open-design is useful as an architectural reference for local-first artifact storage, preview-before-commit, sandboxed preview, generated-output self-check, and export provenance, but MouseDB must remain a colony evidence and audit system rather than a design generator.
+
+Structure-only adoption is acceptable:
+
+- proposed changeset artifacts for durable apply previews;
+- validation report artifacts for deterministic self-check gates;
+- export manifests that link generated Excel files to accepted state and source evidence;
+- review batch artifacts when a batch needs a stable handoff record;
+- plain JSON/Markdown contracts for artifacts that should be reviewable outside the database.
+
+Runtime adoption is not acceptable for MVP:
+
+- do not add the open-design daemon;
+- do not add design skill marketplace behavior;
+- do not treat design-system files as MouseDB parser/rule masters;
+- do not let an agent or AI artifact writer bypass MouseDB review and canonical apply paths;
+- do not send real lab records to external design or inference tools as part of this workflow.
 
 ## 19. Risks And Mitigations
 

@@ -37,6 +37,7 @@ from scripts.parse_legacy_workbooks import parse_workbook
 STATIC_DIR = ROOT / "static"
 FIXTURE_PATH = ROOT / "fixtures" / "sample_parse_results.json"
 ROI_PRESET_PATH = ROOT / "config" / "roi_presets.json"
+ARTIFACT_ROOT = ROOT / "mousedb_artifacts"
 RUNTIME_OPENAI_API_KEY = ""
 ROI_CACHE_LOCK = threading.RLock()
 
@@ -182,6 +183,9 @@ class GenotypingUpdate(BaseModel):
     result_date: str = ""
     target_name: str = ""
     notes: str = ""
+    source_record_id: str | None = None
+    source_photo_id: str | None = None
+    photo_evidence_id: str | None = None
 
 
 class GenotypingRequestCreate(BaseModel):
@@ -2682,6 +2686,22 @@ def review_item_audit_view(conn: Any, review_id: str) -> dict[str, Any]:
         """,
         (review_id,),
     ).fetchall()
+    photo_evidence_rows = conn.execute(
+        """
+        SELECT evidence.source_photo_id, evidence.parse_id, evidence.note_item_id,
+               evidence.card_type, evidence.evidence_kind, evidence.roi_label,
+               evidence.observed_raw_text, evidence.ocr_text, evidence.parsed_value,
+               evidence.confidence, evidence.needs_review, evidence.review_reason,
+               evidence.status
+        FROM review_evidence_link link
+        JOIN photo_evidence_item evidence
+          ON evidence.photo_evidence_id = link.photo_evidence_id
+        WHERE link.review_id = ?
+        ORDER BY evidence.evidence_kind, evidence.roi_label,
+                 evidence.observed_raw_text, evidence.photo_evidence_id
+        """,
+        (review_id,),
+    ).fetchall()
     action_rows = conn.execute(
         """
         SELECT action_id, action_type, target_id, before_value, after_value,
@@ -2705,10 +2725,12 @@ def review_item_audit_view(conn: Any, review_id: str) -> dict[str, Any]:
         "boundary": "export or view",
         "review": review,
         "note_items": [dict(row) for row in note_rows],
+        "photo_evidence_items": [dict(row) for row in photo_evidence_rows],
         "corrections": [dict(row) for row in correction_rows],
         "actions": actions,
         "summary": {
             "note_item_count": len(note_rows),
+            "photo_evidence_count": len(photo_evidence_rows),
             "correction_count": len(correction_rows),
             "action_count": len(actions),
             "has_photo": bool(review.get("photo_id")),
@@ -3224,6 +3246,416 @@ def list_canonical_candidates() -> list[dict[str, Any]]:
     return result
 
 
+def safe_artifact_slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return slug.strip("._") or "artifact"
+
+
+def unique_nonempty(values: list[Any]) -> list[str]:
+    result: list[str] = []
+    seen = set()
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result
+
+
+def persist_proposed_changeset_artifact(
+    preview: dict[str, Any],
+    *,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    created_at = created_at or utc_now()
+    candidate_id = str(preview.get("candidate_id") or "")
+    artifact_id = f"proposed_changeset_{safe_artifact_slug(candidate_id)}"
+    proposed_mice = preview.get("proposed_mice") if isinstance(preview.get("proposed_mice"), list) else []
+    source_photo_ids = unique_nonempty([item.get("source_photo_id") for item in proposed_mice if isinstance(item, dict)])
+    note_item_ids = unique_nonempty([item.get("source_note_item_id") for item in proposed_mice if isinstance(item, dict)])
+    card_snapshot_ids = unique_nonempty([item.get("card_snapshot_id") for item in proposed_mice if isinstance(item, dict)])
+    legacy_row_ids = unique_nonempty([preview.get("legacy_row_id")])
+
+    proposed_writes = []
+    for item in proposed_mice:
+        if not isinstance(item, dict):
+            continue
+        evidence_refs = unique_nonempty(
+            [item.get("source_note_item_id"), item.get("source_photo_id"), item.get("card_snapshot_id")]
+        )
+        operation = "insert" if item.get("will_create_mouse") else "update"
+        proposed_writes.append(
+            {
+                "target_layer": "canonical structured state",
+                "target_table": "mouse_master",
+                "target_id": item.get("mouse_id") or "",
+                "operation": operation,
+                "field": "",
+                "before_value": None,
+                "after_value": {
+                    "display_id": item.get("display_id") or "",
+                    "status": item.get("status") or "",
+                    "source_note_item_id": item.get("source_note_item_id") or "",
+                    "source_photo_id": item.get("source_photo_id") or "",
+                },
+                "risk": "medium",
+                "evidence_refs": evidence_refs,
+                "review_required": False,
+            }
+        )
+        if item.get("will_create_event"):
+            proposed_writes.append(
+                {
+                    "target_layer": "canonical structured state",
+                    "target_table": "mouse_event",
+                    "target_id": "",
+                    "operation": "event_insert",
+                    "field": "",
+                    "before_value": None,
+                    "after_value": {
+                        "event_type": "canonical_candidate_applied",
+                        "mouse_id": item.get("mouse_id") or "",
+                        "related_entity_type": "canonical_candidate",
+                        "related_entity_id": candidate_id,
+                    },
+                    "risk": "medium",
+                    "evidence_refs": evidence_refs,
+                    "review_required": False,
+                }
+            )
+
+    blockers = [
+        {
+            "check_key": "canonical_apply_preview_blocker",
+            "severity": "high",
+            "message": str(blocker),
+            "evidence_refs": [],
+        }
+        for blocker in preview.get("blockers", [])
+    ]
+    artifact = {
+        "artifact_id": artifact_id,
+        "artifact_type": "proposed_changeset",
+        "source_layer": "export or view",
+        "created_at": created_at,
+        "created_by": "local_user",
+        "status": "blocked" if blockers else "draft",
+        "canonical_candidate_id": candidate_id,
+        "review_id": str(preview.get("review_id") or ""),
+        "parse_id": str(preview.get("parse_id") or ""),
+        "source_refs": {
+            "photo_ids": source_photo_ids,
+            "note_item_ids": note_item_ids,
+            "card_snapshot_ids": card_snapshot_ids,
+            "legacy_row_ids": legacy_row_ids,
+            "source_record_ids": [],
+        },
+        "proposed_writes": proposed_writes,
+        "blockers": blockers,
+        "validation_report_id": "",
+        "notes": "Generated from canonical candidate apply preview. This artifact is not canonical state.",
+    }
+    target_dir = ARTIFACT_ROOT / "proposed_changesets"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = target_dir / f"{safe_artifact_slug(candidate_id)}.json"
+    artifact_path.write_text(json.dumps(artifact, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {
+        "artifact_id": artifact_id,
+        "artifact_path": str(artifact_path),
+        "artifact": artifact,
+        "boundary": "export or view",
+    }
+
+
+def validation_report_status(checks: list[dict[str, Any]]) -> str:
+    if any(check.get("status") == "blocked" for check in checks):
+        return "blocked"
+    if any(check.get("status") == "warning" for check in checks):
+        return "warning"
+    return "pass"
+
+
+def build_canonical_apply_validation_report(
+    preview: dict[str, Any],
+    *,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    created_at = created_at or utc_now()
+    candidate_id = str(preview.get("candidate_id") or "")
+    proposed_mice = preview.get("proposed_mice") if isinstance(preview.get("proposed_mice"), list) else []
+    duplicate_risks = preview.get("duplicate_risks") if isinstance(preview.get("duplicate_risks"), list) else []
+    source_photo_ids = unique_nonempty([item.get("source_photo_id") for item in proposed_mice if isinstance(item, dict)])
+    note_item_ids = unique_nonempty([item.get("source_note_item_id") for item in proposed_mice if isinstance(item, dict)])
+    mouse_ids = unique_nonempty([item.get("mouse_id") for item in proposed_mice if isinstance(item, dict)])
+    missing_trace = [
+        item
+        for item in proposed_mice
+        if isinstance(item, dict) and (not item.get("source_note_item_id") or not item.get("source_photo_id"))
+    ]
+    checks = [
+        {
+            "check_key": "duplicate_active_mouse_id",
+            "status": "blocked" if duplicate_risks else "pass",
+            "severity": "high" if duplicate_risks else "low",
+            "message": (
+                "Active duplicate display IDs must be resolved before canonical apply."
+                if duplicate_risks
+                else "No active duplicate mouse IDs found for proposed mice."
+            ),
+            "target_refs": unique_nonempty([risk.get("candidate_mouse_id") for risk in duplicate_risks if isinstance(risk, dict)]),
+            "evidence_refs": unique_nonempty([risk.get("existing_source_note_item_id") for risk in duplicate_risks if isinstance(risk, dict)]),
+            "recommended_action": "Resolve duplicate active mouse IDs in Review Queue before applying.",
+        },
+        {
+            "check_key": "missing_source_trace",
+            "status": "blocked" if missing_trace or not proposed_mice else "pass",
+            "severity": "high" if missing_trace or not proposed_mice else "low",
+            "message": (
+                "One or more proposed mouse writes are missing source photo or note-line trace."
+                if missing_trace
+                else (
+                    "Candidate has no proposed mouse writes with source traces."
+                    if not proposed_mice
+                    else "All proposed mouse writes keep source photo and note-line trace."
+                )
+            ),
+            "target_refs": unique_nonempty([item.get("mouse_id") for item in missing_trace if isinstance(item, dict)]),
+            "evidence_refs": unique_nonempty(source_photo_ids + note_item_ids),
+            "recommended_action": "Return to photo review or candidate mapping before applying.",
+        },
+    ]
+    report = {
+        "report_id": f"validation_report_{safe_artifact_slug(candidate_id)}",
+        "artifact_type": "validation_report",
+        "source_layer": "export or view",
+        "created_at": created_at,
+        "created_by": "local_user",
+        "scope": "canonical_apply",
+        "status": validation_report_status(checks),
+        "related_artifact_id": f"proposed_changeset_{safe_artifact_slug(candidate_id)}",
+        "canonical_candidate_id": candidate_id,
+        "export_id": "",
+        "state_watermark": str(preview.get("candidate_status") or ""),
+        "source_refs": {
+            "photo_ids": source_photo_ids,
+            "parse_ids": unique_nonempty([preview.get("parse_id")]),
+            "review_ids": unique_nonempty([preview.get("review_id")]),
+            "note_item_ids": note_item_ids,
+            "mouse_ids": mouse_ids,
+        },
+        "checks": checks,
+        "summary": "Canonical apply validation report generated from apply preview; no canonical state was written.",
+    }
+    return report
+
+
+def persist_validation_report_artifact(report: dict[str, Any]) -> dict[str, Any]:
+    candidate_id = str(report.get("canonical_candidate_id") or report.get("report_id") or "candidate")
+    target_dir = ARTIFACT_ROOT / "validation_reports"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = target_dir / f"{safe_artifact_slug(candidate_id)}.json"
+    artifact_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {
+        "report_id": report["report_id"],
+        "artifact_path": str(artifact_path),
+        "artifact": report,
+        "boundary": "export or view",
+    }
+
+
+def split_export_ref_values(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return unique_nonempty(value)
+    return unique_nonempty(str(value or "").replace(";", ",").split(","))
+
+
+def build_export_validation_report(
+    preview: dict[str, Any],
+    *,
+    export_type: str,
+    query: str = "",
+    filename: str = "",
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    created_at = created_at or utc_now()
+    review_blockers = preview.get("review_blockers") if isinstance(preview.get("review_blockers"), list) else []
+    blocked_review_count = int(preview.get("blocked_review_items") or len(review_blockers) or 0)
+    export_rows = []
+    trace_rows = []
+    if export_type == "animal_sheet_xlsx":
+        export_rows = preview.get("animal_sheet_rows") if isinstance(preview.get("animal_sheet_rows"), list) else []
+        trace_rows = export_rows
+    elif export_type == "separation_xlsx":
+        export_rows = preview.get("separation_rows") if isinstance(preview.get("separation_rows"), list) else []
+        trace_rows = preview.get("preview_rows") if isinstance(preview.get("preview_rows"), list) else export_rows
+    else:
+        export_rows = preview.get("preview_rows") if isinstance(preview.get("preview_rows"), list) else []
+        trace_rows = export_rows
+
+    photo_ids: list[str] = []
+    note_item_ids: list[str] = []
+    mouse_ids: list[str] = []
+    for row in trace_rows:
+        if not isinstance(row, dict):
+            continue
+        photo_ids.extend(split_export_ref_values(row.get("source_photo_ids") or row.get("source_photo_id")))
+        note_item_ids.extend(split_export_ref_values(row.get("source_note_item_ids") or row.get("source_note_item_id") or row.get("source")))
+        mouse_ids.extend(split_export_ref_values(row.get("mouse_id")))
+    review_ids = unique_nonempty(
+        [item.get("review_id") for item in review_blockers if isinstance(item, dict)]
+    )
+    checks = [
+        {
+            "check_key": "open_focus_review_blocker",
+            "status": "blocked" if blocked_review_count else "pass",
+            "severity": "high" if blocked_review_count else "low",
+            "message": (
+                f"{blocked_review_count} Focus Review blocker(s) remain open before final export."
+                if blocked_review_count
+                else "No Focus Review blockers remain for final export."
+            ),
+            "target_refs": review_ids,
+            "evidence_refs": review_ids,
+            "recommended_action": "Resolve Focus Review blockers before generating final export.",
+        },
+        {
+            "check_key": "missing_source_trace",
+            "status": "warning" if export_rows and not unique_nonempty(photo_ids + note_item_ids) else "pass",
+            "severity": "medium" if export_rows and not unique_nonempty(photo_ids + note_item_ids) else "low",
+            "message": (
+                "Export rows are present but source photo/note trace could not be found in preview rows."
+                if export_rows and not unique_nonempty(photo_ids + note_item_ids)
+                else "Export preview includes source trace or has no rows to export."
+            ),
+            "target_refs": unique_nonempty(mouse_ids),
+            "evidence_refs": unique_nonempty(photo_ids + note_item_ids),
+            "recommended_action": "Review export trace sheet before handoff.",
+        },
+    ]
+    report_id = f"validation_report_export_{safe_artifact_slug(export_type)}_{safe_artifact_slug(query or filename or 'all')}"
+    return {
+        "report_id": report_id,
+        "artifact_type": "validation_report",
+        "source_layer": "export or view",
+        "created_at": created_at,
+        "created_by": "local_user",
+        "scope": "export",
+        "status": validation_report_status(checks),
+        "related_artifact_id": "",
+        "canonical_candidate_id": "",
+        "export_id": "",
+        "state_watermark": str(preview.get("latest_data_change_at") or ""),
+        "source_refs": {
+            "photo_ids": unique_nonempty(photo_ids),
+            "parse_ids": [],
+            "review_ids": review_ids,
+            "note_item_ids": unique_nonempty(note_item_ids),
+            "mouse_ids": unique_nonempty(mouse_ids),
+        },
+        "checks": checks,
+        "summary": (
+            f"Export validation report for {export_type}; "
+            f"query={query.strip() or 'all'}, filename={filename or 'not selected'}."
+        ),
+    }
+
+
+def build_export_manifest(
+    *,
+    export_type: str,
+    filename: str,
+    query: str,
+    status: str,
+    row_count: int,
+    blocked_review_count: int,
+    validation_report: dict[str, Any],
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    created_at = created_at or utc_now()
+    report_artifact = validation_report.get("artifact") if isinstance(validation_report.get("artifact"), dict) else {}
+    source_refs = report_artifact.get("source_refs") if isinstance(report_artifact.get("source_refs"), dict) else {}
+    manifest_id = (
+        f"export_manifest_{safe_artifact_slug(export_type)}_"
+        f"{safe_artifact_slug(query or filename or created_at)}"
+    )
+    return {
+        "manifest_id": manifest_id,
+        "artifact_type": "export_manifest",
+        "source_layer": "export or view",
+        "created_at": created_at,
+        "created_by": "local_user",
+        "export_type": export_type,
+        "filename": filename,
+        "query": query.strip(),
+        "status": status,
+        "row_count": int(row_count),
+        "blocked_review_count": int(blocked_review_count),
+        "validation_report_id": str(validation_report.get("report_id") or report_artifact.get("report_id") or ""),
+        "validation_report_path": str(validation_report.get("artifact_path") or ""),
+        "state_watermark": str(report_artifact.get("state_watermark") or ""),
+        "source_refs": {
+            "photo_ids": unique_nonempty(source_refs.get("photo_ids", [])),
+            "note_item_ids": unique_nonempty(source_refs.get("note_item_ids", [])),
+            "review_ids": unique_nonempty(source_refs.get("review_ids", [])),
+            "mouse_ids": unique_nonempty(source_refs.get("mouse_ids", [])),
+        },
+        "notes": "Generated from export preview and validation report. This manifest is not canonical state.",
+    }
+
+
+def persist_export_manifest_artifact(manifest: dict[str, Any]) -> dict[str, Any]:
+    export_type = str(manifest.get("export_type") or "export")
+    filename = str(manifest.get("filename") or manifest.get("manifest_id") or "manifest")
+    target_dir = ARTIFACT_ROOT / "export_manifests"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = target_dir / f"{safe_artifact_slug(export_type)}_{safe_artifact_slug(filename)}.json"
+    artifact_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {
+        "manifest_id": manifest["manifest_id"],
+        "artifact_path": str(artifact_path),
+        "artifact": manifest,
+        "boundary": "export or view",
+    }
+
+
+def create_export_provenance_artifacts(
+    preview: dict[str, Any],
+    *,
+    export_type: str,
+    filename: str,
+    query: str,
+    status: str,
+    row_count: int,
+    blocked_review_count: int,
+) -> dict[str, Any]:
+    validation_report = persist_validation_report_artifact(
+        build_export_validation_report(
+            preview,
+            export_type=export_type,
+            query=query,
+            filename=filename,
+        )
+    )
+    manifest = persist_export_manifest_artifact(
+        build_export_manifest(
+            export_type=export_type,
+            filename=filename,
+            query=query,
+            status=status,
+            row_count=row_count,
+            blocked_review_count=blocked_review_count,
+            validation_report=validation_report,
+        )
+    )
+    return {
+        "validation_report": validation_report,
+        "manifest": manifest,
+        "manifest_artifact_path": manifest["artifact_path"],
+        "validation_report_id": validation_report["report_id"],
+        "state_watermark": manifest["artifact"].get("state_watermark", ""),
+    }
+
+
 def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str, Any]:
     candidate = conn.execute(
         """
@@ -3443,6 +3875,21 @@ def canonical_candidate_audit_view(conn: Any, candidate_id: str) -> dict[str, An
 def preview_canonical_candidate_apply(candidate_id: str) -> dict[str, Any]:
     with connection() as conn:
         return canonical_candidate_apply_preview(conn, candidate_id)
+
+
+@app.post("/api/canonical-candidates/{candidate_id}/proposed-changeset-artifact")
+def create_canonical_candidate_changeset_artifact(candidate_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        preview = canonical_candidate_apply_preview(conn, candidate_id)
+    return persist_proposed_changeset_artifact(preview)
+
+
+@app.post("/api/canonical-candidates/{candidate_id}/validation-report-artifact")
+def create_canonical_candidate_validation_report_artifact(candidate_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        preview = canonical_candidate_apply_preview(conn, candidate_id)
+    report = build_canonical_apply_validation_report(preview)
+    return persist_validation_report_artifact(report)
 
 
 @app.get("/api/canonical-candidates/{candidate_id}/audit")
@@ -3805,6 +4252,84 @@ def list_mouse_events() -> list[dict[str, Any]]:
     return result
 
 
+HIGH_RISK_MOUSE_EVENT_KEYWORDS = {
+    "death",
+    "dead",
+    "sacrifice",
+    "sacrificed",
+    "euthanasia",
+    "euthanized",
+    "separation",
+    "separated",
+    "wean",
+    "weaned",
+    "move",
+    "moved",
+    "transfer",
+    "transferred",
+    "mating",
+    "mate",
+    "paired",
+    "pairing",
+    "litter",
+    "genotype",
+    "genotyped",
+    "genotyping",
+}
+
+
+def is_high_risk_mouse_event(event_type: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(event_type or "").lower()).strip("_")
+    tokens = {token for token in normalized.split("_") if token}
+    return normalized in HIGH_RISK_MOUSE_EVENT_KEYWORDS or bool(tokens & HIGH_RISK_MOUSE_EVENT_KEYWORDS)
+
+
+def validate_mouse_event_evidence(conn: Any, payload: MouseEventCreate) -> None:
+    details = payload.details or {}
+    source_record_id = payload.source_record_id
+    source_photo_id = str(details.get("source_photo_id") or "").strip()
+    photo_evidence_id = str(details.get("photo_evidence_id") or "").strip()
+    source_note_item_id = str(details.get("source_note_item_id") or "").strip()
+
+    if source_record_id:
+        exists = conn.execute(
+            "SELECT 1 FROM source_record WHERE source_record_id = ?",
+            (source_record_id,),
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=400, detail="source_record_id does not exist.")
+    if source_photo_id:
+        exists = conn.execute("SELECT 1 FROM photo_log WHERE photo_id = ?", (source_photo_id,)).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=400, detail="source_photo_id does not exist.")
+    if photo_evidence_id:
+        exists = conn.execute(
+            "SELECT 1 FROM photo_evidence_item WHERE photo_evidence_id = ?",
+            (photo_evidence_id,),
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=400, detail="photo_evidence_id does not exist.")
+    if source_note_item_id:
+        exists = conn.execute(
+            "SELECT 1 FROM card_note_item_log WHERE note_item_id = ?",
+            (source_note_item_id,),
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=400, detail="source_note_item_id does not exist.")
+
+    if is_high_risk_mouse_event(payload.event_type) and not any(
+        [source_record_id, source_photo_id, photo_evidence_id, source_note_item_id]
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "High-risk mouse events require evidence before canonical commit: "
+                "source_record_id, details.source_photo_id, details.photo_evidence_id, "
+                "or details.source_note_item_id."
+            ),
+        )
+
+
 @app.post("/api/mouse-events")
 def create_mouse_event(payload: MouseEventCreate) -> dict[str, Any]:
     event_id = new_id("event")
@@ -3817,6 +4342,7 @@ def create_mouse_event(payload: MouseEventCreate) -> dict[str, Any]:
         ).fetchone()
         if exists is None:
             raise HTTPException(status_code=404, detail="Mouse not found.")
+        validate_mouse_event_evidence(conn, payload)
         conn.execute(
             """
             INSERT INTO mouse_event
@@ -4661,6 +5187,176 @@ def refresh_card_snapshot_summary(conn: Any, card_snapshot_id: str, updated_at: 
         (json.dumps(summary, ensure_ascii=False), status, updated_at, card_snapshot_id),
     )
     return {"card_snapshot_id": card_snapshot_id, "status": status, "note_summary": summary}
+
+
+PHOTO_EVIDENCE_FIELD_MAP = {
+    "raw_strain": ("rawStrain", "raw_strain"),
+    "matched_strain": ("matchedStrain", "raw_strain"),
+    "sex_raw": ("sexRaw", "sex_raw"),
+    "sex_normalized": ("sexNormalized", "sex_raw"),
+    "id_raw": ("idRaw", "id_raw"),
+    "dob_raw": ("dobRaw", "dob_raw"),
+    "dob_normalized": ("dobNormalized", "dob_raw"),
+    "mating_date_raw": ("matingDateRaw", "mating_date_raw"),
+    "mating_date_normalized": ("matingDateNormalized", "mating_date_raw"),
+    "lmo_raw": ("lmoRaw", "lmo_raw"),
+    "mouse_count": ("mouseCount", "sex_raw"),
+}
+
+
+def roi_label_for_field(record: dict[str, Any], field_name: str) -> str:
+    for region in record.get("extractionRegions") or []:
+        if not isinstance(region, dict):
+            continue
+        target_fields = region.get("targetFields") if isinstance(region.get("targetFields"), list) else []
+        if field_name in {str(field).strip() for field in target_fields}:
+            return str(region.get("label") or field_name)
+    return PHOTO_EVIDENCE_FIELD_MAP.get(field_name, ("", field_name))[1]
+
+
+def write_photo_evidence_items(
+    conn: Any,
+    *,
+    parse_id: str,
+    photo_id: str,
+    card_snapshot_id: str,
+    record: dict[str, Any],
+    created_at: str,
+) -> int:
+    uncertain_fields = {
+        normalize_uncertain_field_name(field)
+        for field in record.get("uncertainFields", [])
+        if normalize_uncertain_field_name(field)
+    }
+    card_type = str(record.get("type") or "")
+    written = 0
+
+    for field_name, (record_key, _default_roi) in PHOTO_EVIDENCE_FIELD_MAP.items():
+        observed_value = str(record.get(record_key) or "").strip()
+        if not observed_value:
+            continue
+        needs_review = 1 if field_name in uncertain_fields else 0
+        review_reason = f"Field {field_name} was marked uncertain by the transcription draft." if needs_review else ""
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO photo_evidence_item
+                (photo_evidence_id, source_photo_id, parse_id, card_snapshot_id,
+                 card_type, evidence_kind, roi_label, observed_raw_text,
+                 ocr_text, parsed_value, confidence, interpretation,
+                 needs_review, review_reason, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"pe_{parse_id}_{field_name}",
+                photo_id,
+                parse_id,
+                card_snapshot_id or None,
+                card_type,
+                "card_field",
+                roi_label_for_field(record, field_name),
+                observed_value,
+                observed_value,
+                observed_value,
+                bounded_float(record.get("confidence")),
+                "",
+                needs_review,
+                review_reason,
+                "review_open" if needs_review else "draft",
+                created_at,
+                created_at,
+            ),
+        )
+        written += 1
+
+    note_rows = conn.execute(
+        """
+        SELECT note_item_id, card_type, raw_line_text, parsed_type,
+               parsed_mouse_display_id, parsed_ear_label_raw,
+               parsed_ear_label_code, confidence, needs_review
+        FROM card_note_item_log
+        WHERE parse_id = ?
+        ORDER BY line_number
+        """,
+        (parse_id,),
+    ).fetchall()
+    for row in note_rows:
+        parsed_bits = [
+            str(row["parsed_type"] or ""),
+            str(row["parsed_mouse_display_id"] or ""),
+            str(row["parsed_ear_label_code"] or row["parsed_ear_label_raw"] or ""),
+        ]
+        parsed_value = " ".join(bit for bit in parsed_bits if bit).strip()
+        needs_review = int(row["needs_review"] or 0)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO photo_evidence_item
+                (photo_evidence_id, source_photo_id, parse_id, card_snapshot_id,
+                 note_item_id, card_type, evidence_kind, roi_label,
+                 observed_raw_text, ocr_text, parsed_value, confidence,
+                 interpretation, needs_review, review_reason, status,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"pe_{row['note_item_id']}",
+                photo_id,
+                parse_id,
+                card_snapshot_id or None,
+                row["note_item_id"],
+                row["card_type"] or card_type,
+                "note_line",
+                roi_label_for_field(record, "notes"),
+                row["raw_line_text"] or "",
+                row["raw_line_text"] or "",
+                parsed_value,
+                bounded_float(row["confidence"]),
+                "",
+                needs_review,
+                "Note line requires review before canonical use." if needs_review else "",
+                "review_open" if needs_review else "draft",
+                created_at,
+                created_at,
+            ),
+        )
+        written += 1
+
+    return written
+
+
+def link_review_to_photo_evidence_items(
+    conn: Any,
+    *,
+    review_id: str,
+    parse_id: str,
+    created_at: str,
+) -> int:
+    evidence_rows = conn.execute(
+        """
+        SELECT photo_evidence_id
+        FROM photo_evidence_item
+        WHERE parse_id = ?
+        ORDER BY evidence_kind, roi_label, observed_raw_text, photo_evidence_id
+        """,
+        (parse_id,),
+    ).fetchall()
+    linked = 0
+    for row in evidence_rows:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO review_evidence_link
+                (link_id, review_id, photo_evidence_id, link_reason, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                f"rel_{review_id}_{row['photo_evidence_id']}",
+                review_id,
+                row["photo_evidence_id"],
+                "Review the parsed transcription against linked photo evidence before canonical writes.",
+                created_at,
+            ),
+        )
+        linked += max(cursor.rowcount, 0)
+    return linked
 
 
 def validation_review_for_record(conn: Any, record: dict[str, Any], status: str) -> dict[str, str] | None:
@@ -5700,6 +6396,14 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             "review",
             card_snapshot_id,
         )
+        evidence_count = write_photo_evidence_items(
+            conn,
+            parse_id=parse_id,
+            photo_id=photo_id,
+            card_snapshot_id=card_snapshot_id,
+            record=record,
+            created_at=now,
+        )
         review_id = f"review_{parse_id}"
         conn.execute(
             """
@@ -5719,6 +6423,12 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                 "open",
                 now,
             ),
+        )
+        linked_evidence_count = link_review_to_photo_evidence_items(
+            conn,
+            review_id=review_id,
+            parse_id=parse_id,
+            created_at=now,
         )
         conn.execute("UPDATE photo_log SET status = ? WHERE photo_id = ?", ("transcribed_review_pending", photo_id))
         photo_review_rows = conn.execute(
@@ -5765,6 +6475,8 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                     "card_snapshot_id": card_snapshot_id,
                     "review_id": review_id,
                     "note_count": note_count,
+                    "evidence_count": evidence_count,
+                    "linked_evidence_count": linked_evidence_count,
                     "source_name": source_name,
                     "resolved_photo_review_items": len(resolved_photo_review_ids),
                     "superseded_ai_parse_ids": superseded_ai["superseded_parse_ids"],
@@ -5782,6 +6494,8 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
         "card_snapshot_id": card_snapshot_id,
         "photo_id": photo_id,
         "created_note_items": note_count,
+        "created_photo_evidence_items": evidence_count,
+        "linked_photo_evidence_items": linked_evidence_count,
         "created_mouse_candidates": mouse_count,
         "created_ear_review_items": ear_review_count,
         "resolved_photo_review_items": len(resolved_photo_review_ids),
@@ -6157,6 +6871,55 @@ def suggested_genotyping_fields(normalized_result: str, target: dict[str, str] |
     }
 
 
+def genotyping_result_evidence_refs(conn: Any, payload: GenotypingUpdate, normalized_result: str) -> dict[str, str | None]:
+    if not normalized_result:
+        return {
+            "source_record_id": payload.source_record_id,
+            "source_photo_id": payload.source_photo_id,
+            "photo_evidence_id": payload.photo_evidence_id,
+        }
+
+    source_record_id = payload.source_record_id
+    source_photo_id = payload.source_photo_id
+    photo_evidence_id = payload.photo_evidence_id
+    if photo_evidence_id:
+        evidence = conn.execute(
+            """
+            SELECT photo_evidence_id, source_photo_id
+            FROM photo_evidence_item
+            WHERE photo_evidence_id = ?
+            """,
+            (photo_evidence_id,),
+        ).fetchone()
+        if evidence is None:
+            raise HTTPException(status_code=400, detail="photo_evidence_id does not exist.")
+        source_photo_id = source_photo_id or evidence["source_photo_id"]
+    if source_photo_id:
+        photo = conn.execute("SELECT 1 FROM photo_log WHERE photo_id = ?", (source_photo_id,)).fetchone()
+        if photo is None:
+            raise HTTPException(status_code=400, detail="source_photo_id does not exist.")
+    if source_record_id:
+        source = conn.execute(
+            "SELECT 1 FROM source_record WHERE source_record_id = ?",
+            (source_record_id,),
+        ).fetchone()
+        if source is None:
+            raise HTTPException(status_code=400, detail="source_record_id does not exist.")
+    if not any([source_record_id, source_photo_id, photo_evidence_id]):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Genotype result confirmation requires evidence: provide source_photo_id, "
+                "photo_evidence_id, or source_record_id."
+            ),
+        )
+    return {
+        "source_record_id": source_record_id,
+        "source_photo_id": source_photo_id,
+        "photo_evidence_id": photo_evidence_id,
+    }
+
+
 @app.post("/api/genotyping/update")
 def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
     updated_at = utc_now()
@@ -6176,6 +6939,7 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
         if existing is None:
             raise HTTPException(status_code=404, detail="Mouse not found.")
         before = dict(existing)
+        evidence_refs = genotyping_result_evidence_refs(conn, payload, normalized_result)
         target = target_suggestion(conn, existing, normalized_result) if normalized_result else None
         suggestions = suggested_genotyping_fields(normalized_result, target)
         conn.execute(
@@ -6217,8 +6981,9 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
             INSERT INTO genotyping_record
                 (genotyping_id, mouse_id, sample_id, sample_date, result_date,
                  target_name, raw_result, normalized_result, result_status,
+                 source_photo_id, source_record_id, photo_evidence_id,
                  confidence, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record_id,
@@ -6230,6 +6995,9 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
                 payload.raw_result,
                 normalized_result,
                 suggestions["genotyping_status"] if suggestions["genotyping_status"] != "sampled" else "pending",
+                evidence_refs["source_photo_id"],
+                evidence_refs["source_record_id"],
+                evidence_refs["photo_evidence_id"],
                 1.0 if normalized_result else 0.8,
                 payload.notes,
                 updated_at,
@@ -6256,10 +7024,40 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
                 "genotyping_resulted" if normalized_result else "sample_collected",
                 payload.mouse_id,
                 json.dumps(before, ensure_ascii=False),
-                json.dumps(dict(after), ensure_ascii=False),
+                json.dumps(dict(after) | {"evidence_refs": evidence_refs}, ensure_ascii=False),
                 updated_at,
             ),
         )
+        if normalized_result:
+            conn.execute(
+                """
+                INSERT INTO mouse_event
+                    (event_id, mouse_id, event_type, event_date, related_entity_type,
+                     related_entity_id, source_record_id, details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("event"),
+                    payload.mouse_id,
+                    "genotyped",
+                    result_date,
+                    "genotyping_record",
+                    record_id,
+                    evidence_refs["source_record_id"],
+                    json.dumps(
+                        {
+                            "sample_id": payload.sample_id or before["display_id"],
+                            "target_name": payload.target_name,
+                            "raw_result": payload.raw_result,
+                            "normalized_result": normalized_result,
+                            "source_photo_id": evidence_refs["source_photo_id"],
+                            "photo_evidence_id": evidence_refs["photo_evidence_id"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    updated_at,
+                ),
+            )
     return {"genotyping_id": record_id, **dict(after)}
 
 
@@ -7793,12 +8591,23 @@ def log_workbook_export(
     row_count: int,
     blocked_review_count: int,
     status: str,
+    manifest_artifact_path: str = "",
+    validation_report_id: str = "",
+    state_watermark: str = "",
 ) -> None:
     note = (
         "Blocked final XLSX export because Focus Review blockers remain."
         if status == "blocked"
         else "XLSX generated from workbook preview."
     )
+    provenance_bits = [
+        f"manifest={manifest_artifact_path}" if manifest_artifact_path else "",
+        f"validation_report={validation_report_id}" if validation_report_id else "",
+        f"state_watermark={state_watermark}" if state_watermark else "",
+    ]
+    provenance_note = "; ".join(bit for bit in provenance_bits if bit)
+    if provenance_note:
+        note = f"{note} {provenance_note}"
     with connection() as conn:
         conn.execute(
             """
@@ -9095,6 +9904,47 @@ def export_genotyping_worklist_csv(query: str = "") -> Response:
     )
 
 
+@app.post("/api/exports/{export_type}/validation-report-artifact")
+def create_export_validation_report_artifact(export_type: str, query: str = "") -> dict[str, Any]:
+    if export_type not in {"separation_xlsx", "animal_sheet_xlsx", "mouse_csv", "genotyping_worklist_csv"}:
+        raise HTTPException(status_code=400, detail="Unsupported export type.")
+    preview = export_preview()
+    if export_type == "animal_sheet_xlsx":
+        filename = export_filename("animal", preview, query)
+    elif export_type == "separation_xlsx":
+        filename = export_filename("separation", preview, query)
+    elif export_type == "genotyping_worklist_csv":
+        filename = "genotyping_worklist_filtered.csv" if query.strip() else "genotyping_worklist.csv"
+    else:
+        filename = "mouse_records_filtered.csv" if query.strip() else "mouse_records.csv"
+    report = build_export_validation_report(
+        preview,
+        export_type=export_type,
+        query=query,
+        filename=filename,
+    )
+    return persist_validation_report_artifact(report)
+
+
+def parse_export_log_provenance(note: str) -> dict[str, str]:
+    provenance = {
+        "export_manifest_path": "",
+        "validation_report_id": "",
+        "state_watermark": "",
+    }
+    note_text = str(note or "")
+    patterns = {
+        "export_manifest_path": r"(?:^|\s|;)manifest=([^;]+)",
+        "validation_report_id": r"(?:^|\s|;)validation_report=([^;]+)",
+        "state_watermark": r"(?:^|\s|;)state_watermark=([^;]+)",
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, note_text)
+        if match:
+            provenance[key] = match.group(1).strip()
+    return provenance
+
+
 @app.get("/api/export-log")
 def list_export_log() -> list[dict[str, Any]]:
     with connection() as conn:
@@ -9108,7 +9958,14 @@ def list_export_log() -> list[dict[str, Any]]:
             LIMIT 25
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    export_rows = []
+    for row in rows:
+        item = dict(row)
+        provenance = parse_export_log_provenance(item.get("note", ""))
+        item.update(provenance)
+        item["provenance"] = provenance
+        export_rows.append(item)
+    return export_rows
 
 
 @app.get("/api/exports/separation.xlsx")
@@ -9136,7 +9993,26 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
     filename = export_filename("separation", preview, query)
     blocked_count = preview["blocked_review_items"]
     if require_ready and blocked_count:
-        log_workbook_export("separation_xlsx", filename, query, len(rows), blocked_count, "blocked")
+        provenance = create_export_provenance_artifacts(
+            preview,
+            export_type="separation_xlsx",
+            filename=filename,
+            query=query,
+            status="blocked",
+            row_count=len(rows),
+            blocked_review_count=blocked_count,
+        )
+        log_workbook_export(
+            "separation_xlsx",
+            filename,
+            query,
+            len(rows),
+            blocked_count,
+            "blocked",
+            manifest_artifact_path=provenance["manifest_artifact_path"],
+            validation_report_id=provenance["validation_report_id"],
+            state_watermark=provenance["state_watermark"],
+        )
         raise HTTPException(
             status_code=409,
             detail={
@@ -9145,6 +10021,8 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
                 "review_blockers": preview["review_blockers"],
                 "filename": filename,
                 "source_layer": "export or view",
+                "export_manifest_path": provenance["manifest_artifact_path"],
+                "validation_report_id": provenance["validation_report_id"],
             },
         )
     payload = build_xlsx(
@@ -9154,7 +10032,26 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
         trace_rows_from_export_rows(filtered_rows, "source_note_item_ids"),
         [14, 22, 22, 12, 18, 10, 10, 22, 32],
     )
-    log_workbook_export("separation_xlsx", filename, query, len(rows), blocked_count, "generated")
+    provenance = create_export_provenance_artifacts(
+        preview,
+        export_type="separation_xlsx",
+        filename=filename,
+        query=query,
+        status="generated",
+        row_count=len(rows),
+        blocked_review_count=blocked_count,
+    )
+    log_workbook_export(
+        "separation_xlsx",
+        filename,
+        query,
+        len(rows),
+        blocked_count,
+        "generated",
+        manifest_artifact_path=provenance["manifest_artifact_path"],
+        validation_report_id=provenance["validation_report_id"],
+        state_watermark=provenance["state_watermark"],
+    )
     return Response(
         content=payload,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -9188,7 +10085,26 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
     filename = export_filename("animal", preview, query)
     blocked_count = preview["blocked_review_items"]
     if require_ready and blocked_count:
-        log_workbook_export("animal_sheet_xlsx", filename, query, len(rows), blocked_count, "blocked")
+        provenance = create_export_provenance_artifacts(
+            preview,
+            export_type="animal_sheet_xlsx",
+            filename=filename,
+            query=query,
+            status="blocked",
+            row_count=len(rows),
+            blocked_review_count=blocked_count,
+        )
+        log_workbook_export(
+            "animal_sheet_xlsx",
+            filename,
+            query,
+            len(rows),
+            blocked_count,
+            "blocked",
+            manifest_artifact_path=provenance["manifest_artifact_path"],
+            validation_report_id=provenance["validation_report_id"],
+            state_watermark=provenance["state_watermark"],
+        )
         raise HTTPException(
             status_code=409,
             detail={
@@ -9197,6 +10113,8 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
                 "review_blockers": preview["review_blockers"],
                 "filename": filename,
                 "source_layer": "export or view",
+                "export_manifest_path": provenance["manifest_artifact_path"],
+                "validation_report_id": provenance["validation_report_id"],
             },
         )
     payload = build_xlsx(
@@ -9206,7 +10124,26 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
         trace_rows_from_export_rows(filtered_rows, "source"),
         [10, 22, 10, 18, 16, 16, 16, 18, 16, 32],
     )
-    log_workbook_export("animal_sheet_xlsx", filename, query, len(rows), blocked_count, "generated")
+    provenance = create_export_provenance_artifacts(
+        preview,
+        export_type="animal_sheet_xlsx",
+        filename=filename,
+        query=query,
+        status="generated",
+        row_count=len(rows),
+        blocked_review_count=blocked_count,
+    )
+    log_workbook_export(
+        "animal_sheet_xlsx",
+        filename,
+        query,
+        len(rows),
+        blocked_count,
+        "generated",
+        manifest_artifact_path=provenance["manifest_artifact_path"],
+        validation_report_id=provenance["validation_report_id"],
+        state_watermark=provenance["state_watermark"],
+    )
     return Response(
         content=payload,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

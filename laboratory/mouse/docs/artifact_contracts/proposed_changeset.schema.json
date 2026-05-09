@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mousedb.local/schemas/proposed_changeset.schema.json",
+  "title": "MouseDB Proposed Changeset Artifact",
+  "description": "Reviewable preview of proposed canonical MouseDB writes. This artifact is export/view evidence and must not itself be treated as canonical state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_id",
+    "artifact_type",
+    "source_layer",
+    "created_at",
+    "status",
+    "source_refs",
+    "proposed_writes",
+    "blockers"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_type": {
+      "const": "proposed_changeset"
+    },
+    "source_layer": {
+      "const": "export or view"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_by": {
+      "type": "string",
+      "default": "local_user"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "blocked", "approved", "applied", "voided", "rejected"]
+    },
+    "canonical_candidate_id": {
+      "type": "string"
+    },
+    "review_id": {
+      "type": "string"
+    },
+    "parse_id": {
+      "type": "string"
+    },
+    "source_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "photo_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "note_item_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "card_snapshot_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "legacy_row_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "source_record_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "default": {}
+    },
+    "proposed_writes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_layer", "target_table", "operation", "risk", "evidence_refs"],
+        "properties": {
+          "target_layer": {
+            "const": "canonical structured state"
+          },
+          "target_table": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string",
+            "enum": ["insert", "update", "event_insert", "void"]
+          },
+          "field": {
+            "type": "string"
+          },
+          "before_value": {},
+          "after_value": {},
+          "risk": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "review_required": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check_key", "severity", "message"],
+        "properties": {
+          "check_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "validation_report_id": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}
