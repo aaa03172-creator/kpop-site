@@ -45,6 +45,7 @@ def test_parse_animal_sheet_keeps_workbook_rows_reviewable(tmp_path: Path) -> No
     assert payload["rows"][0]["source_cells"]["display_id"] == "D2"
     assert payload["rows"][1]["row_type"] == "litter_or_offspring_snapshot"
     assert payload["rows"][1]["review_status"] == "candidate"
+    assert payload["strain_registry_candidates"][0]["source_evidence_ids"] == ["animal sheet:2"]
 
 
 def test_parse_animal_sheet_adds_reviewable_mating_cage_candidate(tmp_path: Path) -> None:
@@ -64,6 +65,18 @@ def test_parse_animal_sheet_adds_reviewable_mating_cage_candidate(tmp_path: Path
     assert payload["breeding_candidates"][0]["candidate_value"] == "mating"
     assert payload["breeding_candidates"][0]["review_required"] is False
     assert payload["breeding_candidates"][0]["source_evidence_ids"] == ["animal sheet:2", "animal sheet:3"]
+    registry_candidate = payload["strain_registry_candidates"][0]
+    assert registry_candidate["candidate_type"] == "strain_registry_review"
+    assert registry_candidate["strain_raw"] == "ApoM Tg/Tg"
+    assert registry_candidate["genotype_raw"] == "Tg"
+    assert registry_candidate["normalized_candidate"] == {
+        "strain_name": "ApoM Tg/Tg",
+        "gene_symbol": "",
+        "allele_name": "",
+        "genotype_text": "Tg",
+    }
+    assert registry_candidate["review_required"] is True
+    assert registry_candidate["source_evidence_ids"] == ["animal sheet:2", "animal sheet:3"]
 
 
 def test_parse_separation_sheet_keeps_counts_as_candidates(tmp_path: Path) -> None:
@@ -106,6 +119,11 @@ def test_parse_separation_sheet_adds_maintenance_group_candidate(tmp_path: Path)
     assert candidate["sex_candidate"] == "female"
     assert candidate["count_candidate"] == 8
     assert candidate["source_evidence_ids"] == ["separation:2"]
+    registry_candidate = payload["strain_registry_candidates"][0]
+    assert registry_candidate["strain_raw"] == "ApoM Tg/Tg"
+    assert registry_candidate["genotype_raw"] == "Tg"
+    assert registry_candidate["normalized_candidate"]["gene_symbol"] == ""
+    assert registry_candidate["normalized_candidate"]["allele_name"] == ""
 
 
 def test_parse_multisheet_animal_workbook_with_legacy_headers(tmp_path: Path) -> None:

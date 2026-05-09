@@ -286,9 +286,11 @@ def base_payload(source_file: Path, ws: Worksheet, workbook_kind: str, rows: lis
         "parsed_at": datetime.now().isoformat(timespec="seconds"),
         "rows": rows,
         "breeding_candidates": build_breeding_candidates(rows, workbook_kind),
+        "strain_registry_candidates": build_strain_registry_candidates(rows, workbook_kind),
         "notes": [
             "Predecessor Excel rows are snapshots/views and must not overwrite newer cage-card photo evidence.",
             "Rows require review before becoming canonical cage, mouse, mating, litter, or genotype state.",
+            "Strain/gene/allele registry candidates preserve raw strain and genotype text but do not infer gene or allele automatically.",
         ],
     }
 
@@ -308,10 +310,12 @@ def merge_payloads(source_file: Path, workbook_kind: str, payloads: list[dict[st
         "parsed_at": datetime.now().isoformat(timespec="seconds"),
         "rows": rows,
         "breeding_candidates": build_breeding_candidates(rows, workbook_kind),
+        "strain_registry_candidates": build_strain_registry_candidates(rows, workbook_kind),
         "notes": [
             "Predecessor Excel rows are snapshots/views and must not overwrite newer cage-card photo evidence.",
             "Rows require review before becoming canonical cage, mouse, mating, litter, or genotype state.",
             "Multiple workbook sheets were parsed into one reviewable import when their shapes matched the selected kind.",
+            "Strain/gene/allele registry candidates preserve raw strain and genotype text but do not infer gene or allele automatically.",
         ],
     }
 
@@ -394,6 +398,46 @@ def build_separation_breeding_candidates(rows: list[dict[str, Any]]) -> list[dic
         candidate["source_layer"] = "export or view"
         candidate["review_status"] = "candidate"
         candidates.append(candidate)
+    return candidates
+
+
+def build_strain_registry_candidates(rows: list[dict[str, Any]], workbook_kind: str) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        if row.get("row_type") == "litter_or_offspring_snapshot":
+            continue
+        strain_raw = normalize_cell(row.get("strain_raw") or "")
+        genotype_raw = normalize_cell(row.get("genotype_raw") or "")
+        if not strain_raw:
+            continue
+        grouped.setdefault((strain_raw, genotype_raw), []).append(row)
+
+    candidates: list[dict[str, Any]] = []
+    for (strain_raw, genotype_raw), evidence_rows in sorted(grouped.items()):
+        source_evidence_ids = [evidence_id(row) for row in evidence_rows]
+        candidates.append(
+            {
+                "candidate_type": "strain_registry_review",
+                "source_layer": "export or view",
+                "review_status": "candidate",
+                "workbook_kind": workbook_kind,
+                "strain_raw": strain_raw,
+                "genotype_raw": genotype_raw,
+                "normalized_candidate": {
+                    "strain_name": strain_raw,
+                    "gene_symbol": "",
+                    "allele_name": "",
+                    "genotype_text": genotype_raw,
+                },
+                "review_required": True,
+                "confidence": 0.4,
+                "review_reason": (
+                    "Legacy workbook strain/genotype text can seed strain registry review, "
+                    "but gene and allele links require human curation."
+                ),
+                "source_evidence_ids": source_evidence_ids,
+            }
+        )
     return candidates
 
 

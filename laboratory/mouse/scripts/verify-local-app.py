@@ -922,8 +922,9 @@ def main() -> None:
                 assert_true(legacy_payload["stored_rows"] == 2, "Legacy workbook import row count is wrong.")
                 assert_true(legacy_payload["parse_id"], "Legacy workbook import should create parse evidence for review items.")
                 assert_true(
-                    legacy_payload["created_review_items"] == 2,
-                    "Legacy workbook import should open one review item per parsed row.",
+                    legacy_payload["created_review_items"] == 3
+                    and legacy_payload["strain_registry_candidate_count"] == 1,
+                    "Legacy workbook import should open row reviews plus strain registry candidate review.",
                 )
                 assert_true(legacy_payload["source_record_id"], "Legacy workbook import should create source evidence.")
                 legacy_imports = client.get("/api/legacy-workbook-imports").json()
@@ -937,8 +938,12 @@ def main() -> None:
                 )
                 assert_true(stored_legacy is not None, "Legacy workbook import list should include the stored import.")
                 assert_true(stored_legacy["workbook_kind"] == "legacy_animal_sheet", "Legacy workbook kind was not preserved.")
-                assert_true(stored_legacy["review_count"] == 2, "Legacy workbook list should expose linked review items.")
-                assert_true(stored_legacy["open_review_count"] == 2, "Legacy workbook list should expose open review items.")
+                assert_true(stored_legacy["review_count"] == 3, "Legacy workbook list should expose linked review items.")
+                assert_true(stored_legacy["open_review_count"] == 3, "Legacy workbook list should expose open review items.")
+                assert_true(
+                    stored_legacy["strain_registry_candidates"][0]["normalized_candidate"]["gene_symbol"] == "",
+                    "Legacy workbook strain registry candidate should not infer gene symbols.",
+                )
                 assert_true(
                     stored_legacy["rows"][0]["raw_row"]["source_cells"]["display_id"] == "D2",
                     "Legacy workbook import should preserve source cell traceability.",
@@ -948,16 +953,32 @@ def main() -> None:
                     for item in client.get("/api/review-items").json()
                     if item["parse_id"] == legacy_payload["parse_id"]
                 ]
-                assert_true(len(legacy_review_items) == 2, "Legacy workbook rows should be visible in Review Queue.")
+                assert_true(len(legacy_review_items) == 3, "Legacy workbook row and registry reviews should be visible in Review Queue.")
                 assert_true(
                     all(item["status"] == "open" for item in legacy_review_items),
                     "Legacy workbook review items should start open.",
                 )
+                legacy_row_review_items = [
+                    item
+                    for item in legacy_review_items
+                    if item["issue"] == "Legacy workbook row requires review"
+                ]
+                registry_review_items = [
+                    item
+                    for item in legacy_review_items
+                    if item["issue"] == "Legacy strain registry candidate requires review"
+                ]
+                assert_true(len(legacy_row_review_items) == 2, "Legacy workbook rows should still get row-level reviews.")
                 assert_true(
-                    any("display_id" in item["current_value"] and "D2" in item["review_reason"] for item in legacy_review_items),
+                    len(registry_review_items) == 1
+                    and registry_review_items[0]["assigned_role"] == "Strain Curator",
+                    "Legacy workbook strain registry candidates should route to Strain Curator review.",
+                )
+                assert_true(
+                    any("display_id" in item["current_value"] and "D2" in item["review_reason"] for item in legacy_row_review_items),
                     "Legacy workbook review items should preserve row anchors and source cell evidence.",
                 )
-                rejected_legacy_review = legacy_review_items[0]
+                rejected_legacy_review = legacy_row_review_items[0]
                 legacy_reject = client.post(
                     f"/api/review-items/{rejected_legacy_review['review_id']}/resolve",
                     json={
@@ -979,7 +1000,7 @@ def main() -> None:
                     if item["legacy_import_id"] == legacy_payload["legacy_import_id"]
                 )
                 assert_true(
-                    updated_stored_legacy["open_review_count"] == 1,
+                    updated_stored_legacy["open_review_count"] == 2,
                     "Resolving a legacy row should reduce the legacy import open review count.",
                 )
                 rejected_rows = [
