@@ -485,6 +485,25 @@ def test_review_check_targets_include_plausibility_warning() -> None:
     assert targets[:3] == ["Plausibility warning", "Sex/count field", "Mouse count"]
 
 
+def test_review_check_targets_include_legacy_strain_registry_focus() -> None:
+    targets = review_check_targets(
+        {
+            "status": "open",
+            "issue": "Legacy strain registry candidate requires review",
+            "source_name": "legacy_workbook_import",
+            "priority": "medium",
+            "severity": "Medium",
+        }
+    )
+
+    assert targets == [
+        "Strain registry",
+        "Raw strain/genotype",
+        "Gene/allele link",
+        "Workbook row evidence",
+    ]
+
+
 def test_review_attention_preserves_zero_payload_confidence() -> None:
     result = review_attention_level(
         {

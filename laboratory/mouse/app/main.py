@@ -458,6 +458,11 @@ def review_check_targets(item: dict[str, Any], parse_payload: dict[str, Any] | N
             add("Notes")
         if not targets:
             add("Source photo")
+    elif issue_key == "legacy strain registry candidate requires review":
+        add("Strain registry")
+        add("Raw strain/genotype")
+        add("Gene/allele link")
+        add("Workbook row evidence")
     elif "duplicate active" in issue_key:
         add("Duplicate mouse ID")
         add("Source evidence")
