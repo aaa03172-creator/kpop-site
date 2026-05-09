@@ -64,5 +64,11 @@ def test_legacy_workbook_import_surfaces_strain_registry_review_candidates(tmp_p
         assert len(registry_reviews) == 1
         assert registry_reviews[0]["assigned_role"] == "Strain Curator"
         assert "does not infer gene or allele" in registry_reviews[0]["review_reason"]
+        assert registry_reviews[0]["review_check_targets"] == [
+            "Strain registry",
+            "Raw strain/genotype",
+            "Gene/allele link",
+            "Workbook row evidence",
+        ]
     finally:
         db.DB_PATH = old_db_path
