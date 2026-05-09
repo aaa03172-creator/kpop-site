@@ -8810,8 +8810,8 @@ def comparison_matches_review_scope(comparison: dict[str, Any], scope: EvidenceC
         return False
     if photo_id and comparison.get("photo_id") != photo_id:
         return False
-    if upload_batch_id:
-        return comparison.get("upload_batch_id") == upload_batch_id
+    if upload_batch_id and comparison.get("upload_batch_id") != upload_batch_id:
+        return False
     return True
 
 

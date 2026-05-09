@@ -3769,6 +3769,9 @@
           </tbody>
         </table>
         <h3>Photo worklist</h3>
+        <div class="toolbar-row">
+          <button class="create-batch-comparison-reviews" type="button" data-batch-id="${escapeHtml(batch.upload_batch_id)}" ${batch.comparison_needed_count ? "" : "disabled"}>Create Batch Comparison Reviews</button>
+        </div>
         <table>
           <thead><tr><th>Photo</th><th>Transcription</th><th>Reviews</th><th>Mapping</th><th>Next action</th><th>Open</th></tr></thead>
           <tbody>
@@ -5984,8 +5987,12 @@
           return;
         }
         if (targetType === "canonical_candidate" && targetId) {
+          const result = await api(`/api/canonical-candidates/${encodeURIComponent(targetId)}/apply-preview`);
           setActiveView("comparison");
-          document.getElementById("uploadMessage").textContent = `Open canonical candidate ${targetId} in Candidate Drafts.`;
+          await refresh();
+          renderCanonicalApplyPreview(result);
+          document.getElementById("uploadMessage").textContent =
+            `Previewed canonical candidate ${targetId}: ${result.summary.new_mouse_rows} new mouse row(s), ${result.summary.events} event(s).`;
           return;
         }
         if (photoId) {
@@ -5993,6 +6000,21 @@
           setTranscriptionPhoto(photoId);
           document.getElementById("uploadMessage").textContent = `Opened photo ${photoId} from the batch worklist.`;
         }
+        return;
+      }
+      const batchComparisonButton = event.target.closest(".create-batch-comparison-reviews");
+      if (batchComparisonButton) {
+        const result = await api("/api/evidence-comparison/review-candidates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ upload_batch_id: batchComparisonButton.dataset.batchId || "" })
+        });
+        reviewStatusFilter = "all";
+        selectedReviewId = result.review_ids?.[0] || "";
+        setActiveView(selectedReviewId ? "review" : "comparison");
+        await refresh();
+        document.getElementById("uploadMessage").textContent =
+          `Created ${result.created_review_items} batch-scoped comparison review item(s); ${result.existing_review_items} already existed.`;
         return;
       }
       const button = event.target.closest(".release-upload-batch");
