@@ -23,6 +23,15 @@
       --primary-dark: #0f6b5f;
       --warn: #8a5a00;
       --danger: #9b2f3e;
+      --cue-must-bg: #fff1f2;
+      --cue-must-line: #f0a0ad;
+      --cue-must-ink: #8f2435;
+      --cue-quick-bg: #fff8e6;
+      --cue-quick-line: #f2d28d;
+      --cue-quick-ink: #8a5a04;
+      --cue-trace-bg: #f3f4f6;
+      --cue-trace-line: #d1d5db;
+      --cue-trace-ink: #4b5563;
     }
     * { box-sizing: border-box; }
     body {
@@ -547,6 +556,19 @@
       padding: 13px;
       box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
     }
+    .review-card.attention-must-review {
+      border-left: 4px solid var(--cue-must-line);
+      background: linear-gradient(90deg, var(--cue-must-bg), #fff 28%);
+    }
+    .review-card.attention-quick-check {
+      border-left: 4px solid var(--cue-quick-line);
+      background: linear-gradient(90deg, var(--cue-quick-bg), #fff 28%);
+    }
+    .review-card.attention-trace-only,
+    .review-card.attention-hidden-default {
+      border-left: 4px solid var(--cue-trace-line);
+      background: linear-gradient(90deg, var(--cue-trace-bg), #fff 28%);
+    }
     .review-card-content {
       min-width: 0;
     }
@@ -566,19 +588,19 @@
       letter-spacing: 0.04em;
     }
     .review-card-kind.warn {
-      background: #fff8e6;
-      border-color: #f2d28d;
-      color: #8a5a04;
+      background: var(--cue-must-bg);
+      border-color: var(--cue-must-line);
+      color: var(--cue-must-ink);
     }
     .review-card-kind.source {
-      background: #eef7f4;
-      border-color: #c4ddd6;
-      color: var(--primary-dark);
+      background: var(--cue-quick-bg);
+      border-color: var(--cue-quick-line);
+      color: var(--cue-quick-ink);
     }
     .review-card-kind.record {
-      background: #f2f7ff;
-      border-color: #c8dcff;
-      color: #1d4f91;
+      background: var(--cue-trace-bg);
+      border-color: var(--cue-trace-line);
+      color: var(--cue-trace-ink);
     }
     .review-card.selected-card,
     .review-card:hover {
@@ -5026,7 +5048,7 @@
         return { label: "Focus review", tone: "warn" };
       }
       if (item.attention_level === "quick_check") {
-        return { label: "Quick check", tone: "source" };
+        return { label: "Needs quick confirmation", tone: "source" };
       }
       if (item.attention_level === "trace_only") {
         return { label: "Trace only", tone: "record" };
@@ -5614,8 +5636,9 @@
       document.getElementById("reviewRows").innerHTML = visibleReviews.map((item) => {
         const visual = reviewVisual(item);
         const checkTargets = reviewCheckTargetsText(item);
+        const attentionClass = `attention-${text(item.attention_level || "quick_check").replaceAll("_", "-")}`;
         return `
-        <article class="review-card ${item.review_id === selectedReviewId ? "selected-card" : ""}" data-review-id="${escapeHtml(item.review_id)}">
+        <article class="review-card ${escapeHtml(attentionClass)} ${item.review_id === selectedReviewId ? "selected-card" : ""}" data-review-id="${escapeHtml(item.review_id)}" data-attention-level="${escapeHtml(item.attention_level || "quick_check")}">
           <div class="review-card-content">
             <span class="review-card-kind ${escapeHtml(visual.tone)}">${escapeHtml(visual.label)}</span>
             <h3>${escapeHtml(item.issue)}</h3>

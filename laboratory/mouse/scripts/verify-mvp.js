@@ -119,6 +119,15 @@ async function main() {
       staticHtml.includes("DESIGN.md-inspired"),
     "Local UI should expose Airtable/Linear-inspired design tokens without copying brand surfaces."
   );
+  assert(
+    staticHtml.includes("attention-must-review") &&
+      staticHtml.includes("attention-quick-check") &&
+      staticHtml.includes("attention-trace-only") &&
+      staticHtml.includes("Needs quick confirmation") &&
+      staticHtml.includes("Trace only") &&
+      staticHtml.includes("data-attention-level"),
+    "Focus Review should expose low-fatigue attention cues with text, structure, and stable classes."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);
@@ -161,6 +170,33 @@ async function main() {
   const staticPage = await context.newPage();
   await staticPage.goto(fileUrl(staticPagePath));
   await staticPage.waitForFunction(() => typeof legacyWorkbookRow === "function");
+  const attentionCue = await staticPage.evaluate(() => {
+    const item = { review_id: "review_dom_contract", attention_level: "quick_check", status: "open" };
+    const visual = reviewVisual(item);
+    const attentionClass = `attention-${text(item.attention_level || "quick_check").replaceAll("_", "-")}`;
+    const host = document.createElement("div");
+    host.innerHTML = `
+      <article class="review-card ${attentionClass}" data-attention-level="${item.attention_level}">
+        <span class="review-card-kind ${visual.tone}">${visual.label}</span>
+        <button class="inspect-review" type="button">Inspect</button>
+      </article>
+    `;
+    document.body.appendChild(host);
+    const card = host.querySelector(".review-card");
+    return {
+      label: host.querySelector(".review-card-kind")?.textContent || "",
+      hasDataLevel: card?.getAttribute("data-attention-level") === "quick_check",
+      hasStableClass: card?.classList.contains("attention-quick-check"),
+      hasAction: Boolean(host.querySelector(".inspect-review")),
+    };
+  });
+  assert(
+    attentionCue.label === "Needs quick confirmation" &&
+      attentionCue.hasDataLevel &&
+      attentionCue.hasStableClass &&
+      attentionCue.hasAction,
+    "Rendered Focus Review cards should expose quick-check text, stable cue class, data level, and actions."
+  );
   const legacyWorkbookHtml = await staticPage.evaluate(() => legacyWorkbookRow({
     source_file_name: "legacy <source>.xlsx",
     workbook_kind: "animal",
