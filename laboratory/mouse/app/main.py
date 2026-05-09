@@ -7091,7 +7091,10 @@ def list_review_items() -> list[dict[str, Any]]:
 
 @app.get("/api/ui/focus-review")
 def ui_focus_review() -> dict[str, Any]:
-    reviews = [item for item in list_review_items() if item.get("status") == "open"]
+    reviews = [
+        item for item in list_review_items()
+        if item.get("status") == "open" and item.get("attention_level") in {"must_review", "quick_check"}
+    ]
     grouped: dict[str, list[dict[str, Any]]] = {}
     for item in reviews:
         group_key = str(item.get("parse_id") or item.get("photo_id") or item.get("review_id") or "")

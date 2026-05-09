@@ -156,3 +156,57 @@ def test_focus_review_empty_state_does_not_fabricate_colony_data(tmp_path: Path)
         }
     finally:
         db.DB_PATH = old_db_path
+
+
+def test_focus_review_excludes_hidden_default_fixture_reviews(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_fixture_hidden",
+                    None,
+                    "fixtures/sample_parse_results.json",
+                    json.dumps({"confidence": 95, "rawStrain": "Fixture", "sexRaw": "female"}, ensure_ascii=False),
+                    "2026-05-09T10:20:00Z",
+                    "review",
+                    95,
+                    1,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_fixture_hidden",
+                    "parse_fixture_hidden",
+                    "Low",
+                    "Fixture review",
+                    "fixture",
+                    "fixture",
+                    "Fixture/sample records should stay out of default Focus Review workload.",
+                    "open",
+                    "2026-05-09T10:21:00Z",
+                ),
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/focus-review")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["workload_summary"] == {"must_review": 0, "quick_check": 0}
+        assert payload["cards"] == []
+    finally:
+        db.DB_PATH = old_db_path
