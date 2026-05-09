@@ -6355,7 +6355,7 @@
       }
       const result = await response.json();
       document.getElementById("legacyWorkbookMessage").textContent =
-        `Imported ${result.stored_rows} candidate rows and opened ${result.created_review_items} review items from ${result.source_file_name}; source evidence ${result.source_record_id}.`;
+        `Imported ${result.stored_rows} candidate rows, ${result.strain_registry_candidate_count || 0} strain registry candidates, and opened ${result.created_review_items} review items from ${result.source_file_name}; source evidence ${result.source_record_id}.`;
       document.getElementById("legacyWorkbookFile").value = "";
       await refresh();
     });
