@@ -188,6 +188,7 @@ def main() -> None:
                     mouse_id TEXT PRIMARY KEY,
                     display_id TEXT NOT NULL
                 );
+                INSERT INTO mouse_master (mouse_id, display_id) VALUES ('legacy_mouse_001', 'LM001');
                 CREATE TABLE card_note_item_log (
                     note_item_id TEXT PRIMARY KEY,
                     raw_line_text TEXT NOT NULL

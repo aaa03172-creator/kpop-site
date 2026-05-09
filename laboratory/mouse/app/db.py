@@ -184,6 +184,13 @@ def connection() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def sqlite_add_column_definition(definition: str) -> str:
+    normalized = " ".join(definition.upper().split())
+    if "DEFAULT CURRENT_TIMESTAMP" in normalized:
+        return definition.replace("DEFAULT CURRENT_TIMESTAMP", "DEFAULT ''")
+    return definition
+
+
 def ensure_columns(conn: sqlite3.Connection, table_name: str, columns: dict[str, str]) -> None:
     existing = {
         row["name"]
@@ -191,7 +198,9 @@ def ensure_columns(conn: sqlite3.Connection, table_name: str, columns: dict[str,
     }
     for column_name, definition in columns.items():
         if column_name not in existing:
-            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+            conn.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {sqlite_add_column_definition(definition)}"
+            )
 
 
 def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
@@ -334,6 +343,20 @@ def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
             "genotyping_protocol": "TEXT NOT NULL DEFAULT ''",
         },
     )
+    for table_name, column_name in [
+        ("mouse_master", "created_at"),
+        ("mouse_master", "updated_at"),
+        ("card_note_item_log", "created_at"),
+        ("genotyping_record", "updated_at"),
+    ]:
+        existing = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name in existing:
+            conn.execute(
+                f"UPDATE {table_name} SET {column_name} = CURRENT_TIMESTAMP WHERE {column_name} = '' OR {column_name} IS NULL"
+            )
     conn.execute(
         """
         UPDATE review_queue
