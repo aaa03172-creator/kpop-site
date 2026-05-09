@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 import httpx
 
 from .db import ROOT, connection, init_db
+from .labeling_rules import interpret_crossed_out_status
 from .matching import MatchCandidate, match_candidate
 from .storage import new_id, save_legacy_workbook, save_upload, utc_now
 from scripts.parse_legacy_workbooks import parse_workbook
@@ -176,6 +177,7 @@ class GenotypingRequestCreate(BaseModel):
     sample_id: str = ""
     sample_date: str = ""
     target_name: str = ""
+    labeling_rule_set_id: str = ""
     note: str = ""
 
 
@@ -3857,6 +3859,52 @@ def should_write_mouse_candidate(record: dict[str, Any], status: str) -> bool:
     return review_field not in {"mouseid", "mousecount"} and "count mismatch" not in issue
 
 
+def load_labeling_rule_ear_sequence(conn: Any, rule_set_id: str) -> list[str]:
+    rule_id = str(rule_set_id or "").strip()
+    if not rule_id:
+        return []
+    rows = conn.execute(
+        """
+        SELECT ear_label_code
+        FROM labeling_rule_ear_sequence
+        WHERE rule_set_id = ?
+        ORDER BY sequence_index
+        """,
+        (rule_id,),
+    ).fetchall()
+    return [str(row["ear_label_code"]) for row in rows]
+
+
+def load_labeling_rule_crossed_out_handling(conn: Any, rule_set_id: str) -> str:
+    rule_id = str(rule_set_id or "").strip()
+    if not rule_id:
+        return ""
+    row = conn.execute(
+        """
+        SELECT crossed_out_handling
+        FROM labeling_rule_set
+        WHERE rule_set_id = ?
+        """,
+        (rule_id,),
+    ).fetchone()
+    return str(row["crossed_out_handling"] or "").strip() if row else ""
+
+
+def load_labeling_rule_genotyping_target(conn: Any, rule_set_id: str) -> str:
+    rule_id = str(rule_set_id or "").strip()
+    if not rule_id:
+        return ""
+    row = conn.execute(
+        """
+        SELECT genotyping_target
+        FROM labeling_rule_set
+        WHERE rule_set_id = ?
+        """,
+        (rule_id,),
+    ).fetchone()
+    return str(row["genotyping_target"] or "").strip() if row else ""
+
+
 def active_mouse_note_count(record: dict[str, Any]) -> int:
     card_type = str(record.get("type") or "unknown").lower()
     notes = record.get("notes") if isinstance(record.get("notes"), list) else []
@@ -4085,6 +4133,12 @@ def write_note_items_and_mouse_candidates(
     photo_id = str(record.get("sourcePhotoId") or "")
     snapshot_id = card_snapshot_id or str(record.get("cardSnapshotId") or "")
     numeric_note_review_items: list[dict[str, Any]] = []
+    labeling_rule_set_id = str(record.get("labelingRuleSetId") or record.get("labeling_rule_set_id") or "").strip()
+    ear_sequence = load_labeling_rule_ear_sequence(conn, labeling_rule_set_id) if labeling_rule_set_id else []
+    crossed_out_handling = (
+        load_labeling_rule_crossed_out_handling(conn, labeling_rule_set_id) if labeling_rule_set_id else ""
+    )
+    ear_sequence_index = 0
 
     for index, note in enumerate(notes, start=1):
         raw_line = str(note.get("raw") if isinstance(note, dict) else note)
@@ -4096,6 +4150,19 @@ def write_note_items_and_mouse_candidates(
             if parsed["parsed_type"] == "unlabeled_numeric_note"
             else status_from_strike if parsed["parsed_type"] != "unknown" else "unknown"
         )
+        parsed_metadata = dict(parsed.get("parsed_metadata") or {})
+        if parsed["parsed_type"] == "mouse_item" and labeling_rule_set_id:
+            expected_ear_label_code = None
+            label_status = (
+                interpret_crossed_out_status(strike_status, crossed_out_handling)
+                if crossed_out_handling
+                else interpreted
+            )
+            if label_status != "dead":
+                expected_ear_label_code = ear_sequence[ear_sequence_index] if ear_sequence_index < len(ear_sequence) else None
+                ear_sequence_index += 1
+            parsed_metadata["expected_ear_label_code"] = expected_ear_label_code
+            parsed_metadata["labeling_rule_set_id"] = labeling_rule_set_id
         note_item_id = f"note_{parse_id}_{index}"
         conn.execute(
             """
@@ -4124,7 +4191,7 @@ def write_note_items_and_mouse_candidates(
                 parsed["parsed_ear_label_review_status"],
                 parsed["parsed_event_date"],
                 parsed["parsed_count"],
-                json.dumps(parsed.get("parsed_metadata") or {}, ensure_ascii=False),
+                json.dumps(parsed_metadata, ensure_ascii=False),
                 parsed["confidence"],
                 parsed["needs_review"],
             ),
@@ -5591,6 +5658,9 @@ def request_genotyping(payload: GenotypingRequestCreate) -> dict[str, Any]:
 
         before = dict(existing)
         sample_id = payload.sample_id.strip() or existing["display_id"]
+        target_name = payload.target_name.strip() or load_labeling_rule_genotyping_target(
+            conn, payload.labeling_rule_set_id
+        )
         raw_payload = payload.model_dump_json()
         source_record_id = create_source_record(
             conn,
@@ -5628,7 +5698,7 @@ def request_genotyping(payload: GenotypingRequestCreate) -> dict[str, Any]:
                 sample_id,
                 sample_date,
                 requested_at[:10],
-                payload.target_name,
+                target_name,
                 "",
                 "",
                 "pending",
@@ -5658,7 +5728,8 @@ def request_genotyping(payload: GenotypingRequestCreate) -> dict[str, Any]:
                         {
                             "display_id": existing["display_id"],
                             "sample_id": sample_id,
-                            "target_name": payload.target_name,
+                            "target_name": target_name,
+                            "labeling_rule_set_id": payload.labeling_rule_set_id,
                             "note": payload.note,
                         },
                         ensure_ascii=False,
