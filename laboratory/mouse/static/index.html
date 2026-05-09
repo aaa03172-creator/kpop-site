@@ -2398,6 +2398,12 @@
         <p class="muted" id="extractionProgressDetail">Waiting for upload.</p>
         <ul class="progress-list" id="extractionProgressList"></ul>
       </div>
+      <h3>Upload batches</h3>
+      <p class="muted">Each photo set is tracked as a raw source batch before review or canonical mapping.</p>
+      <table>
+        <thead><tr><th>Batch</th><th>Photos</th><th>Transcription</th><th>Reviews</th><th>Status</th><th>Created</th></tr></thead>
+        <tbody id="uploadBatchRows"></tbody>
+      </table>
     </section>
 
     <section data-view="settings">
@@ -2721,7 +2727,7 @@
     <section data-view="records">
       <h2>Photo Inbox</h2>
       <table>
-        <thead><tr><th>ID</th><th>File</th><th>Status</th><th>Uploaded</th><th>Action</th></tr></thead>
+        <thead><tr><th>ID</th><th>Batch</th><th>File</th><th>Status</th><th>Uploaded</th><th>Action</th></tr></thead>
         <tbody id="photoRows"></tbody>
       </table>
     </section>
@@ -5198,7 +5204,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, photos, reviews, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -5210,6 +5216,7 @@
         api("/api/evidence-reconciliation"),
         api("/api/evidence-comparison"),
         api("/api/photo-review-workbench"),
+        api("/api/upload-batches"),
         api("/api/photos"),
         api("/api/review-items"),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
@@ -5326,9 +5333,20 @@
         });
       });
       latestPhotos = photoWorkbench.rows || [];
+      document.getElementById("uploadBatchRows").innerHTML = (uploadBatches.rows || photoWorkbench.batches || []).map((batch) =>
+        row([
+          batch.batch_label || batch.upload_batch_id,
+          `${batch.photo_count || 0}/${batch.expected_photo_count || 0}`,
+          `${batch.transcribed_photo_count || 0} done / ${batch.pending_transcription_count || 0} pending`,
+          `${batch.open_review_count || 0} open / ${batch.resolved_review_count || 0} resolved`,
+          batch.derived_status || batch.status || "--",
+          batch.created_at || "--"
+        ])
+      ).join("") || row(["No upload batches yet", "", "", "", "", ""]);
       document.getElementById("workbenchPhotoCards").innerHTML = latestPhotos.slice(0, 8).map((photo) => `
         <button class="photo-worklist-card select-photo-review ${photo.photo_id === selectedTranscriptionPhotoId ? "active" : ""}" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">
           <strong>${escapeHtml(photo.original_filename)}</strong>
+          <span>${escapeHtml(photo.batch_label || "Unbatched source")}</span>
           <span>${escapeHtml(photo.next_action || photo.status || "--")}</span>
           <span>${escapeHtml(`${photo.note_line_count || 0} note lines / ${photo.open_review_count || 0} open review(s)`)}</span>
         </button>
@@ -5336,12 +5354,13 @@
       document.getElementById("photoRows").innerHTML = latestPhotos.map((photo) => `
         <tr>
           <td>${escapeHtml(photo.photo_id)}</td>
+          <td>${escapeHtml(photo.batch_label || photo.upload_batch_id || "--")}</td>
           <td>${escapeHtml(photo.original_filename)}</td>
           <td>${escapeHtml(`${photo.status} / ${photo.next_action} / ${photo.open_review_count || 0} open`)}</td>
           <td>${escapeHtml(photo.uploaded_at)}</td>
           <td><button class="select-photo-review" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">Use</button></td>
         </tr>
-      `).join("") || row(["No photos yet", "", "", "", ""]);
+      `).join("") || row(["No photos yet", "", "", "", "", ""]);
       document.getElementById("transcriptionPhotoId").innerHTML = latestPhotos.map((photo) =>
         `<option value="${escapeHtml(photo.photo_id)}">${escapeHtml(photo.original_filename)} (${escapeHtml(photo.status)})</option>`
       ).join("") || '<option value="">No photos uploaded</option>';
@@ -5662,6 +5681,7 @@
       const uploadedPhotos = [];
       let extracted = 0;
       let failed = 0;
+      let uploadBatch = null;
       uploadButton.disabled = true;
       reviewButton.disabled = true;
       setExtractionProgress({
@@ -5673,6 +5693,15 @@
         items: progressItems
       });
       try {
+        uploadBatch = await api("/api/upload-batches", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            batch_label: `Cage card batch ${new Date().toISOString().slice(0, 19)}`,
+            expected_photo_count: files.length,
+            note: "Created from multi-photo upload."
+          })
+        });
         for (let index = 0; index < files.length; index += 1) {
           const file = files[index];
           progressItems[index].status = "uploading";
@@ -5686,13 +5715,14 @@
           });
           const form = new FormData();
           form.append("file", file);
+          form.append("upload_batch_id", uploadBatch.upload_batch_id);
           const result = await api("/api/photos", { method: "POST", body: form });
           uploadedPhotos.push({ ...result, progressIndex: index });
           uploaded += 1;
           progressItems[index].status = currentAiStatus.available ? "queued extraction" : "stored";
         }
         document.getElementById("photoFile").value = "";
-        document.getElementById("uploadMessage").textContent = `Stored ${uploaded} photo(s) and opened review candidates.`;
+        document.getElementById("uploadMessage").textContent = `Stored ${uploaded} photo(s) in ${uploadBatch.batch_label} and opened review candidates.`;
         if (!uploadedPhotos.length) return;
         if (!currentAiStatus.available) {
           setExtractionProgress({
@@ -5704,7 +5734,7 @@
             items: progressItems
           });
           document.getElementById("uploadMessage").textContent =
-            `Stored ${uploaded} photo(s). AI extraction did not run because no API key is configured. Enter a session key, then use Extract & Save Review.`;
+            `Stored ${uploaded} photo(s) in ${uploadBatch.batch_label}. AI extraction did not run because no API key is configured. Enter a session key, then use Extract & Save Review.`;
           await refresh();
           return;
         }
@@ -5721,7 +5751,7 @@
             items: progressItems.map((item) => ({ ...item, status: item.status === "queued extraction" ? "stored" : item.status }))
           });
           document.getElementById("uploadMessage").textContent =
-            `Stored ${uploaded} photo(s). AI extraction was skipped; photos remain in Review Queue.`;
+            `Stored ${uploaded} photo(s) in ${uploadBatch.batch_label}. AI extraction was skipped; photos remain in Review Queue.`;
           await refresh();
           return;
         }
@@ -5763,8 +5793,8 @@
         items: progressItems
       });
       document.getElementById("uploadMessage").textContent = failed
-        ? `Stored ${uploaded} photo(s), saved ${extracted} extracted review transcription(s), ${failed} extraction failed.`
-        : `Stored ${uploaded} photo(s) and saved ${extracted} extracted review transcription(s).`;
+        ? `Stored ${uploaded} photo(s) in ${uploadBatch?.batch_label || "the upload batch"}, saved ${extracted} extracted review transcription(s), ${failed} extraction failed.`
+        : `Stored ${uploaded} photo(s) in ${uploadBatch?.batch_label || "the upload batch"} and saved ${extracted} extracted review transcription(s).`;
       await refresh();
       const firstExtracted = uploadedPhotos.find((photo) => progressItems[photo.progressIndex]?.status === "review saved");
       if (firstExtracted) {
