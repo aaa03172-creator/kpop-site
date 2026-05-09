@@ -47,6 +47,25 @@ def test_parse_animal_sheet_keeps_workbook_rows_reviewable(tmp_path: Path) -> No
     assert payload["rows"][1]["review_status"] == "candidate"
 
 
+def test_parse_animal_sheet_adds_reviewable_mating_cage_candidate(tmp_path: Path) -> None:
+    parser = load_parser_module()
+    workbook_path = tmp_path / "animal-mating.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "animal sheet"
+    ws.append(["Cage No.", "Strain", "Sex", "I.D", "Genotype", "DOB", "Mating Date", "Pubs"])
+    ws.append(["86", "ApoM Tg/Tg", "male", "14", "Tg", "2026-01-21", "2026-02-18", ""])
+    ws.append(["", "", "female", "15", "Tg", "2026-01-21", "", ""])
+    wb.save(workbook_path)
+
+    payload = parser.parse_workbook(workbook_path, kind="animal")
+
+    assert payload["breeding_candidates"][0]["candidate_type"] == "cage_type"
+    assert payload["breeding_candidates"][0]["candidate_value"] == "mating"
+    assert payload["breeding_candidates"][0]["review_required"] is False
+    assert payload["breeding_candidates"][0]["source_evidence_ids"] == ["animal sheet:2", "animal sheet:3"]
+
+
 def test_parse_separation_sheet_keeps_counts_as_candidates(tmp_path: Path) -> None:
     parser = load_parser_module()
     workbook_path = tmp_path / "separation.xlsx"
@@ -67,6 +86,26 @@ def test_parse_separation_sheet_keeps_counts_as_candidates(tmp_path: Path) -> No
     assert row["count_candidate"] == 3
     assert row["source_cells"]["total"] == "C2"
     assert row["review_status"] == "candidate"
+
+
+def test_parse_separation_sheet_adds_maintenance_group_candidate(tmp_path: Path) -> None:
+    parser = load_parser_module()
+    workbook_path = tmp_path / "separation-maintenance.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "separation"
+    ws.append(["Strain", "Genotype", "Total", "DOB", "WT", "TG", "Sampling Point"])
+    ws.append(["ApoM Tg/Tg", "Tg", "female 8p", "2026-01-01", "", "8", "tail"])
+    wb.save(workbook_path)
+
+    payload = parser.parse_workbook(workbook_path, kind="separation")
+
+    candidate = payload["breeding_candidates"][0]
+    assert candidate["candidate_type"] == "maintenance_group"
+    assert candidate["strain_raw"] == "ApoM Tg/Tg"
+    assert candidate["sex_candidate"] == "female"
+    assert candidate["count_candidate"] == 8
+    assert candidate["source_evidence_ids"] == ["separation:2"]
 
 
 def test_parse_multisheet_animal_workbook_with_legacy_headers(tmp_path: Path) -> None:

@@ -11,9 +11,16 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.breeding_rules import infer_cage_type_candidate, infer_maintenance_group_candidate
 
 try:
     from openpyxl import load_workbook
@@ -278,6 +285,7 @@ def base_payload(source_file: Path, ws: Worksheet, workbook_kind: str, rows: lis
         "sheet_name": sheet_names[0] if len(sheet_names) == 1 else ", ".join(sheet_names),
         "parsed_at": datetime.now().isoformat(timespec="seconds"),
         "rows": rows,
+        "breeding_candidates": build_breeding_candidates(rows, workbook_kind),
         "notes": [
             "Predecessor Excel rows are snapshots/views and must not overwrite newer cage-card photo evidence.",
             "Rows require review before becoming canonical cage, mouse, mating, litter, or genotype state.",
@@ -299,12 +307,94 @@ def merge_payloads(source_file: Path, workbook_kind: str, payloads: list[dict[st
         "sheet_name": ", ".join(sheet_names),
         "parsed_at": datetime.now().isoformat(timespec="seconds"),
         "rows": rows,
+        "breeding_candidates": build_breeding_candidates(rows, workbook_kind),
         "notes": [
             "Predecessor Excel rows are snapshots/views and must not overwrite newer cage-card photo evidence.",
             "Rows require review before becoming canonical cage, mouse, mating, litter, or genotype state.",
             "Multiple workbook sheets were parsed into one reviewable import when their shapes matched the selected kind.",
         ],
     }
+
+
+def build_breeding_candidates(rows: list[dict[str, Any]], workbook_kind: str) -> list[dict[str, Any]]:
+    if workbook_kind == "legacy_animal_sheet":
+        return build_animal_breeding_candidates(rows)
+    if workbook_kind == "legacy_separation_status":
+        return build_separation_breeding_candidates(rows)
+    return []
+
+
+def evidence_id(row: dict[str, Any]) -> str:
+    return f"{row.get('source_sheet', '')}:{row.get('source_row_number', '')}"
+
+
+def build_animal_breeding_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        cage_no = str(row.get("cage_no_raw") or "")
+        if cage_no:
+            grouped.setdefault(cage_no, []).append(row)
+
+    for cage_no, group_rows in grouped.items():
+        evidence_rows = [
+            {
+                "evidence_id": evidence_id(row),
+                "normalized_candidate": {
+                    "sex": row.get("sex_candidate") or "",
+                    "mouse_display_id": row.get("display_id_raw") or "",
+                },
+                "confidence": 0.82 if row.get("row_type") == "parent_or_mouse_snapshot" else 0.68,
+            }
+            for row in group_rows
+        ]
+        candidate = infer_cage_type_candidate(
+            evidence_rows,
+            signals={
+                "mating_date": any(row.get("mating_date_raw") for row in group_rows),
+                "parent_style_rows": any(row.get("row_type") == "parent_or_mouse_snapshot" for row in group_rows),
+                "active_litter_evidence": any(row.get("pubs_raw") for row in group_rows),
+            },
+        )
+        if candidate["candidate_value"] != "unknown":
+            candidate["cage_no_raw"] = cage_no
+            candidate["source_layer"] = "export or view"
+            candidate["review_status"] = "candidate"
+            candidates.append(candidate)
+    return candidates
+
+
+def build_separation_breeding_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("row_type") != "separation_summary_row":
+            continue
+        candidate = infer_maintenance_group_candidate(
+            {
+                "evidence_id": evidence_id(row),
+                "raw": {
+                    "strain": row.get("strain_raw") or "",
+                    "sex": row.get("total_raw") or "",
+                    "count": row.get("total_raw") or "",
+                    "dob": row.get("dob_raw") or "",
+                    "genotype_counts": {
+                        "WT": row.get("wt_raw") or "",
+                        "Tg": row.get("tg_raw") or "",
+                    },
+                },
+                "normalized_candidate": {
+                    "sex": row.get("sex_candidate") or "",
+                    "count": row.get("count_candidate"),
+                    "dob_start": "",
+                    "dob_end": "",
+                },
+                "confidence": 0.74,
+            }
+        )
+        candidate["source_layer"] = "export or view"
+        candidate["review_status"] = "candidate"
+        candidates.append(candidate)
+    return candidates
 
 
 def parse_workbook(path: Path, kind: str = "auto", sheet_name: str | None = None) -> dict[str, Any]:
