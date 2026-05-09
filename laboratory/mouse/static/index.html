@@ -3728,15 +3728,18 @@
         </table>
         <h3>Photo worklist</h3>
         <table>
-          <thead><tr><th>Photo</th><th>Transcription</th><th>Reviews</th><th>Mapping</th><th>Next action</th></tr></thead>
+          <thead><tr><th>Photo</th><th>Transcription</th><th>Reviews</th><th>Mapping</th><th>Next action</th><th>Open</th></tr></thead>
           <tbody>
-            ${(preview.worklist || []).map((item) => row([
-              item.original_filename || item.photo_id,
-              item.transcription_count ? "available" : "missing",
-              `${item.open_review_count || 0} open / ${item.total_review_count || 0} total`,
-              `${item.applied_candidate_count || 0}/${item.canonical_candidate_count || 0} applied`,
-              `${item.next_action || "--"}${item.blocker ? `: ${item.blocker}` : ""}`
-            ])).join("") || row(["No photos in this batch", "", "", "", ""])}
+            ${(preview.worklist || []).map((item) => `
+              <tr>
+                <td>${escapeHtml(item.original_filename || item.photo_id)}</td>
+                <td>${escapeHtml(item.transcription_count ? "available" : "missing")}</td>
+                <td>${escapeHtml(`${item.open_review_count || 0} open / ${item.total_review_count || 0} total`)}</td>
+                <td>${escapeHtml(`${item.applied_candidate_count || 0}/${item.canonical_candidate_count || 0} applied`)}</td>
+                <td>${escapeHtml(`${item.next_action || "--"}${item.blocker ? `: ${item.blocker}` : ""}`)}</td>
+                <td><button class="open-batch-worklist-target" type="button" data-target-type="${escapeHtml(item.action_target_type || "photo")}" data-target-id="${escapeHtml(item.action_target_id || item.photo_id)}" data-photo-id="${escapeHtml(item.photo_id)}">${escapeHtml(item.action_target_label || "Open")}</button></td>
+              </tr>
+            `).join("") || row(["No photos in this batch", "", "", "", "", ""])}
           </tbody>
         </table>
         <button class="release-upload-batch" type="button" data-batch-id="${escapeHtml(batch.upload_batch_id)}" ${preview.ready ? "" : "disabled"}>Close Batch</button>
@@ -5872,6 +5875,31 @@
       await refresh();
     });
     document.getElementById("uploadBatchReleasePanel").addEventListener("click", async (event) => {
+      const targetButton = event.target.closest(".open-batch-worklist-target");
+      if (targetButton) {
+        const targetType = targetButton.dataset.targetType || "photo";
+        const targetId = targetButton.dataset.targetId || "";
+        const photoId = targetButton.dataset.photoId || targetId;
+        if (targetType === "review" && targetId) {
+          reviewStatusFilter = "all";
+          selectedReviewId = targetId;
+          setActiveView("review");
+          await refresh();
+          document.getElementById("uploadMessage").textContent = `Opened review ${targetId} from the batch worklist.`;
+          return;
+        }
+        if (targetType === "canonical_candidate" && targetId) {
+          setActiveView("comparison");
+          document.getElementById("uploadMessage").textContent = `Open canonical candidate ${targetId} in Candidate Drafts.`;
+          return;
+        }
+        if (photoId) {
+          setActiveView("photo");
+          setTranscriptionPhoto(photoId);
+          document.getElementById("uploadMessage").textContent = `Opened photo ${photoId} from the batch worklist.`;
+        }
+        return;
+      }
       const button = event.target.closest(".release-upload-batch");
       if (!button) return;
       try {
