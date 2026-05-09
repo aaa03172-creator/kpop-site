@@ -4252,6 +4252,84 @@ def list_mouse_events() -> list[dict[str, Any]]:
     return result
 
 
+HIGH_RISK_MOUSE_EVENT_KEYWORDS = {
+    "death",
+    "dead",
+    "sacrifice",
+    "sacrificed",
+    "euthanasia",
+    "euthanized",
+    "separation",
+    "separated",
+    "wean",
+    "weaned",
+    "move",
+    "moved",
+    "transfer",
+    "transferred",
+    "mating",
+    "mate",
+    "paired",
+    "pairing",
+    "litter",
+    "genotype",
+    "genotyped",
+    "genotyping",
+}
+
+
+def is_high_risk_mouse_event(event_type: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(event_type or "").lower()).strip("_")
+    tokens = {token for token in normalized.split("_") if token}
+    return normalized in HIGH_RISK_MOUSE_EVENT_KEYWORDS or bool(tokens & HIGH_RISK_MOUSE_EVENT_KEYWORDS)
+
+
+def validate_mouse_event_evidence(conn: Any, payload: MouseEventCreate) -> None:
+    details = payload.details or {}
+    source_record_id = payload.source_record_id
+    source_photo_id = str(details.get("source_photo_id") or "").strip()
+    photo_evidence_id = str(details.get("photo_evidence_id") or "").strip()
+    source_note_item_id = str(details.get("source_note_item_id") or "").strip()
+
+    if source_record_id:
+        exists = conn.execute(
+            "SELECT 1 FROM source_record WHERE source_record_id = ?",
+            (source_record_id,),
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=400, detail="source_record_id does not exist.")
+    if source_photo_id:
+        exists = conn.execute("SELECT 1 FROM photo_log WHERE photo_id = ?", (source_photo_id,)).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=400, detail="source_photo_id does not exist.")
+    if photo_evidence_id:
+        exists = conn.execute(
+            "SELECT 1 FROM photo_evidence_item WHERE photo_evidence_id = ?",
+            (photo_evidence_id,),
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=400, detail="photo_evidence_id does not exist.")
+    if source_note_item_id:
+        exists = conn.execute(
+            "SELECT 1 FROM card_note_item_log WHERE note_item_id = ?",
+            (source_note_item_id,),
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=400, detail="source_note_item_id does not exist.")
+
+    if is_high_risk_mouse_event(payload.event_type) and not any(
+        [source_record_id, source_photo_id, photo_evidence_id, source_note_item_id]
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "High-risk mouse events require evidence before canonical commit: "
+                "source_record_id, details.source_photo_id, details.photo_evidence_id, "
+                "or details.source_note_item_id."
+            ),
+        )
+
+
 @app.post("/api/mouse-events")
 def create_mouse_event(payload: MouseEventCreate) -> dict[str, Any]:
     event_id = new_id("event")
@@ -4264,6 +4342,7 @@ def create_mouse_event(payload: MouseEventCreate) -> dict[str, Any]:
         ).fetchone()
         if exists is None:
             raise HTTPException(status_code=404, detail="Mouse not found.")
+        validate_mouse_event_evidence(conn, payload)
         conn.execute(
             """
             INSERT INTO mouse_event
@@ -9847,6 +9926,25 @@ def create_export_validation_report_artifact(export_type: str, query: str = "") 
     return persist_validation_report_artifact(report)
 
 
+def parse_export_log_provenance(note: str) -> dict[str, str]:
+    provenance = {
+        "export_manifest_path": "",
+        "validation_report_id": "",
+        "state_watermark": "",
+    }
+    note_text = str(note or "")
+    patterns = {
+        "export_manifest_path": r"(?:^|\s|;)manifest=([^;]+)",
+        "validation_report_id": r"(?:^|\s|;)validation_report=([^;]+)",
+        "state_watermark": r"(?:^|\s|;)state_watermark=([^;]+)",
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, note_text)
+        if match:
+            provenance[key] = match.group(1).strip()
+    return provenance
+
+
 @app.get("/api/export-log")
 def list_export_log() -> list[dict[str, Any]]:
     with connection() as conn:
@@ -9860,7 +9958,14 @@ def list_export_log() -> list[dict[str, Any]]:
             LIMIT 25
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    export_rows = []
+    for row in rows:
+        item = dict(row)
+        provenance = parse_export_log_provenance(item.get("note", ""))
+        item.update(provenance)
+        item["provenance"] = provenance
+        export_rows.append(item)
+    return export_rows
 
 
 @app.get("/api/exports/separation.xlsx")

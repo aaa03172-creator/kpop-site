@@ -2783,6 +2783,15 @@ def main() -> None:
                     any(item["export_type"] == "animal_sheet_xlsx" and item["status"] == "generated" for item in ready_logs),
                     "Export log should record generated animal sheet XLSX exports.",
                 )
+                workbook_export_log = next(
+                    item for item in ready_logs if item["export_type"] == "separation_xlsx" and item["status"] == "generated"
+                )
+                assert_true(
+                    workbook_export_log["export_manifest_path"].endswith(".json")
+                    and workbook_export_log["validation_report_id"].startswith("validation_report_export_separation_xlsx")
+                    and workbook_export_log["state_watermark"],
+                    "Workbook export log should expose manifest, validation report, and state watermark provenance.",
+                )
                 ready_export_log = next(item for item in ready_logs if item["export_type"] == "mouse_csv")
                 assert_true(ready_export_log["status"] == "generated", "Ready export should create a generated export log entry.")
                 assert_true(

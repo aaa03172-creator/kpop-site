@@ -320,3 +320,35 @@ def test_log_workbook_export_preserves_manifest_provenance(tmp_path: Path) -> No
         assert "state_watermark=2026-05-09T11:45:00Z" in row["note"]
     finally:
         db.DB_PATH = old_db_path
+
+
+def test_export_log_api_exposes_structured_provenance(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+
+        app_main.log_workbook_export(
+            "animal_sheet_xlsx",
+            "2026-05-09 ApoM animalsheet.xlsx",
+            "ApoM",
+            2,
+            0,
+            "generated",
+            manifest_artifact_path="mousedb_artifacts/export_manifests/animal_sheet.json",
+            validation_report_id="validation_report_export_animal_sheet_xlsx_ApoM",
+            state_watermark="2026-05-09T12:05:00Z",
+        )
+
+        [row] = app_main.list_export_log()
+
+        assert row["export_manifest_path"] == "mousedb_artifacts/export_manifests/animal_sheet.json"
+        assert row["validation_report_id"] == "validation_report_export_animal_sheet_xlsx_ApoM"
+        assert row["state_watermark"] == "2026-05-09T12:05:00Z"
+        assert row["provenance"] == {
+            "export_manifest_path": "mousedb_artifacts/export_manifests/animal_sheet.json",
+            "validation_report_id": "validation_report_export_animal_sheet_xlsx_ApoM",
+            "state_watermark": "2026-05-09T12:05:00Z",
+        }
+    finally:
+        db.DB_PATH = old_db_path

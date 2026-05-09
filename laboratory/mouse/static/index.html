@@ -3339,7 +3339,7 @@
             <h3>Export log</h3>
             <div class="export-table-wrap">
               <table>
-                <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Rows</th><th>Blocked</th><th>Persona</th><th>Generated</th><th>Filter</th></tr></thead>
+                <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Rows</th><th>Blocked</th><th>Manifest</th><th>Validation</th><th>State</th><th>Persona</th><th>Generated</th><th>Filter</th></tr></thead>
                 <tbody id="exportLogRows"></tbody>
               </table>
             </div>
@@ -5336,11 +5336,14 @@
           item.status,
           item.row_count,
           item.blocked_review_count,
+          item.export_manifest_path || "--",
+          item.validation_report_id || "--",
+          item.state_watermark || "--",
           item.generated_role || "Data / Export Manager",
           item.exported_at,
           item.query || "--"
         ])
-      ).join("") || row(["No exports generated yet", "", "", "", "", "", "", ""]);
+      ).join("") || row(["No exports generated yet", "", "", "", "", "", "", "", "", "", ""]);
     }
 
     async function refresh() {

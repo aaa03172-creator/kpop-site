@@ -89,7 +89,7 @@ Current implementation already has several pieces of the ledger:
 | Note-line evidence | `card_note_item_log` | Present. This is a strong fit for cage card note line continuity. |
 | Correction history | `correction_log` | Present, but should be extended or consistently used for evidence item corrections. |
 | Canonical mouse state | `mouse_master` | Present. Several fields carry `source_photo_id`, `source_note_item_id`, and `source_record_id`. |
-| Event history | `mouse_event` | Present. Some event paths include `source_record_id`; photo/note evidence requirements are not consistently enforced. |
+| Event history | `mouse_event` | Present. Generic high-risk event creation now rejects evidence-free commits and accepts `source_record_id`, source photo, photo evidence item, or source note item references. Some domain-specific apply flows still need deeper photo evidence linking. |
 | Genotyping evidence | `genotyping_record` | Present, with `source_photo_id`, `source_record_id`, and `photo_evidence_id`. Genotype result confirmation is evidence-gated. |
 | ROI/crop evidence | ROI preview and cache paths | Present as local derived review aid, but not yet durable field-level evidence. |
 
@@ -100,7 +100,7 @@ Important current findings:
 - Review Queue is connected to raw photo evidence through `review_queue.parse_id -> parse_result.photo_id -> photo_log.photo_id`; photo transcription reviews also use `review_evidence_link` to point directly at `photo_evidence_item` rows.
 - ROI/bbox is currently enough as a local review aid. For v1, `source_photo_id + roi_label + observed_raw_text + note_item_id` is sufficient. Durable `bbox_json` should be added first for ear label ambiguity and gel band evidence, not for every field on day one.
 - AI parsing results generally enter `parse_result`, `card_snapshot`, `card_note_item_log`, `photo_evidence_item`, and `review_queue` before canonical apply.
-- The risky gap is no longer initial AI transcription or genotype result confirmation. Remaining risk is later manual or workflow endpoints that create mating, death, movement, separation, or litter events with weak evidence requirements.
+- The risky gap is no longer initial AI transcription, genotype result confirmation, or direct generic high-risk event creation. Remaining risk is later domain-specific apply flows where created events may carry only a broad source record instead of the most specific `photo_evidence_item` or note-line evidence.
 
 ## Proposed Photo Evidence Ledger
 
@@ -239,7 +239,7 @@ Gel band calls should start as reviewable evidence. A genotype result should bec
 2. On review resolution, write correction rows that preserve raw OCR/observed text separately from corrected values.
 3. On canonical candidate apply, link created mouse events to source evidence item IDs when available.
 4. Require evidence for `update_genotyping` when accepting a genotype result, unless the user supplies an explicit manual source record.
-5. Require evidence/source records for death, separation, mating, movement, and litter event commits.
+5. Require evidence/source records for death, separation, mating, movement, and litter event commits through the generic event API; then extend specific apply flows to preserve the most specific evidence ID available.
 6. Add UI audit display for source photo, ROI label, raw text, parsed value, correction, and linked canonical event.
 
 ## Implementation Plan
@@ -346,11 +346,13 @@ Implemented in the local FastAPI/SQLite prototype:
 - Review audit exposes linked `photo_evidence_items`.
 - Genotype result confirmation requires `source_photo_id`, `photo_evidence_id`, or `source_record_id`.
 - Accepted genotype result records preserve evidence refs and create a `genotyped` mouse event with evidence details.
+- Generic high-risk mouse event creation rejects evidence-free death, separation/weaning, cage movement, mating, litter, and genotype-style events.
+- Generic high-risk mouse event creation accepts and validates evidence through `source_record_id`, `details.source_photo_id`, `details.photo_evidence_id`, or `details.source_note_item_id`.
 
 Still pending:
 
 - Link canonical candidate apply events back to `photo_evidence_item`.
-- Extend evidence-required commit checks to death, separation/weaning, cage movement, mating, and litter events.
+- Extend domain-specific apply flows so death, separation/weaning, cage movement, mating, and litter events preserve the most specific available note-line or photo evidence reference, not only a broad source record.
 - Add UI panels that render linked evidence rows with source photo/ROI context.
 - Add gel band evidence capture as manual/reviewable rows before any automated band calling.
 
@@ -438,8 +440,8 @@ Do now:
 
 1. Adopt PVM only as the Photo Evidence Ledger framing.
 2. Add a doc reference so future work does not reinterpret PVM as model training.
-3. Plan schema placeholder work for `photo_evidence_item`.
-4. Prioritize genotype evidence enforcement because genotype status currently has the highest risk of becoming canonical without photo or result evidence.
+3. Keep generic event and genotype evidence gates covered by regression tests.
+4. Next, link canonical candidate apply events to the specific `photo_evidence_item` rows that justified them.
 
 Do later:
 
