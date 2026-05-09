@@ -683,6 +683,10 @@ def main() -> None:
                 assert_true("legacyWorkbookKind" in index_html, "Local UI should expose legacy workbook kind selection.")
                 assert_true("legacyWorkbookRows" in index_html, "Local UI should render legacy workbook rows.")
                 assert_true("Review items" in index_html, "Local UI should expose legacy workbook review item counts.")
+                assert_true(
+                    "Strain registry candidates" in index_html and "review gene/allele" in index_html,
+                    "Local UI should surface legacy strain registry candidates without inferred gene/allele values.",
+                )
                 assert_true("Legacy decision" in index_html, "Local UI should expose legacy review decision controls.")
                 assert_true("Create Missing Photo Reviews" in index_html, "Local UI should expose photo review candidate creation.")
                 assert_true("Evidence Reconciliation" in index_html, "Local UI should expose photo/workbook reconciliation.")

@@ -2668,6 +2668,7 @@
             <th>Kind</th>
             <th>Rows</th>
             <th>Review items</th>
+            <th>Strain registry candidates</th>
             <th>Preview</th>
             <th>Source evidence</th>
           </tr>
@@ -3499,6 +3500,22 @@
 
     function legacyWorkbookRow(item) {
       const rows = item.rows || [];
+      const registryCandidates = item.strain_registry_candidates || [];
+      const registryPreview = registryCandidates.slice(0, 3).map((candidate) => {
+        const normalized = candidate.normalized_candidate || {};
+        const rawText = [
+          candidate.strain_raw,
+          candidate.genotype_raw
+        ].filter(Boolean).join(" / ");
+        const geneAllele = [
+          normalized.gene_symbol,
+          normalized.allele_name
+        ].filter(Boolean).join(" / ");
+        return `${rawText || "--"} -> ${geneAllele || "review gene/allele"}`;
+      }).join(" | ");
+      const registrySummary = registryCandidates.length
+        ? `${registryCandidates.length} candidate${registryCandidates.length === 1 ? "" : "s"}: ${registryPreview}`
+        : "--";
       const preview = rows.slice(0, 3).map((legacyRow) => {
         const raw = legacyRow.raw_row || {};
         return [
@@ -3514,6 +3531,7 @@
         `${item.workbook_kind || "--"} / ${item.sheet_name || "--"}`,
         String(rows.length),
         `${item.open_review_count || 0} open / ${item.review_count || 0} total`,
+        registrySummary,
         preview || "--",
         item.source_record_id || "--"
       ]);
@@ -5454,7 +5472,7 @@
       document.getElementById("distributionRows").innerHTML = suggestions.map(distributionRow).join("") ||
         row(["No distribution candidates yet", "", "", "", "", ""]);
       document.getElementById("legacyWorkbookRows").innerHTML = legacyWorkbookImports.map(legacyWorkbookRow).join("") ||
-        row(["No legacy workbooks imported yet", "", "", "", "", ""]);
+        row(["No legacy workbooks imported yet", "", "", "", "", "", ""]);
       document.getElementById("evidenceReconciliationRows").innerHTML = (evidenceReconciliation.comparison_rows || []).map((item) =>
         row([item.check, item.status, item.detail])
       ).join("") || row(["No evidence loaded", "missing", "Upload latest cage-card photos and predecessor Excel views."]);
@@ -6337,7 +6355,7 @@
       }
       const result = await response.json();
       document.getElementById("legacyWorkbookMessage").textContent =
-        `Imported ${result.stored_rows} candidate rows and opened ${result.created_review_items} review items from ${result.source_file_name}; source evidence ${result.source_record_id}.`;
+        `Imported ${result.stored_rows} candidate rows, ${result.strain_registry_candidate_count || 0} strain registry candidates, and opened ${result.created_review_items} review items from ${result.source_file_name}; source evidence ${result.source_record_id}.`;
       document.getElementById("legacyWorkbookFile").value = "";
       await refresh();
     });
