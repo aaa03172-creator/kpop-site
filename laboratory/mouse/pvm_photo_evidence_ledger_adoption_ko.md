@@ -84,23 +84,23 @@ Current implementation already has several pieces of the ledger:
 | --- | --- | --- |
 | Raw source photo | `app/db.py` `photo_log` | Present. Uploaded photo is retained and linked to review flow. |
 | Parse attempt and AI/manual draft | `parse_result` | Present. It acts like a parse log, but not a full append-only photo parse ledger. |
-| Review queue | `review_queue` | Present and linked through `parse_id`; review items can reach the source photo. |
+| Review queue | `review_queue`, `review_evidence_link` | Present. Review items can reach the source photo through `parse_id`, and photo transcription reviews can directly link to field/note evidence items. |
 | Card snapshot | `card_snapshot` | Present as parsed/intermediate observation, not durable history by itself. |
 | Note-line evidence | `card_note_item_log` | Present. This is a strong fit for cage card note line continuity. |
 | Correction history | `correction_log` | Present, but should be extended or consistently used for evidence item corrections. |
 | Canonical mouse state | `mouse_master` | Present. Several fields carry `source_photo_id`, `source_note_item_id`, and `source_record_id`. |
 | Event history | `mouse_event` | Present. Some event paths include `source_record_id`; photo/note evidence requirements are not consistently enforced. |
-| Genotyping evidence | `genotyping_record` | Present, with `source_photo_id`, but result update can still be entered without image or evidence link. |
+| Genotyping evidence | `genotyping_record` | Present, with `source_photo_id`, `source_record_id`, and `photo_evidence_id`. Genotype result confirmation is evidence-gated. |
 | ROI/crop evidence | ROI preview and cache paths | Present as local derived review aid, but not yet durable field-level evidence. |
 
 Important current findings:
 
 - `photo_parse_log` does not exist by that exact name. `parse_result` covers part of the need, but a future ledger should record parse attempt metadata more explicitly: extraction method, ROI template, field crop labels, source image minimization mode, OCR engine/model, parse version, confidence, and failure/supersession state.
 - `card_note_item_log` exists and is the correct starting point for cage card note line tracking.
-- Review Queue is connected to raw photo evidence through `review_queue.parse_id -> parse_result.photo_id -> photo_log.photo_id`.
+- Review Queue is connected to raw photo evidence through `review_queue.parse_id -> parse_result.photo_id -> photo_log.photo_id`; photo transcription reviews also use `review_evidence_link` to point directly at `photo_evidence_item` rows.
 - ROI/bbox is currently enough as a local review aid. For v1, `source_photo_id + roi_label + observed_raw_text + note_item_id` is sufficient. Durable `bbox_json` should be added first for ear label ambiguity and gel band evidence, not for every field on day one.
-- AI parsing results generally enter `parse_result`, `card_snapshot`, `card_note_item_log`, and `review_queue` before canonical apply.
-- The risky gap is not initial AI transcription. The risk is later manual or workflow endpoints that create genotype, mating, death, movement, separation, or litter events with weak evidence requirements.
+- AI parsing results generally enter `parse_result`, `card_snapshot`, `card_note_item_log`, `photo_evidence_item`, and `review_queue` before canonical apply.
+- The risky gap is no longer initial AI transcription or genotype result confirmation. Remaining risk is later manual or workflow endpoints that create mating, death, movement, separation, or litter events with weak evidence requirements.
 
 ## Proposed Photo Evidence Ledger
 
@@ -175,7 +175,7 @@ Review items should be able to show:
 - review reason;
 - downstream event or mouse record that would be affected.
 
-For v1, a review item may link indirectly through `parse_id` and `note_item_id`. After the ledger exists, high-risk review items should link directly to `photo_evidence_id`.
+For v1, a review item may link indirectly through `parse_id` and `note_item_id`. Photo transcription reviews now also link through `review_evidence_link`; future high-risk review items should use the same linking pattern instead of adding a single `photo_evidence_id` column to `review_queue`.
 
 ## Event Commit Rule
 
@@ -229,7 +229,7 @@ Gel band calls should start as reviewable evidence. A genotype result should bec
 ### Schema-only
 
 1. Add `photo_evidence_item`.
-2. Add optional `photo_evidence_id` to `review_queue`, or define a linking table if one review can cover several evidence items.
+2. Add `review_evidence_link` so one review can cover several evidence items.
 3. Add optional `photo_evidence_id` to `mouse_event` or standardize event details JSON to include `photo_evidence_ids`.
 4. Allow `correction_log.entity_type = 'photo_evidence_item'` and `entity_type = 'note_item'`.
 
@@ -334,6 +334,25 @@ Acceptance checks:
 - Genotype confirmation with source record or gel/photo evidence succeeds.
 - Mating, death, separation, and movement commits preserve source linkage.
 - Existing reviewed canonical candidate apply remains possible because note-line/photo evidence is present.
+
+### Implemented Progress Snapshot
+
+Implemented in the local FastAPI/SQLite prototype:
+
+- `photo_evidence_item` schema and indexes.
+- `review_evidence_link` schema and indexes.
+- AI/manual photo transcription writes field-level and note-line `photo_evidence_item` rows.
+- Photo transcription review items link to evidence rows.
+- Review audit exposes linked `photo_evidence_items`.
+- Genotype result confirmation requires `source_photo_id`, `photo_evidence_id`, or `source_record_id`.
+- Accepted genotype result records preserve evidence refs and create a `genotyped` mouse event with evidence details.
+
+Still pending:
+
+- Link canonical candidate apply events back to `photo_evidence_item`.
+- Extend evidence-required commit checks to death, separation/weaning, cage movement, mating, and litter events.
+- Add UI panels that render linked evidence rows with source photo/ROI context.
+- Add gel band evidence capture as manual/reviewable rows before any automated band calling.
 
 ### Phase 6: Gel and genotyping evidence
 
