@@ -2616,7 +2616,7 @@
       </div>
       <p class="muted" id="strainMessage"></p>
       <table>
-        <thead><tr><th>Strain</th><th>Gene</th><th>Allele</th><th>Status</th><th>Source evidence</th></tr></thead>
+        <thead><tr><th>Strain</th><th>Gene</th><th>Allele</th><th>Linked gene/allele</th><th>Status</th><th>Source evidence</th></tr></thead>
         <tbody id="strainRows"></tbody>
       </table>
     </section>
@@ -3402,6 +3402,16 @@
       return text(value).replace(/[&<>"']/g, (ch) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
       }[ch]));
+    }
+
+    function strainAlleleSummary(strain) {
+      const alleles = strain.alleles || [];
+      if (!alleles.length) return "--";
+      return alleles.map((item) => {
+        const gene = item.gene_symbol || "--";
+        const allele = item.allele_name || "--";
+        return `${gene} / ${allele}`;
+      }).join("; ");
     }
 
     function assignedStrainRow(strain) {
@@ -5186,8 +5196,9 @@
 
       const selectedStrain = strains[0] || assignedStrains.find((strain) => strain.active) || {};
       const selectedStrainName = selectedStrain.strain_name || selectedStrain.display_name || mouse?.raw_strain_text || "No configured strain";
-      const selectedGene = selectedStrain.gene || "--";
-      const selectedAllele = selectedStrain.allele || "--";
+      const selectedLinkedAllele = (selectedStrain.alleles || [])[0] || {};
+      const selectedGene = selectedLinkedAllele.gene_symbol || selectedStrain.gene || "--";
+      const selectedAllele = selectedLinkedAllele.allele_name || selectedStrain.allele || "--";
       const selectedBackground = selectedStrain.background || "--";
       const selectedMating = matings.find((mating) => (mating.strain_goal || "").includes(selectedStrainName)) || matings[0] || {};
       const selectedEvent = mouseEvents.find((event) => event.related_entity_type === "mating" || event.related_entity_type === "litter") || mouseEvents[0] || {};
@@ -5434,10 +5445,11 @@
           strain.strain_name,
           strain.gene || "--",
           strain.allele || "--",
+          strainAlleleSummary(strain),
           strain.status,
           strain.source_record_id || "--"
         ])
-      ).join("") || row(["No confirmed strains yet", "", "", "", ""]);
+      ).join("") || row(["No confirmed strains yet", "", "", "", "", ""]);
       const suggestions = distributionSuggestions(distributionImports, assignedStrains);
       document.getElementById("distributionRows").innerHTML = suggestions.map(distributionRow).join("") ||
         row(["No distribution candidates yet", "", "", "", "", ""]);

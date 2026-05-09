@@ -43,6 +43,7 @@ Layer classification: implementation verification / non-canonical project note.
 | A24 | High-Risk Mouse Event Evidence | death, sacrificed, moved, weaned 같은 high-risk mouse event는 source evidence 없이 canonical event를 생성하지 않는다. | Done | `tests/test_mouse_event_evidence_enforcement.py` |
 | A25 | Validation Report Artifact | canonical apply/export 전 validation report artifact가 pass/block 상태와 source refs를 남긴다. | Done | `tests/test_artifact_workflow.py` |
 | A26 | Export Manifest Artifact | CSV/XLSX export는 export_manifest artifact로 validation report, source refs, state watermark, filename을 추적한다. | Done | `tests/test_artifact_workflow.py` |
+| A27 | Strain Gene/Allele Registry | Strain creation preserves legacy gene/allele text while creating source-backed normalized gene, allele, and strain-allele link records. | Done | `tests/test_strain_knowledge_graph.py`, `scripts/verify-local-app.py` |
 
 ## 주요 Gap / 다음 검증 후보
 

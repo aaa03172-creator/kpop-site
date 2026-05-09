@@ -21,7 +21,7 @@ def main() -> None:
     index_html = INDEX_PATH.read_text(encoding="utf-8")
     main_py = MAIN_PATH.read_text(encoding="utf-8")
 
-    for number in range(1, 27):
+    for number in range(1, 28):
         acceptance_id = f"A{number:02d}"
         assert_true(acceptance_id in matrix, f"Acceptance matrix is missing {acceptance_id}.")
 
@@ -42,6 +42,7 @@ def main() -> None:
         "A24": ["High-risk mouse events require evidence"],
         "A25": ["validation_report"],
         "A26": ["export_manifest"],
+        "A27": ["Strain creation should populate the normalized gene registry", "strain_allele_relationship"],
     }
     combined = "\n".join([matrix, local_verify, index_html, main_py])
     for acceptance_id, tokens in evidence_checks.items():
