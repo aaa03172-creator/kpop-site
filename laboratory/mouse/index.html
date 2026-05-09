@@ -6,18 +6,25 @@
   <title>Mouse Colony LIMS - Photo Review Workbench</title>
   <style>
     :root {
-      --background: #f8f9ff;
-      --surface: #ffffff;
-      --surface-low: #eff4ff;
-      --surface-mid: #e5eeff;
-      --surface-high: #dce9ff;
-      --line: #bec8ca;
-      --line-soft: #dbe3e5;
-      --ink: #0b1c30;
-      --muted: #3e494a;
-      --quiet: #6f797a;
-      --primary: #00535b;
-      --primary-2: #006d77;
+      /* DESIGN.md-inspired Airtable canvas + Linear focus accent, adapted for lab evidence review. */
+      --canvas: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink-strong: #181d26;
+      --hairline: #dddddd;
+      --accent-linear: #5e6ad2;
+      --accent-linear-soft: #eef0ff;
+      --background: #f8fafc;
+      --surface: var(--canvas);
+      --surface-low: #f3f6f8;
+      --surface-mid: var(--accent-linear-soft);
+      --surface-high: #e8edf2;
+      --line: var(--hairline);
+      --line-soft: #e7ebef;
+      --ink: var(--ink-strong);
+      --muted: #41454d;
+      --quiet: #6f747c;
+      --primary: #181d26;
+      --primary-2: #0f6b5f;
       --secondary: #236863;
       --secondary-bg: #a9ece5;
       --tertiary: #713d10;
@@ -88,10 +95,11 @@
       width: 32px;
       height: 32px;
       border-radius: 6px;
-      background: var(--primary);
+      background: var(--ink-strong);
       color: #fff;
       font-size: 15px;
       font-weight: 900;
+      box-shadow: inset 0 -3px 0 var(--accent-linear);
     }
 
     .brand-title {
@@ -141,14 +149,14 @@
     }
 
     .nav-button:hover {
-      background: #eef3f6;
-      color: var(--primary);
+      background: var(--accent-linear-soft);
+      color: var(--ink-strong);
     }
 
     .nav-button.active {
-      background: #e8f4f3;
-      color: var(--primary);
-      box-shadow: inset 3px 0 0 var(--primary);
+      background: var(--accent-linear-soft);
+      color: var(--ink-strong);
+      box-shadow: inset 3px 0 0 var(--accent-linear);
     }
 
     .nav-icon {
@@ -298,7 +306,7 @@
     }
 
     .ghost-button {
-      color: var(--primary);
+      color: var(--accent-linear);
     }
 
     .danger-button {
@@ -636,7 +644,7 @@
 
     tbody tr.selected {
       background: var(--surface-mid);
-      box-shadow: inset 3px 0 0 var(--primary);
+      box-shadow: inset 3px 0 0 var(--accent-linear);
     }
 
     .thumb {
@@ -730,7 +738,7 @@
       min-height: 20px;
       border: 1px solid var(--line);
       border-radius: 4px;
-      background: var(--surface-low);
+      background: var(--surface-soft);
       color: var(--muted);
       padding: 1px 6px;
       font-size: 10px;
@@ -826,7 +834,7 @@
       height: 42px;
       border-radius: 999px;
       background: var(--surface-low);
-      color: var(--primary);
+      color: var(--accent-linear);
       font-weight: 900;
     }
 

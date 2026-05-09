@@ -6,14 +6,21 @@
   <title>Mouse Colony LIMS - Photo Review Workbench</title>
   <style>
     :root {
-      --bg: #f7faf9;
-      --panel: #ffffff;
-      --panel-soft: #eef5f2;
-      --line: #d6e0dc;
-      --ink: #12201b;
-      --muted: #667770;
-      --primary: #0f6b5f;
-      --primary-dark: #0a4039;
+      /* DESIGN.md-inspired Airtable canvas + Linear focus accent, adapted for lab evidence review. */
+      --canvas: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink-strong: #181d26;
+      --hairline: #dddddd;
+      --accent-linear: #5e6ad2;
+      --accent-linear-soft: #eef0ff;
+      --bg: #f8fafc;
+      --panel: var(--canvas);
+      --panel-soft: var(--surface-soft);
+      --line: var(--hairline);
+      --ink: var(--ink-strong);
+      --muted: #41454d;
+      --primary: #181d26;
+      --primary-dark: #0f6b5f;
       --warn: #8a5a00;
       --danger: #9b2f3e;
     }
@@ -38,8 +45,8 @@
       gap: 18px;
       padding: 18px 14px;
       border-right: 1px solid var(--line);
-      background: #10211d;
-      color: #e9f4f1;
+      background: #181d26;
+      color: #f7f8f8;
       overflow-y: auto;
     }
     .brand {
@@ -53,7 +60,7 @@
     }
     .brand span,
     .sidebar-footer {
-      color: #a9bbb5;
+      color: #c8ced8;
       font-size: 12px;
       line-height: 1.35;
     }
@@ -63,7 +70,7 @@
     }
     .nav-label {
       margin: 10px 8px 4px;
-      color: #90a49d;
+      color: #8a8f98;
       font-size: 11px;
       font-weight: 800;
       text-transform: uppercase;
@@ -86,8 +93,9 @@
     }
     .nav-button:hover,
     .nav-button.active {
-      background: #1b3932;
+      background: #252836;
       color: #fff;
+      box-shadow: inset 3px 0 0 var(--accent-linear);
     }
     .nav-icon {
       display: grid;
@@ -96,7 +104,7 @@
       height: 22px;
       border-radius: 6px;
       background: rgba(255, 255, 255, 0.08);
-      color: #9fd6c8;
+      color: #c8cbff;
       font-size: 11px;
     }
     .nav-count {
@@ -427,7 +435,7 @@
       letter-spacing: 0.04em;
     }
     tr.selected-row td {
-      background: #eef7f4;
+      background: var(--accent-linear-soft);
     }
     .mono {
       font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -574,8 +582,8 @@
     }
     .review-card.selected-card,
     .review-card:hover {
-      border-color: rgba(37, 99, 235, 0.45);
-      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.09);
+      border-color: rgba(94, 106, 210, 0.52);
+      box-shadow: 0 10px 24px rgba(94, 106, 210, 0.1);
     }
     .review-card h3 {
       margin: 0 0 5px;

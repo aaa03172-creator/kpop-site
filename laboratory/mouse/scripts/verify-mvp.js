@@ -7,6 +7,7 @@ const { chromium } = require("playwright");
 const root = path.resolve(__dirname, "..");
 const pagePath = path.join(root, "index.html");
 const staticPagePath = path.join(root, "static", "index.html");
+const designPath = path.join(root, "design.md");
 const fixturePath = path.join(root, "fixtures", "sample_parse_results.json");
 const distributionFixturePath = path.join(root, "fixtures", "sample_distribution_import.json");
 const distributionParserPath = path.join(root, "scripts", "parse_distribution_workbook.py");
@@ -95,12 +96,29 @@ wb.save(workbook_path)
 async function main() {
   assert(fs.existsSync(pagePath), "index.html is missing.");
   assert(fs.existsSync(staticPagePath), "static/index.html is missing.");
+  assert(fs.existsSync(designPath), "design.md is missing.");
   assert(fs.existsSync(fixturePath), "fixtures/sample_parse_results.json is missing.");
   assert(fs.existsSync(distributionFixturePath), "fixtures/sample_distribution_import.json is missing.");
   assert(fs.existsSync(distributionParserPath), "Distribution workbook parser is missing.");
   const generatedDistributionPath = verifyDistributionParser();
 
   const html = fs.readFileSync(pagePath, "utf8");
+  const staticHtml = fs.readFileSync(staticPagePath, "utf8");
+  const design = fs.readFileSync(designPath, "utf8");
+  assert(
+    design.includes("awesome-design-md") &&
+      design.includes("Airtable") &&
+      design.includes("Linear") &&
+      design.includes("Layer classification: design guidance / non-canonical product documentation"),
+    "design.md should document the non-canonical awesome-design-md adaptation sources."
+  );
+  assert(
+    html.includes("--accent-linear: #5e6ad2") &&
+      staticHtml.includes("--accent-linear: #5e6ad2") &&
+      html.includes("DESIGN.md-inspired") &&
+      staticHtml.includes("DESIGN.md-inspired"),
+    "Local UI should expose Airtable/Linear-inspired design tokens without copying brand surfaces."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);

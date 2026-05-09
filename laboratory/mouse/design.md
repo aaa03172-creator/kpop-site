@@ -315,6 +315,37 @@ The proposed visual direction is appropriate:
 - clear status badges;
 - source image thumbnails and ROI overlays.
 
+## DESIGN.md Source Adaptation
+
+Layer classification: design guidance / non-canonical product documentation.
+
+This project adapts `awesome-design-md` as a design reference source, not as a canonical product requirement. The useful references are:
+
+- Airtable `DESIGN.md`: white canvas, structured-data rhythm, modest typography weights, hairline borders, clear primary/secondary action hierarchy.
+- Linear `DESIGN.md`: precise product-workflow density, thin panel boundaries, quiet status language, and a single lavender-blue focus accent.
+
+For Mouse Colony LIMS, these references should be translated into a lab workflow interface:
+
+- Use Airtable-like spreadsheet familiarity for Photo Inbox, Colony Records, Excel import, and Excel export views.
+- Use Linear-like precision for Review Queue, evidence inspectors, selected rows, focus states, and blocked/high-risk workflow states.
+- Keep the base surface light and clinical. Avoid copying Linear's near-black marketing canvas or Airtable's coral/forest signature marketing cards.
+- Reserve `#5e6ad2` as a narrow focus/selection accent, not as a broad brand color.
+- Keep status colors semantic: green/teal for verified or valid, amber for review, red for conflict, gray for processing.
+- Keep cards flat or nearly flat. Favor 1px borders, compact rows, and stable panels over decorative shadow or marketing composition.
+- Treat source photo thumbnails, parsed note lines, confidence, and before/after values as first-class UI material.
+- Do not introduce brand-copy language from the reference systems. Use lab terms: photos, cage cards, mouse IDs, mating, litter, genotype, review, and Excel export.
+
+Implementation tokens inspired by this adaptation:
+
+| Token | Value | Role |
+| --- | --- | --- |
+| `--canvas` | `#ffffff` | Airtable-style primary work canvas |
+| `--surface-soft` | `#f8fafc` | Quiet table and panel background |
+| `--ink-strong` | `#181d26` | High-contrast operational text |
+| `--hairline` | `#dddddd` | Subtle dividers and input borders |
+| `--accent-linear` | `#5e6ad2` | Focus, selected state, and review inspector accent |
+| `--accent-linear-soft` | `#eef0ff` | Low-intensity selected row or focus background |
+
 Recommended tone:
 
 - quiet;
