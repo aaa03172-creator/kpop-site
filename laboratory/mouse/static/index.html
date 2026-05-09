@@ -511,7 +511,8 @@
     .focus-review-read-model,
     .colony-state-read-model,
     .colony-schedule-read-model,
-    .mouse-timeline-read-model {
+    .mouse-timeline-read-model,
+    .evidence-ledger-read-model {
       display: grid;
       gap: 10px;
       margin: 0 0 12px;
@@ -526,14 +527,17 @@
     .colony-schedule-read-model h2,
     .colony-schedule-read-model h3,
     .mouse-timeline-read-model h2,
-    .mouse-timeline-read-model h3 {
+    .mouse-timeline-read-model h3,
+    .evidence-ledger-read-model h2,
+    .evidence-ledger-read-model h3 {
       margin: 0;
       font-size: 14px;
     }
     .focus-review-read-model p,
     .colony-state-read-model p,
     .colony-schedule-read-model p,
-    .mouse-timeline-read-model p {
+    .mouse-timeline-read-model p,
+    .evidence-ledger-read-model p {
       margin: 0;
       color: var(--muted);
       font-size: 12px;
@@ -541,14 +545,16 @@
     .focus-review-read-model[data-state="error"],
     .colony-state-read-model[data-state="error"],
     .colony-schedule-read-model[data-state="error"],
-    .mouse-timeline-read-model[data-state="error"] {
+    .mouse-timeline-read-model[data-state="error"],
+    .evidence-ledger-read-model[data-state="error"] {
       border-color: var(--cue-must-line);
       background: var(--cue-must-bg);
     }
     .focus-review-card,
     .colony-state-card,
     .colony-schedule-card,
-    .mouse-timeline-card {
+    .mouse-timeline-card,
+    .evidence-ledger-card {
       border-top: 1px solid var(--line);
       padding-top: 10px;
     }
@@ -2381,6 +2387,10 @@
         </article>
         <article class="viz-card span-12">
           <h3>Evidence & Review Readiness</h3>
+          <div class="evidence-ledger-read-model" id="evidenceLedgerReadModel" aria-live="polite">
+            <h3>Evidence Ledger</h3>
+            <p>Loading photo evidence ledger...</p>
+          </div>
           <p class="viz-note">Visualization numbers are useful only when they stay tied to source photos, note lines, reviewed corrections, and export blockers.</p>
           <table aria-label="Visualization data quality">
             <thead><tr><th>Check</th><th>Current</th><th>Data Boundary</th><th>Lab Action</th></tr></thead>
@@ -3932,6 +3942,25 @@
       }
     }
 
+    async function loadEvidenceLedgerReadModel() {
+      try {
+        return await api("/api/ui/evidence-ledger");
+      } catch (error) {
+        return {
+          source_layer: "export or view",
+          load_error: true,
+          error_message: apiErrorMessage(error),
+          page_question: "What evidence supports this record?",
+          summary: { total_evidence: 0, needs_review: 0, linked_events: 0, source_photos: 0 },
+          evidence_items: [],
+          empty_state: {
+            message: "Evidence Ledger unavailable. Use source evidence tables while the read model reloads.",
+            fabricated_records: false
+          }
+        };
+      }
+    }
+
     function renderFocusReviewReadModel(model) {
       const panel = document.getElementById("focusReviewReadModel");
       if (!panel) return;
@@ -4237,6 +4266,72 @@
               <span class="chip">Related ${escapeHtml(related.entity_type || "--")} ${escapeHtml(related.entity_id || "")}</span>
               <span class="chip">Evidence ${escapeHtml(evidence.source_record_id || "--")}</span>
               <span class="chip">${escapeHtml(evidence.source_label || evidence.source_type || "source pending")}</span>
+            </div>
+          </div>
+        `;
+      }).join("")}`;
+    }
+
+    function renderEvidenceLedgerReadModel(model) {
+      const panel = document.getElementById("evidenceLedgerReadModel");
+      if (!panel) return;
+      const items = Array.isArray(model?.evidence_items) ? model.evidence_items : [];
+      const summaryData = model?.summary || {};
+      const emptyState = model?.empty_state || {};
+      const fabricatedRecords = emptyState.fabricated_records === true;
+      const requiredSummaryKeys = ["total_evidence", "needs_review", "linked_events", "source_photos"];
+      const hasSummaryCounts = requiredSummaryKeys.every((key) => Number.isFinite(summaryData[key]));
+      const counts = model?.load_error || !hasSummaryCounts
+        ? ["Counts unavailable"]
+        : [
+            `Evidence items ${Number(summaryData.total_evidence || 0)}`,
+            `Needs review ${Number(summaryData.needs_review || 0)}`,
+            `Linked events ${Number(summaryData.linked_events || 0)}`,
+            `Source photos ${Number(summaryData.source_photos || 0)}`
+          ];
+      const summary = `
+        <div class="section-kicker">
+          <div>
+            <h3>Evidence Ledger</h3>
+            <p>${escapeHtml(model?.page_question || "What evidence supports this record?")}</p>
+          </div>
+          <span class="chip">${escapeHtml(model?.source_layer || "export or view")}</span>
+        </div>
+        <div class="review-queue-summary">
+          ${counts.map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+          <span class="chip">Fabricated records: ${fabricatedRecords ? "yes" : "no"}</span>
+        </div>
+      `;
+      if (model?.load_error) {
+        panel.dataset.state = "error";
+        panel.dataset.fabricatedRecords = "false";
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Evidence Ledger unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        return;
+      }
+      if (!items.length) {
+        panel.dataset.state = "empty";
+        panel.dataset.fabricatedRecords = String(fabricatedRecords);
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "No photo evidence items are available yet.")}</p>`;
+        return;
+      }
+      panel.dataset.state = "loaded";
+      panel.dataset.fabricatedRecords = String(fabricatedRecords);
+      panel.innerHTML = `${summary}${items.slice(0, 5).map((item) => {
+        const sourcePhoto = item.source_photo || {};
+        const direct = item.direct_observation || {};
+        const ocr = item.ocr || {};
+        const interpretation = item.ai_interpretation || {};
+        const links = item.links || {};
+        return `
+          <div class="evidence-ledger-card">
+            <h3>${escapeHtml(item.evidence_kind || item.photo_evidence_id || "Evidence item")}</h3>
+            <p>${escapeHtml(sourcePhoto.original_filename || sourcePhoto.photo_id || "source photo pending")} / ${escapeHtml(item.status || "draft")}</p>
+            <div class="review-meta">
+              <span class="chip">Observed ${escapeHtml(direct.observed_raw_text || "--")}</span>
+              <span class="chip">OCR ${escapeHtml(ocr.text || "--")}</span>
+              <span class="chip">Parsed ${escapeHtml(interpretation.parsed_value || "--")}</span>
+              <span class="chip">Review ${escapeHtml(interpretation.needs_review ? "needed" : "not needed")}</span>
+              <span class="chip">Reviews ${escapeHtml(String((links.review_ids || []).length))}</span>
             </div>
           </div>
         `;
@@ -5935,7 +6030,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, colonySchedule, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, colonySchedule, evidenceLedger, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -5953,6 +6048,7 @@
         loadFocusReviewReadModel(),
         loadColonyStateReadModel(),
         loadColonyScheduleReadModel(),
+        loadEvidenceLedgerReadModel(),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
         api("/api/note-items"),
         api("/api/card-snapshots"),
@@ -5974,6 +6070,7 @@
       renderFocusReviewReadModel(focusReview);
       renderColonyStateReadModel(colonyState);
       renderColonyScheduleReadModel(colonySchedule);
+      renderEvidenceLedgerReadModel(evidenceLedger);
       const selectedTimelineMouse = firstMouse(mice);
       renderMouseTimelineReadModel(await loadMouseTimelineReadModel(selectedTimelineMouse?.mouse_id || ""));
       const aiStatus = health.ai_draft || {};

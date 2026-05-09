@@ -156,6 +156,13 @@ async function main() {
       staticHtml.includes("accepted_events"),
     "Mouse Timeline UI should consume the read-only read model and render only accepted events by default."
   );
+  assert(
+    staticHtml.includes("/api/ui/evidence-ledger") &&
+      staticHtml.includes("renderEvidenceLedgerReadModel") &&
+      staticHtml.includes("Evidence Ledger unavailable") &&
+      staticHtml.includes("observed_raw_text"),
+    "Evidence Ledger UI should consume the read-only read model and separate observed, OCR, and interpreted evidence."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);
@@ -363,6 +370,55 @@ async function main() {
         attention_links: [{ label: "Open Focus Review", target_path: "/api/ui/focus-review", must_review: 1, quick_check: 0 }],
         empty_state: { message: "", fabricated_records: false }
       },
+      "/api/ui/evidence-ledger": {
+        source_layer: "export or view",
+        page_question: "What evidence supports this record?",
+        summary: { total_evidence: 1, needs_review: 1, linked_events: 0, source_photos: 1 },
+        evidence_items: [
+          {
+            photo_evidence_id: "pe_static_ear",
+            evidence_kind: "ear_label",
+            card_type: "Separated",
+            status: "review_open",
+            source_photo: {
+              photo_id: "photo_static_evidence",
+              original_filename: "evidence-card.png",
+              raw_source_kind: "cage_card_photo",
+              uploaded_at: "2026-05-09T12:00:00Z",
+              open_source_photo_label: "Open source photo"
+            },
+            parsed_trace: {
+              parse_id: "parse_static_evidence",
+              source_name: "manual_photo_transcription",
+              status: "review",
+              confidence: 0.62,
+              needs_review: true
+            },
+            direct_observation: {
+              roi_label: "note_line_1",
+              bbox: { x: 10, y: 20, w: 80, h: 24 },
+              observed_raw_text: "MT401 R0"
+            },
+            ocr: { text: "MT401 R0" },
+            ai_interpretation: {
+              parsed_value: "right_circle",
+              confidence: 0.62,
+              interpretation: "R0 may indicate a right ear circle; keep reviewable.",
+              needs_review: true,
+              review_reason: "Ambiguous ear mark."
+            },
+            links: {
+              note_item_id: "note_static_evidence",
+              linked_mouse_id: "",
+              linked_cage_id: "",
+              linked_event_id: "",
+              review_ids: ["review_static_evidence"]
+            },
+            correction_history: []
+          }
+        ],
+        empty_state: { message: "", fabricated_records: false }
+      },
       "/api/mice": [],
       "/api/note-items": [],
       "/api/card-snapshots": [],
@@ -454,6 +510,14 @@ async function main() {
   assert(
     (await staticPage.locator("#mouseTimelineReadModel").filter({ hasText: "born" }).filter({ hasText: "canonical structured state" }).count()) === 1,
     "Static Mouse Timeline should show accepted canonical events without review-item detail."
+  );
+  assert(
+    (await staticPage.locator("#evidenceLedgerReadModel").filter({ hasText: "Evidence items 1" }).filter({ hasText: "evidence-card.png" }).count()) === 1,
+    "Static app startup should render the Evidence Ledger read model from /api/ui/evidence-ledger."
+  );
+  assert(
+    (await staticPage.locator("#evidenceLedgerReadModel").filter({ hasText: "Observed MT401 R0" }).filter({ hasText: "Parsed right_circle" }).count()) === 1,
+    "Static Evidence Ledger should visibly separate direct observation, OCR, and interpreted parsed value."
   );
   const attentionCue = await staticPage.evaluate(() => {
     const item = { review_id: "review_dom_contract", attention_level: "quick_check", status: "open" };

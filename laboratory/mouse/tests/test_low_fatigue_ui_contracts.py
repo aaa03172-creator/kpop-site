@@ -1001,6 +1001,218 @@ def test_mouse_timeline_empty_state_does_not_fabricate_events(tmp_path: Path) ->
         db.DB_PATH = old_db_path
 
 
+def test_evidence_ledger_separates_raw_ocr_interpretation_and_links_review(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_ledger_card",
+                    "ledger-card.jpg",
+                    "data/photos/test/ledger-card.jpg",
+                    "2026-05-09T12:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_ledger_card",
+                    "photo_ledger_card",
+                    "manual_photo_transcription",
+                    json.dumps({"raw": "MT401 R0"}, ensure_ascii=False),
+                    "2026-05-09T12:01:00Z",
+                    "review",
+                    0.62,
+                    1,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, photo_id, parse_id, card_type, line_number,
+                     raw_line_text, parsed_type, interpreted_status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "note_ledger_mt401",
+                    "photo_ledger_card",
+                    "parse_ledger_card",
+                    "Separated",
+                    1,
+                    "MT401 R0",
+                    "mouse_item",
+                    "active",
+                    0.62,
+                    1,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO photo_evidence_item
+                    (photo_evidence_id, source_photo_id, parse_id, note_item_id,
+                     card_type, evidence_kind, roi_label, bbox_json,
+                     observed_raw_text, ocr_text, parsed_value, confidence,
+                     interpretation, needs_review, review_reason, linked_mouse_id,
+                     status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "pe_ledger_mt401_ear",
+                    "photo_ledger_card",
+                    "parse_ledger_card",
+                    "note_ledger_mt401",
+                    "Separated",
+                    "ear_label",
+                    "note_line_1",
+                    json.dumps({"x": 10, "y": 20, "w": 80, "h": 24}),
+                    "MT401 R0",
+                    "MT401 R0",
+                    "right_circle",
+                    0.62,
+                    "R0 may indicate a right ear circle; keep reviewable.",
+                    1,
+                    "Ambiguous ear mark.",
+                    None,
+                    "review_open",
+                    "2026-05-09T12:02:00Z",
+                    "2026-05-09T12:02:00Z",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_ledger_ear_mark",
+                    "parse_ledger_card",
+                    "Medium",
+                    "Ambiguous ear mark",
+                    "MT401 R0",
+                    "Confirm ear mark from source photo.",
+                    "Ambiguous ear mark.",
+                    "open",
+                    "2026-05-09T12:03:00Z",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_evidence_link
+                    (link_id, review_id, photo_evidence_id, link_reason, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    "link_ledger_ear_mark",
+                    "review_ledger_ear_mark",
+                    "pe_ledger_mt401_ear",
+                    "Review is grounded in the original note line.",
+                    "2026-05-09T12:03:10Z",
+                ),
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/evidence-ledger?source_photo_id=photo_ledger_card")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_layer"] == "export or view"
+        assert payload["page_question"] == "What evidence supports this record?"
+        assert payload["summary"] == {
+            "total_evidence": 1,
+            "needs_review": 1,
+            "linked_events": 0,
+            "source_photos": 1,
+        }
+        assert payload["evidence_items"] == [
+            {
+                "photo_evidence_id": "pe_ledger_mt401_ear",
+                "evidence_kind": "ear_label",
+                "card_type": "Separated",
+                "status": "review_open",
+                "source_photo": {
+                    "photo_id": "photo_ledger_card",
+                    "original_filename": "ledger-card.jpg",
+                    "raw_source_kind": "cage_card_photo",
+                    "uploaded_at": "2026-05-09T12:00:00Z",
+                    "open_source_photo_label": "Open source photo",
+                },
+                "parsed_trace": {
+                    "parse_id": "parse_ledger_card",
+                    "source_name": "manual_photo_transcription",
+                    "status": "review",
+                    "confidence": 0.62,
+                    "needs_review": True,
+                },
+                "direct_observation": {
+                    "roi_label": "note_line_1",
+                    "bbox": {"x": 10, "y": 20, "w": 80, "h": 24},
+                    "observed_raw_text": "MT401 R0",
+                },
+                "ocr": {"text": "MT401 R0"},
+                "ai_interpretation": {
+                    "parsed_value": "right_circle",
+                    "confidence": 0.62,
+                    "interpretation": "R0 may indicate a right ear circle; keep reviewable.",
+                    "needs_review": True,
+                    "review_reason": "Ambiguous ear mark.",
+                },
+                "links": {
+                    "note_item_id": "note_ledger_mt401",
+                    "linked_mouse_id": "",
+                    "linked_cage_id": "",
+                    "linked_event_id": "",
+                    "review_ids": ["review_ledger_ear_mark"],
+                },
+                "correction_history": [],
+            }
+        ]
+        assert payload["empty_state"]["fabricated_records"] is False
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_evidence_ledger_empty_state_does_not_fabricate_evidence(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        client = TestClient(app)
+
+        response = client.get("/api/ui/evidence-ledger")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_layer"] == "export or view"
+        assert payload["evidence_items"] == []
+        assert payload["summary"] == {
+            "total_evidence": 0,
+            "needs_review": 0,
+            "linked_events": 0,
+            "source_photos": 0,
+        }
+        assert payload["empty_state"] == {
+            "message": "No photo evidence items are available yet.",
+            "fabricated_records": False,
+        }
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_colony_state_excludes_noncanonical_card_snapshots(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:
