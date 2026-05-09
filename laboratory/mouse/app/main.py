@@ -550,6 +550,13 @@ def mouse_timeline_empty_state() -> dict[str, Any]:
     }
 
 
+def evidence_ledger_empty_state() -> dict[str, Any]:
+    return {
+        "message": "No photo evidence items are available yet.",
+        "fabricated_records": False,
+    }
+
+
 def colony_litter_action_hint(
     birth_date: str,
     rule_set: dict[str, Any],
@@ -8039,6 +8046,124 @@ def ui_mouse_timeline(mouse_id: str = "") -> dict[str, Any]:
         "events": events,
         "attention_links": attention_links,
         "empty_state": mouse_timeline_empty_state(),
+    }
+
+
+@app.get("/api/ui/evidence-ledger")
+def ui_evidence_ledger(source_photo_id: str = "", linked_mouse_id: str = "") -> dict[str, Any]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if source_photo_id.strip():
+        clauses.append("evidence.source_photo_id = ?")
+        params.append(source_photo_id.strip())
+    if linked_mouse_id.strip():
+        clauses.append("evidence.linked_mouse_id = ?")
+        params.append(linked_mouse_id.strip())
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    with connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT evidence.photo_evidence_id, evidence.source_photo_id, evidence.parse_id,
+                   evidence.card_snapshot_id, evidence.note_item_id, evidence.card_type,
+                   evidence.evidence_kind, evidence.roi_label, evidence.bbox_json,
+                   evidence.observed_raw_text, evidence.ocr_text, evidence.parsed_value,
+                   evidence.confidence, evidence.interpretation, evidence.needs_review,
+                   evidence.review_reason, evidence.linked_mouse_id, evidence.linked_cage_id,
+                   evidence.linked_event_id, evidence.status, evidence.created_at,
+                   evidence.updated_at, photo.original_filename, photo.raw_source_kind,
+                   photo.uploaded_at, parse.source_name, parse.status AS parse_status,
+                   parse.confidence AS parse_confidence, parse.needs_review AS parse_needs_review
+            FROM photo_evidence_item evidence
+            LEFT JOIN photo_log photo ON photo.photo_id = evidence.source_photo_id
+            LEFT JOIN parse_result parse ON parse.parse_id = evidence.parse_id
+            {where_sql}
+            ORDER BY evidence.created_at DESC, evidence.photo_evidence_id
+            LIMIT 50
+            """,
+            params,
+        ).fetchall()
+        evidence_ids = [row["photo_evidence_id"] for row in rows]
+        review_ids_by_evidence: dict[str, list[str]] = {evidence_id: [] for evidence_id in evidence_ids}
+        if evidence_ids:
+            placeholders = ", ".join("?" for _ in evidence_ids)
+            for row in conn.execute(
+                f"""
+                SELECT photo_evidence_id, review_id
+                FROM review_evidence_link
+                WHERE photo_evidence_id IN ({placeholders})
+                ORDER BY created_at, review_id
+                """,
+                evidence_ids,
+            ).fetchall():
+                review_ids_by_evidence.setdefault(row["photo_evidence_id"], []).append(row["review_id"])
+
+    evidence_items = []
+    for row in rows:
+        bbox = {}
+        try:
+            bbox = json.loads(row["bbox_json"] or "{}")
+        except json.JSONDecodeError:
+            bbox = {}
+        evidence_items.append(
+            {
+                "photo_evidence_id": row["photo_evidence_id"],
+                "evidence_kind": row["evidence_kind"],
+                "card_type": row["card_type"],
+                "status": row["status"],
+                "source_photo": {
+                    "photo_id": row["source_photo_id"],
+                    "original_filename": row["original_filename"] or "",
+                    "raw_source_kind": row["raw_source_kind"] or "",
+                    "uploaded_at": row["uploaded_at"] or "",
+                    "open_source_photo_label": "Open source photo",
+                },
+                "parsed_trace": {
+                    "parse_id": row["parse_id"] or "",
+                    "source_name": row["source_name"] or "",
+                    "status": row["parse_status"] or "",
+                    "confidence": row["parse_confidence"] or 0,
+                    "needs_review": bool(row["parse_needs_review"]),
+                },
+                "direct_observation": {
+                    "roi_label": row["roi_label"] or "",
+                    "bbox": bbox,
+                    "observed_raw_text": row["observed_raw_text"] or "",
+                },
+                "ocr": {"text": row["ocr_text"] or ""},
+                "ai_interpretation": {
+                    "parsed_value": row["parsed_value"] or "",
+                    "confidence": row["confidence"] or 0,
+                    "interpretation": row["interpretation"] or "",
+                    "needs_review": bool(row["needs_review"]),
+                    "review_reason": row["review_reason"] or "",
+                },
+                "links": {
+                    "note_item_id": row["note_item_id"] or "",
+                    "linked_mouse_id": row["linked_mouse_id"] or "",
+                    "linked_cage_id": row["linked_cage_id"] or "",
+                    "linked_event_id": row["linked_event_id"] or "",
+                    "review_ids": review_ids_by_evidence.get(row["photo_evidence_id"], []),
+                },
+                "correction_history": [],
+            }
+        )
+
+    return {
+        "source_layer": "export or view",
+        "page_question": "What evidence supports this record?",
+        "summary": {
+            "total_evidence": len(evidence_items),
+            "needs_review": sum(1 for item in evidence_items if item["ai_interpretation"]["needs_review"]),
+            "linked_events": sum(1 for item in evidence_items if item["links"]["linked_event_id"]),
+            "source_photos": len({item["source_photo"]["photo_id"] for item in evidence_items if item["source_photo"]["photo_id"]}),
+        },
+        "filters": {
+            "source_photo_id": source_photo_id.strip(),
+            "linked_mouse_id": linked_mouse_id.strip(),
+        },
+        "evidence_items": evidence_items,
+        "empty_state": evidence_ledger_empty_state(),
     }
 
 
