@@ -91,6 +91,20 @@ class StrainRegistryCreate(BaseModel):
     source_record_id: str | None = None
 
 
+class GeneRegistryUpdate(BaseModel):
+    full_name: str = ""
+    description: str = ""
+    external_reference: str = ""
+
+
+class AlleleRegistryUpdate(BaseModel):
+    description: str = ""
+    allele_type: str = ""
+    inheritance: str = ""
+    zygosity_options: str = ""
+    genotyping_protocol: str = ""
+
+
 class CorrectionCreate(BaseModel):
     entity_type: str = Field(min_length=1)
     entity_id: str = Field(min_length=1)
@@ -2519,6 +2533,20 @@ def get_or_create_gene_master(conn: Any, gene_symbol: str, source_record_id: str
     return gene_id
 
 
+def gene_payload(row: Any) -> dict[str, Any]:
+    return {
+        "gene_id": row["gene_id"],
+        "gene_symbol": row["gene_symbol"],
+        "full_name": row["display_name"],
+        "organism": "mouse",
+        "description": row["description"],
+        "external_reference": row["external_reference"],
+        "source_record_id": row["source_record_id"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def get_or_create_allele_master(
     conn: Any,
     *,
@@ -2563,6 +2591,23 @@ def get_or_create_allele_master(
         (allele_id, clean_symbol, "", gene_id, source_record_id, 1, now, now),
     )
     return allele_id
+
+
+def allele_payload(row: Any) -> dict[str, Any]:
+    return {
+        "allele_id": row["allele_id"],
+        "gene_id": row["gene_id"] or "",
+        "gene_symbol": row["gene_symbol"] or "",
+        "allele_name": row["allele_symbol"],
+        "allele_type": row["allele_type"],
+        "description": row["display_name"],
+        "inheritance": row["inheritance"],
+        "zygosity_options": row["zygosity_options"],
+        "genotyping_protocol": row["genotyping_protocol"],
+        "source_record_id": row["source_record_id"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
 
 
 def link_strain_allele_master(
@@ -2644,26 +2689,57 @@ def list_genes() -> list[dict[str, Any]]:
     with connection() as conn:
         rows = conn.execute(
             """
-            SELECT gene_id, gene_symbol, display_name, source_record_id, created_at, updated_at
+            SELECT gene_id, gene_symbol, display_name, description, external_reference,
+                   source_record_id, created_at, updated_at
             FROM gene_master
             WHERE active = 1
             ORDER BY gene_symbol COLLATE NOCASE
             """
         ).fetchall()
-    return [
-        {
-            "gene_id": row["gene_id"],
-            "gene_symbol": row["gene_symbol"],
-            "full_name": row["display_name"],
-            "organism": "mouse",
-            "description": "",
-            "external_reference": "",
-            "source_record_id": row["source_record_id"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
-        for row in rows
-    ]
+    return [gene_payload(row) for row in rows]
+
+
+@app.patch("/api/genes/{gene_id}")
+def update_gene(gene_id: str, payload: GeneRegistryUpdate) -> dict[str, Any]:
+    updated_at = utc_now()
+    with connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT gene_id
+            FROM gene_master
+            WHERE gene_id = ? AND active = 1
+            """,
+            (gene_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Gene not found.")
+        conn.execute(
+            """
+            UPDATE gene_master
+            SET display_name = ?,
+                description = ?,
+                external_reference = ?,
+                updated_at = ?
+            WHERE gene_id = ?
+            """,
+            (
+                normalized_registry_text(payload.full_name),
+                normalized_registry_text(payload.description),
+                normalized_registry_text(payload.external_reference),
+                updated_at,
+                gene_id,
+            ),
+        )
+        row = conn.execute(
+            """
+            SELECT gene_id, gene_symbol, display_name, description, external_reference,
+                   source_record_id, created_at, updated_at
+            FROM gene_master
+            WHERE gene_id = ?
+            """,
+            (gene_id,),
+        ).fetchone()
+    return gene_payload(row)
 
 
 @app.get("/api/alleles")
@@ -2672,7 +2748,9 @@ def list_alleles() -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT allele.allele_id, allele.gene_id, gene.gene_symbol,
-                   allele.allele_symbol, allele.display_name, allele.source_record_id,
+                   allele.allele_symbol, allele.display_name, allele.allele_type,
+                   allele.inheritance, allele.zygosity_options, allele.genotyping_protocol,
+                   allele.source_record_id,
                    allele.created_at, allele.updated_at
             FROM allele_master allele
             LEFT JOIN gene_master gene ON gene.gene_id = allele.gene_id
@@ -2680,23 +2758,58 @@ def list_alleles() -> list[dict[str, Any]]:
             ORDER BY gene.gene_symbol COLLATE NOCASE, allele.allele_symbol COLLATE NOCASE
             """
         ).fetchall()
-    return [
-        {
-            "allele_id": row["allele_id"],
-            "gene_id": row["gene_id"] or "",
-            "gene_symbol": row["gene_symbol"] or "",
-            "allele_name": row["allele_symbol"],
-            "allele_type": "",
-            "description": row["display_name"],
-            "inheritance": "",
-            "zygosity_options": "",
-            "genotyping_protocol": "",
-            "source_record_id": row["source_record_id"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
-        for row in rows
-    ]
+    return [allele_payload(row) for row in rows]
+
+
+@app.patch("/api/alleles/{allele_id}")
+def update_allele(allele_id: str, payload: AlleleRegistryUpdate) -> dict[str, Any]:
+    updated_at = utc_now()
+    with connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT allele_id
+            FROM allele_master
+            WHERE allele_id = ? AND active = 1
+            """,
+            (allele_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Allele not found.")
+        conn.execute(
+            """
+            UPDATE allele_master
+            SET display_name = ?,
+                allele_type = ?,
+                inheritance = ?,
+                zygosity_options = ?,
+                genotyping_protocol = ?,
+                updated_at = ?
+            WHERE allele_id = ?
+            """,
+            (
+                normalized_registry_text(payload.description),
+                normalized_registry_text(payload.allele_type),
+                normalized_registry_text(payload.inheritance),
+                normalized_registry_text(payload.zygosity_options),
+                normalized_registry_text(payload.genotyping_protocol),
+                updated_at,
+                allele_id,
+            ),
+        )
+        row = conn.execute(
+            """
+            SELECT allele.allele_id, allele.gene_id, gene.gene_symbol,
+                   allele.allele_symbol, allele.display_name, allele.allele_type,
+                   allele.inheritance, allele.zygosity_options, allele.genotyping_protocol,
+                   allele.source_record_id,
+                   allele.created_at, allele.updated_at
+            FROM allele_master allele
+            LEFT JOIN gene_master gene ON gene.gene_id = allele.gene_id
+            WHERE allele.allele_id = ?
+            """,
+            (allele_id,),
+        ).fetchone()
+    return allele_payload(row)
 
 
 @app.get("/api/strains")
@@ -4744,6 +4857,14 @@ def legacy_row_payload(row: Any) -> dict[str, Any]:
     return result
 
 
+def legacy_import_payload(row: Any) -> dict[str, Any]:
+    result = dict(row)
+    raw_payload = json_object(result.pop("raw_payload", "{}"))
+    candidates = raw_payload.get("strain_registry_candidates")
+    result["strain_registry_candidates"] = candidates if isinstance(candidates, list) else []
+    return result
+
+
 def legacy_review_current_value(row: dict[str, Any], fallback_row_number: int) -> str:
     source_cells = row.get("source_cells") if isinstance(row.get("source_cells"), dict) else {}
     anchors = {
@@ -4767,6 +4888,20 @@ def legacy_review_reason(row: dict[str, Any], source_file_name: str, sheet_name:
         f"Legacy workbook row from {source_file_name}, sheet {source_sheet or '--'}, row {row_number}; "
         f"source cells {cell_refs}. Imported as a review candidate only; do not write canonical mouse, cage, "
         "litter, or genotype state until a human resolves the row."
+    )
+
+
+def strain_registry_candidate_review_reason(
+    candidate: dict[str, Any],
+    source_file_name: str,
+    sheet_name: str,
+) -> str:
+    evidence_ids = candidate.get("source_evidence_ids") if isinstance(candidate.get("source_evidence_ids"), list) else []
+    evidence_text = ", ".join(str(item) for item in evidence_ids if item) or "no row evidence"
+    return (
+        f"Legacy workbook strain registry candidate from {source_file_name}, sheet {sheet_name or '--'}; "
+        f"row evidence {evidence_text}. Preserve raw strain/genotype text and review before creating or linking "
+        "gene/allele records; the parser intentionally does not infer gene or allele from genotype text."
     )
 
 
@@ -6141,8 +6276,16 @@ def list_legacy_workbook_imports() -> list[dict[str, Any]]:
     with connection() as conn:
         imports = conn.execute(
             """
-            SELECT legacy_import_id, source_record_id, source_file_name, source_file_path,
-                   workbook_kind, sheet_name, imported_at, status, notes,
+            SELECT legacy_workbook_import.legacy_import_id,
+                   legacy_workbook_import.source_record_id,
+                   legacy_workbook_import.source_file_name,
+                   legacy_workbook_import.source_file_path,
+                   legacy_workbook_import.workbook_kind,
+                   legacy_workbook_import.sheet_name,
+                   legacy_workbook_import.imported_at,
+                   legacy_workbook_import.status,
+                   legacy_workbook_import.notes,
+                   parse.raw_payload AS raw_payload,
                    (
                        SELECT COUNT(*)
                        FROM review_queue review
@@ -6155,6 +6298,8 @@ def list_legacy_workbook_imports() -> list[dict[str, Any]]:
                          AND review.status = 'open'
                    ) AS open_review_count
             FROM legacy_workbook_import
+            LEFT JOIN parse_result parse
+              ON parse.parse_id = 'legacy_parse_' || legacy_workbook_import.legacy_import_id
             ORDER BY imported_at DESC
             """
         ).fetchall()
@@ -6173,7 +6318,7 @@ def list_legacy_workbook_imports() -> list[dict[str, Any]]:
         rows_by_import.setdefault(payload["legacy_import_id"], []).append(payload)
 
     return [
-        {**dict(import_row), "rows": rows_by_import.get(import_row["legacy_import_id"], [])}
+        {**legacy_import_payload(import_row), "rows": rows_by_import.get(import_row["legacy_import_id"], [])}
         for import_row in imports
     ]
 
@@ -6206,6 +6351,9 @@ def create_legacy_workbook_import(
 
     imported_at = utc_now()
     raw_payload = json.dumps(parsed, ensure_ascii=False)
+    strain_registry_candidates = parsed.get("strain_registry_candidates")
+    if not isinstance(strain_registry_candidates, list):
+        strain_registry_candidates = []
     inserted_rows = 0
     created_review_items = 0
     try:
@@ -6304,6 +6452,38 @@ def create_legacy_workbook_import(
                     ),
                 )
                 inserted_rows += 1
+            for candidate in strain_registry_candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                review_id = new_id("review")
+                issue = "Legacy strain registry candidate requires review"
+                review_reason = strain_registry_candidate_review_reason(
+                    candidate,
+                    file.filename,
+                    str(parsed.get("sheet_name") or ""),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO review_queue
+                        (review_id, parse_id, severity, issue, current_value, suggested_value,
+                         review_reason, assigned_role, priority, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        review_id,
+                        parse_id,
+                        "Medium",
+                        issue,
+                        json.dumps(candidate, ensure_ascii=False),
+                        "Review or create a strain registry link without overwriting raw workbook evidence.",
+                        review_reason,
+                        review_assigned_role(issue, review_reason, file.filename),
+                        review_priority("Medium", issue, review_reason),
+                        "open",
+                        imported_at,
+                    ),
+                )
+                created_review_items += 1
             conn.execute(
                 """
                 INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
@@ -6322,6 +6502,7 @@ def create_legacy_workbook_import(
                             "workbook_kind": parsed.get("workbook_kind"),
                             "rows": inserted_rows,
                             "created_review_items": created_review_items,
+                            "strain_registry_candidates": len(strain_registry_candidates),
                             "boundary": "parsed or intermediate result",
                         },
                         ensure_ascii=False,
@@ -6345,6 +6526,7 @@ def create_legacy_workbook_import(
         "status": "parsed",
         "stored_rows": inserted_rows,
         "created_review_items": created_review_items,
+        "strain_registry_candidate_count": len(strain_registry_candidates),
         "boundary": "parsed or intermediate result",
     }
 

@@ -316,6 +316,24 @@ def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
             "generated_role": "TEXT NOT NULL DEFAULT 'Data / Export Manager'",
         },
     )
+    ensure_columns(
+        conn,
+        "gene_master",
+        {
+            "description": "TEXT NOT NULL DEFAULT ''",
+            "external_reference": "TEXT NOT NULL DEFAULT ''",
+        },
+    )
+    ensure_columns(
+        conn,
+        "allele_master",
+        {
+            "allele_type": "TEXT NOT NULL DEFAULT ''",
+            "inheritance": "TEXT NOT NULL DEFAULT ''",
+            "zygosity_options": "TEXT NOT NULL DEFAULT ''",
+            "genotyping_protocol": "TEXT NOT NULL DEFAULT ''",
+        },
+    )
     conn.execute(
         """
         UPDATE review_queue
@@ -456,6 +474,8 @@ def init_db() -> None:
                 gene_id TEXT PRIMARY KEY,
                 gene_symbol TEXT NOT NULL,
                 display_name TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                external_reference TEXT NOT NULL DEFAULT '',
                 source_record_id TEXT,
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
@@ -467,6 +487,10 @@ def init_db() -> None:
                 allele_id TEXT PRIMARY KEY,
                 allele_symbol TEXT NOT NULL,
                 display_name TEXT NOT NULL DEFAULT '',
+                allele_type TEXT NOT NULL DEFAULT '',
+                inheritance TEXT NOT NULL DEFAULT '',
+                zygosity_options TEXT NOT NULL DEFAULT '',
+                genotyping_protocol TEXT NOT NULL DEFAULT '',
                 gene_id TEXT,
                 source_record_id TEXT,
                 active INTEGER NOT NULL DEFAULT 1,

@@ -109,3 +109,50 @@ def test_strain_creation_reuses_gene_and_allele_records_case_insensitively(tmp_p
         assert all(row["alleles"][0]["allele_id"] == alleles[0]["allele_id"] for row in strains)
     finally:
         db.DB_PATH = old_db_path
+
+
+def test_gene_and_allele_metadata_updates_preserve_raw_symbols_and_source(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        client = TestClient(app)
+
+        created = client.post(
+            "/api/strains",
+            json={"strain_name": "PV-Cre", "gene": "Pvalb", "allele": "Pvalb-IRES-Cre"},
+        )
+        assert created.status_code == 200
+        source_record_id = created.json()["source_record_id"]
+        gene = client.get("/api/genes").json()[0]
+        allele = client.get("/api/alleles").json()[0]
+
+        gene_update = client.patch(
+            f"/api/genes/{gene['gene_id']}",
+            json={"full_name": "Parvalbumin", "description": "Curated display metadata."},
+        )
+        allele_update = client.patch(
+            f"/api/alleles/{allele['allele_id']}",
+            json={"description": "IRES-Cre driver allele", "allele_type": "transgene"},
+        )
+
+        assert gene_update.status_code == 200
+        assert allele_update.status_code == 200
+        updated_gene = client.get("/api/genes").json()[0]
+        updated_allele = client.get("/api/alleles").json()[0]
+        strain = client.get("/api/strains").json()[0]
+
+        assert updated_gene["gene_symbol"] == "Pvalb"
+        assert updated_gene["full_name"] == "Parvalbumin"
+        assert updated_gene["description"] == "Curated display metadata."
+        assert updated_gene["source_record_id"] == source_record_id
+        assert updated_allele["allele_name"] == "Pvalb-IRES-Cre"
+        assert updated_allele["description"] == "IRES-Cre driver allele"
+        assert updated_allele["allele_type"] == "transgene"
+        assert updated_allele["source_record_id"] == source_record_id
+        assert strain["gene"] == "Pvalb"
+        assert strain["allele"] == "Pvalb-IRES-Cre"
+        assert strain["alleles"][0]["gene_symbol"] == "Pvalb"
+        assert strain["alleles"][0]["allele_name"] == "Pvalb-IRES-Cre"
+    finally:
+        db.DB_PATH = old_db_path
