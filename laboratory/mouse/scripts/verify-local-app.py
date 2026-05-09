@@ -629,7 +629,8 @@ def main() -> None:
                 assert_true('data-view-target="photo"' in index_html and "Photo Review Workbench" in index_html, "Photo Review Workbench should be the default operational view.")
                 assert_true("reviewDetailPanel" in index_html and "inspect-review" in index_html, "Review Queue should expose a split list/detail workflow.")
                 assert_true("Review Note Evidence" in index_html and "reviewEvidencePanel" in index_html, "Review detail should expose linked note-line and card snapshot evidence.")
-                assert_true("Colony Records" in index_html, "Local UI should expose mouse records.")
+                assert_true("Candidate Records" in index_html, "Local UI should expose candidate mouse records.")
+                assert_true("Export Center" in index_html, "Local UI should frame workbook generation as an export center.")
                 assert_true("Parsed Note Evidence" in index_html, "Local UI should expose parsed note evidence.")
                 assert_true("Card Snapshots" in index_html and "cardSnapshotRows" in index_html, "Local UI should expose card transcription snapshots.")
                 assert_true("Strain Registry" in index_html, "Local UI should expose strain registry.")
@@ -747,6 +748,8 @@ def main() -> None:
                 )
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("uploadBatchRows" in index_html and "/api/upload-batches" in index_html, "Local UI should expose upload batch tracking.")
+                assert_true("uploadBatchReleasePanel" in index_html and "Preview release" in index_html, "Local UI should expose upload batch release checks.")
+                assert_true("/release-preview" in index_html and "Close Batch" in index_html, "Local UI should preview and close upload batches only after release checks.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
                 assert_true("Mouse Detail" in index_html, "Local UI should expose the mouse detail visualization.")
@@ -1009,6 +1012,25 @@ def main() -> None:
                     and selected_batch["pending_transcription_count"] == 1
                     and selected_batch["open_review_count"] >= 1,
                     "Upload batch summary should count photos, transcription pending state, and open reviews.",
+                )
+                batch_release_preview = client.get(
+                    f"/api/upload-batches/{upload_batch_payload['upload_batch_id']}/release-preview"
+                )
+                assert_true(batch_release_preview.status_code == 200, "Upload batch release preview endpoint failed.")
+                batch_release_payload = batch_release_preview.json()
+                assert_true(
+                    batch_release_payload["boundary"] == "export or view"
+                    and batch_release_payload["ready"] is False
+                    and any(item["key"] == "transcription_complete" for item in batch_release_payload["blockers"])
+                    and any(item["key"] == "canonical_mapping_applied" for item in batch_release_payload["blockers"]),
+                    "Upload batch release preview should block unfinished transcription and missing canonical mapping.",
+                )
+                blocked_batch_release = client.post(
+                    f"/api/upload-batches/{upload_batch_payload['upload_batch_id']}/release"
+                )
+                assert_true(
+                    blocked_batch_release.status_code == 409,
+                    "Upload batch release should not close a batch with blockers.",
                 )
                 blocked_ai_draft = client.post(
                     f"/api/photos/{photo_payload['photo_id']}/ai-transcription-draft",
