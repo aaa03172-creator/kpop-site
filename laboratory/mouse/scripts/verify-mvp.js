@@ -135,6 +135,13 @@ async function main() {
       staticHtml.includes("fabricated_records"),
     "Focus Review UI should consume the read-only read model and render honest unavailable or empty states without fabricated records."
   );
+  assert(
+    staticHtml.includes("/api/ui/colony-state") &&
+      staticHtml.includes("renderColonyStateReadModel") &&
+      staticHtml.includes("Colony State unavailable") &&
+      staticHtml.includes("active_card_snapshots"),
+    "Colony State UI should consume the read-only read model and render honest unavailable or empty states without fabricated records."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);
@@ -244,6 +251,34 @@ async function main() {
         ],
         empty_state: { message: "", fabricated_records: false }
       },
+      "/api/ui/colony-state": {
+        source_layer: "export or view",
+        page_question: "What is active now?",
+        summary: {
+          active_mice: 2,
+          active_card_snapshots: 1,
+          active_matings: 0,
+          active_litters: 0,
+          must_review: 1,
+          quick_check: 0
+        },
+        active_card_snapshots: [
+          {
+            card_snapshot_id: "card_colony_static",
+            parse_id: "parse_colony_static",
+            card_type: "Separated",
+            card_id_raw: "C-12",
+            matched_strain_text: "C57BL/6J",
+            mouse_count: 2,
+            source_photo: { photo_id: "photo_colony_static", filename: "colony-card.png", source_photo_role: "primary_evidence" },
+            collapsed_sections: { mice: 2, note_lines: 2, review_blockers: 1, source_evidence: 1 }
+          }
+        ],
+        strain_summary: [{ strain: "C57BL/6J", active_mice: 2 }],
+        status_summary: [{ status: "active", mouse_count: 2 }],
+        attention_links: [{ label: "Focus Review", target_path: "/api/ui/focus-review", must_review: 1, quick_check: 0 }],
+        empty_state: { message: "", fabricated_records: false }
+      },
       "/api/mice": [],
       "/api/note-items": [],
       "/api/card-snapshots": [],
@@ -311,6 +346,14 @@ async function main() {
   assert(
     (await staticPage.locator("#focusReviewReadModel").filter({ hasText: "Inspect source evidence" }).filter({ hasText: "manual_review_required" }).count()) === 1,
     "Static Focus Review cards should render read-model action hints without inventing actions."
+  );
+  assert(
+    (await staticPage.locator("#colonyStateReadModel").filter({ hasText: "Active mice 2" }).filter({ hasText: "colony-card.png" }).count()) === 1,
+    "Static app startup should render the Colony State read model from /api/ui/colony-state."
+  );
+  assert(
+    (await staticPage.locator("#colonyStateReadModel").filter({ hasText: "Open Focus Review" }).filter({ hasText: "Must review 1" }).count()) === 1,
+    "Static Colony State should summarize unresolved blockers with a Focus Review link instead of duplicating review details."
   );
   const attentionCue = await staticPage.evaluate(() => {
     const item = { review_id: "review_dom_contract", attention_level: "quick_check", status: "open" };
@@ -445,6 +488,121 @@ async function main() {
       focusReviewRender.error.text.includes("Focus Review unavailable") &&
       focusReviewRender.error.text.includes("backend down"),
     "Focus Review unavailable state should be explicit and non-fabricated."
+  );
+  const colonyStateRender = await staticPage.evaluate(() => {
+    const panel = document.getElementById("colonyStateReadModel");
+    renderColonyStateReadModel({
+      source_layer: "export or view",
+      page_question: "What is active now?",
+      summary: {
+        active_mice: 3,
+        active_card_snapshots: 1,
+        active_matings: 1,
+        active_litters: 0,
+        must_review: 1,
+        quick_check: 1
+      },
+      active_card_snapshots: [
+        {
+          card_snapshot_id: "card_contract",
+          card_type: "Separated",
+          card_id_raw: "C-21",
+          matched_strain_text: "C57BL/6J",
+          mouse_count: 3,
+          source_photo: { filename: "accepted-card.png", source_photo_role: "primary_evidence" },
+          collapsed_sections: { mice: 3, note_lines: 3, review_blockers: 1, source_evidence: 1 }
+        }
+      ],
+      active_matings: [
+        {
+          mating_id: "mating_contract",
+          mating_label: "C-21 breeding pair",
+          strain_goal: "C57BL/6J",
+          start_date: "2026-04-15",
+          parent_count: 2,
+          active_litter_count: 1,
+          source_record_id: "source_mating_contract",
+          collapsed_sections: { parents: 2, active_litters: 1, source_evidence: 1 }
+        }
+      ],
+      active_litters: [
+        {
+          litter_id: "litter_contract",
+          litter_label: "F1",
+          mating_label: "C-21 breeding pair",
+          birth_date: "2026-05-01",
+          number_alive: 5,
+          status: "born",
+          source_record_id: "source_mating_contract",
+          collapsed_sections: { pups_alive: 5, source_evidence: 1 }
+        }
+      ],
+      strain_summary: [{ strain: "C57BL/6J", active_mice: 3 }],
+      status_summary: [{ status: "active", mouse_count: 3 }],
+      attention_links: [{ label: "Focus Review", target_path: "/api/ui/focus-review", must_review: 1, quick_check: 1 }],
+      empty_state: { message: "", fabricated_records: false }
+    });
+    const loaded = {
+      state: panel.dataset.state,
+      fabricated: panel.dataset.fabricatedRecords,
+      text: panel.textContent
+    };
+    renderColonyStateReadModel({
+      source_layer: "export or view",
+      page_question: "What is active now?",
+      active_card_snapshots: [],
+      empty_state: { message: "No accepted active colony records are available yet.", fabricated_records: false }
+    });
+    const missingSummary = {
+      state: panel.dataset.state,
+      fabricated: panel.dataset.fabricatedRecords,
+      text: panel.textContent
+    };
+    renderColonyStateReadModel({
+      source_layer: "export or view",
+      load_error: true,
+      error_message: "backend down",
+      page_question: "What is active now?",
+      active_card_snapshots: [],
+      empty_state: { message: "Colony State unavailable.", fabricated_records: false }
+    });
+    return {
+      loaded,
+      missingSummary,
+      error: {
+        state: panel.dataset.state,
+        fabricated: panel.dataset.fabricatedRecords,
+        text: panel.textContent
+      }
+    };
+  });
+  assert(
+    colonyStateRender.loaded.state === "loaded" &&
+      colonyStateRender.loaded.fabricated === "false" &&
+      colonyStateRender.loaded.text.includes("Active mice 3") &&
+      colonyStateRender.loaded.text.includes("Active matings 1") &&
+      colonyStateRender.loaded.text.includes("accepted-card.png") &&
+      colonyStateRender.loaded.text.includes("C-21 breeding pair") &&
+      colonyStateRender.loaded.text.includes("Parents 2") &&
+      colonyStateRender.loaded.text.includes("F1") &&
+      colonyStateRender.loaded.text.includes("Alive pups 5") &&
+      colonyStateRender.loaded.text.includes("Open Focus Review") &&
+      !colonyStateRender.loaded.text.includes("review_colony"),
+    "Colony State read-model cards should render accepted-state cards, matings, litters, and review links without detailed review items."
+  );
+  assert(
+    colonyStateRender.missingSummary.state === "empty" &&
+      colonyStateRender.missingSummary.fabricated === "false" &&
+      colonyStateRender.missingSummary.text.includes("Counts unavailable") &&
+      !colonyStateRender.missingSummary.text.includes("Active mice 0"),
+    "Colony State should not invent zero counts when summary is missing."
+  );
+  assert(
+    colonyStateRender.error.state === "error" &&
+      colonyStateRender.error.fabricated === "false" &&
+      colonyStateRender.error.text.includes("Colony State unavailable") &&
+      colonyStateRender.error.text.includes("backend down"),
+    "Colony State unavailable state should be explicit and non-fabricated."
   );
   const legacyApplyFailure = await staticPage.evaluate(async () => {
     const item = {

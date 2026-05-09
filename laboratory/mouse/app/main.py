@@ -7495,6 +7495,7 @@ def ui_colony_state() -> dict[str, Any]:
             """
             SELECT status, COUNT(*) AS mouse_count
             FROM mouse_master
+            WHERE status = 'active'
             GROUP BY status
             ORDER BY mouse_count DESC, status COLLATE NOCASE
             """
@@ -7523,6 +7524,32 @@ def ui_colony_state() -> dict[str, Any]:
                      card.sex_raw, card.sex_normalized, card.count_value, card.dob_raw,
                      card.status, card.source_layer, photo.original_filename
             ORDER BY card.updated_at DESC, card.card_snapshot_id
+            """
+        ).fetchall()
+        mating_rows = conn.execute(
+            """
+            SELECT m.mating_id, m.mating_label, m.strain_goal, m.expected_genotype,
+                   m.start_date, m.status, m.purpose, m.source_record_id,
+                   COUNT(DISTINCT CASE WHEN mm.removed_date IS NULL THEN mm.mouse_id END) AS parent_count,
+                   COUNT(DISTINCT CASE WHEN l.status IN ('active', 'born') THEN l.litter_id END) AS active_litter_count
+            FROM mating_registry m
+            LEFT JOIN mating_mouse mm ON mm.mating_id = m.mating_id
+            LEFT JOIN litter_registry l ON l.mating_id = m.mating_id
+            WHERE m.status = 'active'
+            GROUP BY m.mating_id, m.mating_label, m.strain_goal, m.expected_genotype,
+                     m.start_date, m.status, m.purpose, m.source_record_id
+            ORDER BY m.start_date DESC, m.mating_label COLLATE NOCASE
+            """
+        ).fetchall()
+        litter_rows = conn.execute(
+            """
+            SELECT l.litter_id, l.litter_label, l.mating_id, m.mating_label,
+                   l.birth_date, l.number_born, l.number_alive, l.number_weaned,
+                   l.weaning_date, l.status, l.source_record_id
+            FROM litter_registry l
+            JOIN mating_registry m ON m.mating_id = l.mating_id
+            WHERE l.status IN ('active', 'born')
+            ORDER BY l.birth_date DESC, l.litter_label COLLATE NOCASE
             """
         ).fetchall()
 
@@ -7560,6 +7587,49 @@ def ui_colony_state() -> dict[str, Any]:
             }
         )
 
+    matings = [
+        {
+            "mating_id": row["mating_id"],
+            "mating_label": row["mating_label"],
+            "strain_goal": row["strain_goal"],
+            "expected_genotype": row["expected_genotype"],
+            "start_date": row["start_date"],
+            "status": row["status"],
+            "purpose": row["purpose"],
+            "source_record_id": row["source_record_id"] or "",
+            "parent_count": row["parent_count"],
+            "active_litter_count": row["active_litter_count"],
+            "source_layer": "canonical structured state",
+            "collapsed_sections": {
+                "parents": row["parent_count"],
+                "active_litters": row["active_litter_count"],
+                "source_evidence": 1 if row["source_record_id"] else 0,
+            },
+        }
+        for row in mating_rows
+    ]
+    litters = [
+        {
+            "litter_id": row["litter_id"],
+            "litter_label": row["litter_label"],
+            "mating_id": row["mating_id"],
+            "mating_label": row["mating_label"],
+            "birth_date": row["birth_date"],
+            "number_born": row["number_born"],
+            "number_alive": row["number_alive"],
+            "number_weaned": row["number_weaned"],
+            "weaning_date": row["weaning_date"],
+            "status": row["status"],
+            "source_record_id": row["source_record_id"] or "",
+            "source_layer": "canonical structured state",
+            "collapsed_sections": {
+                "pups_alive": row["number_alive"] if row["number_alive"] is not None else row["number_born"] or 0,
+                "source_evidence": 1 if row["source_record_id"] else 0,
+            },
+        }
+        for row in litter_rows
+    ]
+
     attention_links = []
     must_review = int(attention_counts.get("must_review", 0))
     quick_check = int(attention_counts.get("quick_check", 0))
@@ -7585,6 +7655,8 @@ def ui_colony_state() -> dict[str, Any]:
             "quick_check": quick_check,
         },
         "active_card_snapshots": cards,
+        "active_matings": matings,
+        "active_litters": litters,
         "strain_summary": [dict(row) for row in strain_rows],
         "status_summary": [dict(row) for row in status_rows],
         "attention_links": attention_links,
