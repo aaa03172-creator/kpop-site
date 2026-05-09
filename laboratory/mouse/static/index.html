@@ -512,6 +512,7 @@
     .colony-state-read-model,
     .colony-schedule-read-model,
     .mouse-timeline-read-model,
+    .mouse-pedigree-read-model,
     .evidence-ledger-read-model {
       display: grid;
       gap: 10px;
@@ -528,6 +529,8 @@
     .colony-schedule-read-model h3,
     .mouse-timeline-read-model h2,
     .mouse-timeline-read-model h3,
+    .mouse-pedigree-read-model h2,
+    .mouse-pedigree-read-model h3,
     .evidence-ledger-read-model h2,
     .evidence-ledger-read-model h3 {
       margin: 0;
@@ -537,6 +540,7 @@
     .colony-state-read-model p,
     .colony-schedule-read-model p,
     .mouse-timeline-read-model p,
+    .mouse-pedigree-read-model p,
     .evidence-ledger-read-model p {
       margin: 0;
       color: var(--muted);
@@ -546,6 +550,7 @@
     .colony-state-read-model[data-state="error"],
     .colony-schedule-read-model[data-state="error"],
     .mouse-timeline-read-model[data-state="error"],
+    .mouse-pedigree-read-model[data-state="error"],
     .evidence-ledger-read-model[data-state="error"] {
       border-color: var(--cue-must-line);
       background: var(--cue-must-bg);
@@ -554,6 +559,7 @@
     .colony-state-card,
     .colony-schedule-card,
     .mouse-timeline-card,
+    .mouse-pedigree-card,
     .evidence-ledger-card {
       border-top: 1px solid var(--line);
       padding-top: 10px;
@@ -2422,6 +2428,10 @@
         </article>
         <article class="viz-card span-4">
           <h3>Pedigree</h3>
+          <div class="mouse-pedigree-read-model" id="mousePedigreeReadModel" aria-live="polite">
+            <h3>Pedigree / Lineage</h3>
+            <p>Loading accepted relationship path...</p>
+          </div>
           <div id="detailPedigreeVisual"></div>
           <table aria-label="Mouse pedigree preview">
             <tbody id="detailPedigreeRows"></tbody>
@@ -3942,6 +3952,37 @@
       }
     }
 
+    async function loadMousePedigreeReadModel(mouseId = "") {
+      const query = mouseId ? `?mouse_id=${encodeURIComponent(mouseId)}` : "";
+      try {
+        return await api(`/api/ui/mouse-pedigree${query}`);
+      } catch (error) {
+        return {
+          source_layer: "export or view",
+          load_error: true,
+          error_message: apiErrorMessage(error),
+          page_question: "Where did this mouse come from?",
+          mode: "selected_path",
+          mouse: null,
+          relationship_summary: {
+            confirmed_relationships: 0,
+            pending_relationships: 0,
+            same_litter_siblings: 0,
+            offspring_events: 0,
+            must_review: 0,
+            quick_check: 0
+          },
+          nodes: {},
+          evidence_rows: [],
+          attention_links: [],
+          empty_state: {
+            message: "Pedigree / Lineage unavailable. Use Mouse Detail while the read model reloads.",
+            fabricated_records: false
+          }
+        };
+      }
+    }
+
     async function loadEvidenceLedgerReadModel() {
       try {
         return await api("/api/ui/evidence-ledger");
@@ -4270,6 +4311,105 @@
           </div>
         `;
       }).join("")}`;
+    }
+
+    function renderMousePedigreeReadModel(model) {
+      const panel = document.getElementById("mousePedigreeReadModel");
+      if (!panel) return;
+      const nodes = model?.nodes || {};
+      const summaryData = model?.relationship_summary || {};
+      const emptyState = model?.empty_state || {};
+      const fabricatedRecords = emptyState.fabricated_records === true;
+      const requiredSummaryKeys = ["confirmed_relationships", "pending_relationships", "same_litter_siblings", "offspring_events", "must_review", "quick_check"];
+      const hasSummaryCounts = requiredSummaryKeys.every((key) => Number.isFinite(summaryData[key]));
+      const mouse = model?.mouse || {};
+      const evidenceRows = Array.isArray(model?.evidence_rows) ? model.evidence_rows : [];
+      const siblings = Array.isArray(nodes.same_litter_siblings) ? nodes.same_litter_siblings : [];
+      const counts = model?.load_error || !hasSummaryCounts
+        ? ["Counts unavailable"]
+        : [
+            `Confirmed relationships ${Number(summaryData.confirmed_relationships || 0)}`,
+            `Pending relationships ${Number(summaryData.pending_relationships || 0)}`,
+            `Same litter siblings ${Number(summaryData.same_litter_siblings || 0)}`,
+            `Offspring events ${Number(summaryData.offspring_events || 0)}`,
+            `Must review ${Number(summaryData.must_review || 0)}`,
+            `Quick check ${Number(summaryData.quick_check || 0)}`
+          ];
+      const summary = `
+        <div class="section-kicker">
+          <div>
+            <h3>Pedigree / Lineage</h3>
+            <p>${escapeHtml(model?.page_question || "Where did this mouse come from?")}</p>
+          </div>
+          <span class="chip">${escapeHtml(model?.source_layer || "export or view")}</span>
+        </div>
+        <div class="review-queue-summary">
+          ${counts.map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+          <span class="chip">Mouse ${escapeHtml(mouse.display_id || mouse.mouse_id || "not selected")}</span>
+          <span class="chip">Mode ${escapeHtml(model?.mode || "selected_path")}</span>
+          <span class="chip">Fabricated records: ${fabricatedRecords ? "yes" : "no"}</span>
+        </div>
+      `;
+      if (model?.load_error) {
+        panel.dataset.state = "error";
+        panel.dataset.fabricatedRecords = "false";
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Pedigree / Lineage unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        return;
+      }
+      if (!model?.mouse) {
+        panel.dataset.state = "empty";
+        panel.dataset.fabricatedRecords = String(fabricatedRecords);
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Choose a mouse to view accepted pedigree relationships.")}</p>`;
+        return;
+      }
+      const relationshipNodes = [nodes.father, nodes.mother, nodes.mating, nodes.litter, nodes.selected_mouse].filter(Boolean);
+      const pendingFields = evidenceRows.filter((item) => item.status === "pending_review");
+      const attentionLinks = Array.isArray(model?.attention_links) ? model.attention_links : [];
+      panel.dataset.state = "loaded";
+      panel.dataset.fabricatedRecords = String(fabricatedRecords);
+      panel.innerHTML = `${summary}
+        ${pendingFields.length ? `
+          <div class="mouse-pedigree-card">
+            <h3>${escapeHtml(`${pendingFields.length} relationship needs review`)}</h3>
+            <p>Unconfirmed relationships are not inferred.</p>
+            <div class="review-meta">
+              ${pendingFields.map((field) => `<span class="chip warn">${escapeHtml(field.field)} ${escapeHtml(field.value || "Parent pending")}</span>`).join("")}
+              ${attentionLinks.map((link) => `<button class="open-focus-review" type="button" data-view-target="review">${escapeHtml(link.label || "Open Focus Review")}</button>`).join("")}
+            </div>
+          </div>
+        ` : `
+          <div class="mouse-pedigree-card">
+            <h3>Relationships confirmed</h3>
+            <p>Unconfirmed relationships are not inferred.</p>
+          </div>
+        `}
+        <div class="mouse-pedigree-card">
+          <h3>Selected path</h3>
+          <div class="review-meta">
+            ${relationshipNodes.map((node) => `
+              <span class="chip">${escapeHtml(node.relationship || node.node_type || "node")} ${escapeHtml(node.display_id || node.litter_label || node.mating_label || node.label || node.mouse_id || node.litter_id || node.mating_id || "--")}</span>
+            `).join("")}
+          </div>
+        </div>
+        <div class="mouse-pedigree-card">
+          <h3>Same litter siblings</h3>
+          <div class="review-meta">
+            ${siblings.length ? siblings.map((sibling) => `<span class="chip">${escapeHtml(sibling.display_id || sibling.mouse_id)}</span>`).join("") : `<span class="chip">No accepted siblings</span>`}
+          </div>
+        </div>
+        <div class="mouse-pedigree-card">
+          <h3>Field evidence</h3>
+          <div class="review-meta">
+            ${evidenceRows.map((item) => {
+              const source = item.source || {};
+              return `<span class="chip">${escapeHtml(item.field)} ${escapeHtml(item.status)} ${escapeHtml(source.label || source.source_record_id || "")}</span>`;
+            }).join("")}
+          </div>
+        </div>
+      `;
+      panel.querySelectorAll(".open-focus-review").forEach((button) => {
+        button.addEventListener("click", () => setActiveView("review"));
+      });
     }
 
     function renderEvidenceLedgerReadModel(model) {
@@ -6072,6 +6212,7 @@
       renderColonyScheduleReadModel(colonySchedule);
       renderEvidenceLedgerReadModel(evidenceLedger);
       const selectedTimelineMouse = firstMouse(mice);
+      renderMousePedigreeReadModel(await loadMousePedigreeReadModel(selectedTimelineMouse?.mouse_id || ""));
       renderMouseTimelineReadModel(await loadMouseTimelineReadModel(selectedTimelineMouse?.mouse_id || ""));
       const aiStatus = health.ai_draft || {};
       currentAiStatus = aiStatus;

@@ -1001,6 +1001,207 @@ def test_mouse_timeline_empty_state_does_not_fabricate_events(tmp_path: Path) ->
         db.DB_PATH = old_db_path
 
 
+def test_mouse_pedigree_shows_selected_path_and_field_evidence(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        seed_colony_state_records(tmp_path)
+        with db.connection() as conn:
+            conn.execute(
+                """
+                UPDATE mouse_master
+                SET father_id = ?, mother_id = ?, litter_id = ?
+                WHERE mouse_id = ?
+                """,
+                ("MT402", "", "litter_colony_state", "MT401"),
+            )
+            conn.executemany(
+                """
+                INSERT INTO mouse_master
+                    (mouse_id, display_id, raw_strain_text, sex, dob_raw, dob_start,
+                     litter_id, status, source_photo_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "MT403",
+                        "MT403",
+                        "C57BL/6J",
+                        "male",
+                        "2026-05-01",
+                        "2026-05-01",
+                        "litter_colony_state",
+                        "active",
+                        "photo_colony_state",
+                        "2026-05-09T11:20:00Z",
+                        "2026-05-09T11:20:00Z",
+                    ),
+                    (
+                        "MT404",
+                        "MT404",
+                        "C57BL/6J",
+                        "female",
+                        "2026-05-01",
+                        "2026-05-01",
+                        "litter_colony_state",
+                        "active",
+                        "photo_colony_state",
+                        "2026-05-09T11:20:00Z",
+                        "2026-05-09T11:20:00Z",
+                    ),
+                    (
+                        "MT405",
+                        "MT405",
+                        "C57BL/6J",
+                        "male",
+                        "2026-05-01",
+                        "2026-05-01",
+                        "litter_colony_state",
+                        "active",
+                        "photo_colony_state",
+                        "2026-05-09T11:20:00Z",
+                        "2026-05-09T11:20:00Z",
+                    ),
+                ],
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/mouse-pedigree?mouse_id=MT401")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_layer"] == "export or view"
+        assert payload["page_question"] == "Where did this mouse come from?"
+        assert payload["mode"] == "selected_path"
+        assert payload["mouse"] == {
+            "mouse_id": "MT401",
+            "display_id": "MT401",
+            "status": "active",
+            "strain": "C57BL/6J",
+            "litter_id": "litter_colony_state",
+        }
+        assert payload["relationship_summary"] == {
+            "confirmed_relationships": 3,
+            "pending_relationships": 1,
+            "same_litter_siblings": 3,
+            "offspring_events": 0,
+            "must_review": 1,
+            "quick_check": 0,
+        }
+        assert payload["nodes"]["father"] == {
+            "node_type": "mouse",
+            "relationship": "father",
+            "mouse_id": "MT402",
+            "display_id": "MT402",
+            "status": "active",
+            "strain": "C57BL/6J",
+            "relationship_status": "confirmed",
+            "source_layer": "canonical structured state",
+        }
+        assert payload["nodes"]["mother"] == {
+            "node_type": "pending_relationship",
+            "relationship": "mother",
+            "label": "Parent pending",
+            "relationship_status": "pending_review",
+            "not_inferred": True,
+        }
+        assert payload["nodes"]["mating"]["mating_id"] == "mating_colony_state"
+        assert payload["nodes"]["litter"]["litter_id"] == "litter_colony_state"
+        assert [node["mouse_id"] for node in payload["nodes"]["same_litter_siblings"]] == [
+            "MT403",
+            "MT404",
+            "MT405",
+        ]
+        assert payload["evidence_rows"] == [
+            {
+                "field": "mother_id",
+                "value": "Parent pending",
+                "status": "pending_review",
+                "source_layer": "review item",
+                "source": {
+                    "source_record_id": "",
+                    "label": "Open Focus Review",
+                    "source_type": "review",
+                },
+            },
+            {
+                "field": "father_id",
+                "value": "MT402",
+                "status": "confirmed",
+                "source_layer": "canonical structured state",
+                "source": {
+                    "source_record_id": "source_mating_colony_state",
+                    "label": "Reviewed mating cage C-12",
+                    "source_type": "manual_review",
+                },
+            },
+            {
+                "field": "litter_id",
+                "value": "litter_colony_state",
+                "status": "confirmed",
+                "source_layer": "canonical structured state",
+                "source": {
+                    "source_record_id": "source_mating_colony_state",
+                    "label": "Reviewed mating cage C-12",
+                    "source_type": "manual_review",
+                },
+            },
+            {
+                "field": "mating_id",
+                "value": "mating_colony_state",
+                "status": "confirmed",
+                "source_layer": "canonical structured state",
+                "source": {
+                    "source_record_id": "source_mating_colony_state",
+                    "label": "Reviewed mating cage C-12",
+                    "source_type": "manual_review",
+                },
+            },
+        ]
+        assert payload["attention_links"] == [
+            {
+                "label": "Open Focus Review",
+                "target_path": "/api/ui/focus-review",
+                "must_review": 1,
+                "quick_check": 0,
+            }
+        ]
+        assert "review_items" not in payload
+        assert payload["empty_state"]["fabricated_records"] is False
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_mouse_pedigree_empty_state_does_not_fabricate_relationships(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        client = TestClient(app)
+
+        response = client.get("/api/ui/mouse-pedigree")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_layer"] == "export or view"
+        assert payload["mouse"] is None
+        assert payload["nodes"] == {}
+        assert payload["evidence_rows"] == []
+        assert payload["relationship_summary"] == {
+            "confirmed_relationships": 0,
+            "pending_relationships": 0,
+            "same_litter_siblings": 0,
+            "offspring_events": 0,
+            "must_review": 0,
+            "quick_check": 0,
+        }
+        assert payload["empty_state"] == {
+            "message": "Choose a mouse to view accepted pedigree relationships.",
+            "fabricated_records": False,
+        }
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_evidence_ledger_separates_raw_ocr_interpretation_and_links_review(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:
