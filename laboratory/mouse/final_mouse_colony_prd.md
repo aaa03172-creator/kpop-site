@@ -73,7 +73,7 @@ Core principles:
 - Keep raw values and normalized values separate.
 - Prefer bounded selection controls for normalized/reviewed values when the valid range is limited, while keeping the raw OCR/manual value visible and unchanged.
 - Ear-label review is a bounded correction flow: reviewers choose a normalized code such as `R_PRIME`, `R_CIRCLE`, `NONE`, or `UNREADABLE`, and the raw note token remains preserved as source evidence.
-- If the sex/count evidence indicates both male and female animals in the same cage, the parsed/intermediate card type should default to `Mating`. This is an operational inference for review and export preparation, not permission to overwrite raw sex text or canonical mating records without source-backed review.
+- If the sex/count evidence indicates both male and female animals in the same cage, the parsed/intermediate card type should become a `Mating` candidate with confidence and supporting evidence. It should be treated as stronger when a mating date, parent-style rows, or active litter evidence is also present, and weaker when the source may be a holding cage, stale card, or ambiguous note.
 - Treat note lines and strike-throughs as structured data.
 - Track state changes as events.
 - Treat Excel files as outputs/views, not the only source of truth.
@@ -1625,6 +1625,8 @@ When a selected rule set declares that sample IDs equal mouse display IDs, genot
 Breeding operation rules should be configurable workflow policy used for review, next-action suggestions, and export readiness. They should not hard-code one strain's genotype expectations or force automatic sacrifice, parent replacement, or cage closure.
 
 Workbook notes and animal sheet patterns may suggest defaults such as mating parent ratio, expected parent age range, no-birth review windows, litter separation due dates, parent replacement review age, and separation DOB grouping windows. These values should be stored as editable assumptions and applied only after user review or explicit adoption.
+
+Rule conflicts should be resolved by evidence strength, source recency, and accepted policy scope. Missing workbook/photo evidence should not be treated as proof that an event did not happen; unresolved or biologically unlikely cases should become review items with the conflicting fields and assumed rule shown.
 
 Strain-specific notes such as "all pups are Tg" must remain strain-specific candidate configuration. They should not become global genotype logic because inheritance patterns, genotype categories, and management targets differ by strain and cross.
 
