@@ -1,12 +1,14 @@
 # Selective Normalization Controls Plan
 
-분류: product/workflow design document / non-canonical planning note
-데이터 경계: review item UX, parsed/intermediate transcription, normalized candidate selection
-작성 기준일: 2026-05-04
+Layer classification: product/workflow design document / non-canonical planning note.
+
+Data boundary: review item UX, parsed/intermediate transcription, and normalized candidate selection.
+
+Draft basis: 2026-05-04.
 
 ## 목적
 
-사용자가 cage-card 사진, OCR/AI draft, Excel import review를 확인할 때 직접 기입해야 하는 값을 줄이고, 후보 범위가 제한된 값은 선택형 컨트롤로 고르게 한다. 단, 선택값은 raw evidence를 덮어쓰지 않는다.
+사용자가 cage-card 사진, OCR/AI draft, Excel import review를 확인할 때 직접 타이핑해야 하는 값을 줄이고, 후보 범위가 제한된 값은 선택형 컨트롤로 고르게 한다. 단, 이 선택값은 raw evidence를 덮어쓰지 않는다.
 
 ## 원칙
 
@@ -14,13 +16,13 @@
 
    사진에서 보이는 원문, OCR raw text, manual transcription raw value, Excel cell value는 수정하지 않는다.
 
-2. 선택값은 normalized 또는 matched candidate로 저장한다.
+2. 선택값은 normalized value 또는 matched candidate로 저장한다.
 
-   예: `sex_raw = "♀ 8"`은 그대로 두고, reviewer가 `female`을 선택하면 `sex_normalized = "female"`로 별도 저장한다.
+   예를 들어 `sex_raw = "? 8"`은 그대로 두고, reviewer가 `female`을 선택하면 `sex_normalized = "female"`로 별도 저장한다.
 
 3. 후보가 제한된 필드는 직접 입력보다 선택을 우선한다.
 
-   카드 타입, 성별 해석, LMO/Y/N, note-line 해석, genotype status, assigned strain match는 select, segmented control, combobox를 우선 사용한다.
+   card type, sex interpretation, LMO/Y/N, note-line interpretation, genotype status, assigned strain match에는 select, segmented control, combobox를 우선 사용한다.
 
 4. Master가 필요한 값은 하드코딩하지 않는다.
 
@@ -46,16 +48,16 @@
 
 ## 저장 정책
 
-- `raw_*` 값은 사용자가 선택형 normalized 값을 바꿔도 유지한다.
+- `raw_*` 값은 사용자가 선택한 normalized 값으로 바꾸지 않는다.
 - `matched_*`, `*_normalized`, review decision, correction after value는 before/after action log에 남긴다.
 - canonical write 전에는 선택값도 review item 또는 parsed/intermediate state로 취급한다.
 - export blocker는 선택되지 않았거나 conflicting/high-risk인 값만 막는다.
 
-## 이번 구현 절편
+## 이번 구현 범위
 
 Manual transcription UI에 다음 선택 컨트롤을 추가한다.
 
-- `matched_strain`: active assigned strain 목록에서 선택. 비워두면 raw strain을 matched 후보로 사용한다.
+- `matched_strain`: active assigned strain 목록에서 선택한다. 비워두면 raw strain을 matched 후보로 사용한다.
 - `sex_normalized`: blank/use raw, male, female, mixed, unknown, not_visible.
 - `lmo_raw`: blank/not recorded, Y, N, unknown, not_visible.
 
