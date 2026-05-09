@@ -687,6 +687,13 @@ def main() -> None:
                     "Strain registry candidates" in index_html and "review gene/allele" in index_html,
                     "Local UI should surface legacy strain registry candidates without inferred gene/allele values.",
                 )
+                assert_true(
+                    "apply_strain_registry_candidate" in index_html
+                    and "reviewed-gene-symbol" in index_html
+                    and "reviewed-allele-name" in index_html,
+                    "Local UI should require reviewed strain/gene/allele values before applying legacy registry candidates.",
+                )
+                assert_true("reviewed-existing-strain-id" in index_html, "Local UI should support explicit existing-strain linkage.")
                 assert_true("Legacy decision" in index_html, "Local UI should expose legacy review decision controls.")
                 assert_true("Create Missing Photo Reviews" in index_html, "Local UI should expose photo review candidate creation.")
                 assert_true("Evidence Reconciliation" in index_html, "Local UI should expose photo/workbook reconciliation.")
