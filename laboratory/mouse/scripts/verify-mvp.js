@@ -128,6 +128,13 @@ async function main() {
       staticHtml.includes("data-attention-level"),
     "Focus Review should expose low-fatigue attention cues with text, structure, and stable classes."
   );
+  assert(
+    staticHtml.includes("/api/ui/focus-review") &&
+      staticHtml.includes("renderFocusReviewReadModel") &&
+      staticHtml.includes("Focus Review unavailable") &&
+      staticHtml.includes("fabricated_records"),
+    "Focus Review UI should consume the read-only read model and render honest unavailable or empty states without fabricated records."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);
@@ -168,8 +175,119 @@ async function main() {
   await page.waitForSelector("#inboxRows tr");
 
   const staticPage = await context.newPage();
+  const staticPageErrors = [];
+  staticPage.on("pageerror", (error) => staticPageErrors.push(error.message));
+  staticPage.on("console", (message) => {
+    if (message.type() === "error") {
+      const text = message.text();
+      if (!text.includes("net::ERR_FILE_NOT_FOUND")) {
+        staticPageErrors.push(text);
+      }
+    }
+  });
+  await staticPage.addInitScript(() => {
+    const reviewItem = {
+      review_id: "review_focus_static_contract",
+      status: "open",
+      issue: "Count mismatch",
+      severity: "High",
+      attention_level: "must_review",
+      priority: "high",
+      assigned_role: "Colony Reviewer",
+      review_reason: "Parsed count conflicts with note-line evidence.",
+      evidence_preview: "MT401 R' / MT402 L'",
+      photo_id: "photo_focus_static_contract",
+      original_filename: "focus-card.png",
+      note_line_count: 2
+    };
+    const responses = {
+      "/api/health": { ai_draft: { available: false } },
+      "/api/assigned-strains": [],
+      "/api/strains": [],
+      "/api/source-records": [],
+      "/api/corrections": [],
+      "/api/canonical-candidates": [],
+      "/api/distribution-imports": [],
+      "/api/legacy-workbook-imports": [],
+      "/api/evidence-reconciliation": {},
+      "/api/evidence-comparison": { comparisons: [] },
+      "/api/photo-review-workbench": { pending_transcription_count: 0 },
+      "/api/upload-batches": [],
+      "/api/photos": [],
+      "/api/review-items": [reviewItem],
+      "/api/ui/focus-review": {
+        source_layer: "export or view",
+        page_question: "What needs my decision today?",
+        workload_summary: { must_review: 1, quick_check: 0 },
+        cards: [
+          {
+            parse_id: "parse_focus_static_contract",
+            source_photo: { photo_id: "photo_focus_static_contract", filename: "focus-card.png" },
+            review_count: 1,
+            review_items: [{ review_id: reviewItem.review_id, issue_label: "Count mismatch", attention_level: "must_review" }],
+            mouse_rows: [{ mouse_id: "MT401", raw_line: "MT401 R'" }]
+          }
+        ],
+        empty_state: { message: "", fabricated_records: false }
+      },
+      "/api/mice": [],
+      "/api/note-items": [],
+      "/api/card-snapshots": [],
+      "/api/mouse-events": [],
+      "/api/cages": [],
+      "/api/matings": [],
+      "/api/litters": [],
+      "/api/strain-target-genotypes": [],
+      "/api/genotype-status-vocabulary": [],
+      "/api/review-vocabulary": { roles: [], priorities: [] },
+      "/api/experiment-readiness": {},
+      "/api/genotyping-dashboard": [],
+      "/api/labeling-rule-sets": [],
+      "/api/export-preview": {
+        ready: false,
+        blocked_review_items: 1,
+        open_review_items: 1,
+        review_blockers: [],
+        readiness_warnings: [],
+        preview_row_count: 0,
+        photos: 0,
+        parsed_results: 0,
+        separation_row_count: 0,
+        animal_sheet_row_count: 0,
+        genotype_blocker_items: 0
+      },
+      "/api/export-log": [],
+      "/api/search": { query: "", mice: [], strains: [], reviews: [], sources: [] }
+    };
+    window.fetch = async (input) => {
+      const url = String(input);
+      const path = url.startsWith("file:///api/") ? url.replace("file://", "") : url;
+      const key = path.split("?")[0];
+      const body = Object.prototype.hasOwnProperty.call(responses, key) ? responses[key] : [];
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+  });
   await staticPage.goto(fileUrl(staticPagePath));
   await staticPage.waitForFunction(() => typeof legacyWorkbookRow === "function");
+  try {
+    await staticPage.waitForFunction(() => document.querySelectorAll("#reviewRows .review-card").length > 0, { timeout: 5000 });
+  } catch (error) {
+    const bodyText = await staticPage.locator("body").innerText().catch(() => "");
+    throw new Error(`Static review cards did not render. Errors: ${staticPageErrors.join(" | ") || "none"}. Body: ${bodyText.slice(0, 500)}`);
+  }
+  assert(staticPageErrors.length === 0, `Static app startup errors: ${staticPageErrors.join(" | ")}`);
+  assert(
+    (await staticPage.locator("#reviewRows .review-card").filter({ hasText: "Count mismatch" }).count()) === 1 &&
+      (await staticPage.locator("#reviewRows .review-card").filter({ hasText: "MT401 R'" }).count()) === 1,
+    "Static app-served review queue should render evidence-backed review cards."
+  );
+  assert(
+    (await staticPage.locator("#focusReviewReadModel").filter({ hasText: "Must review 1" }).filter({ hasText: "focus-card.png" }).count()) === 1,
+    "Static app startup should render the Focus Review read model from /api/ui/focus-review."
+  );
   const attentionCue = await staticPage.evaluate(() => {
     const item = { review_id: "review_dom_contract", attention_level: "quick_check", status: "open" };
     const visual = reviewVisual(item);
@@ -196,6 +314,100 @@ async function main() {
       attentionCue.hasStableClass &&
       attentionCue.hasAction,
     "Rendered Focus Review cards should expose quick-check text, stable cue class, data level, and actions."
+  );
+  const focusReviewRender = await staticPage.evaluate(() => {
+    const panel = document.getElementById("focusReviewReadModel");
+    renderFocusReviewReadModel({
+      source_layer: "export or view",
+      page_question: "What needs my decision today?",
+      workload_summary: { must_review: 2, quick_check: 1 },
+      cards: [
+        {
+          parse_id: "parse_focus_contract",
+          source_photo: { filename: "source-card.png" },
+          review_count: 2,
+          review_items: [{ issue_label: "Count mismatch" }],
+          mouse_rows: [{ mouse_id: "M-001" }]
+        }
+      ],
+      empty_state: { message: "", fabricated_records: false }
+    });
+    const loaded = {
+      state: panel.dataset.state,
+      fabricated: panel.dataset.fabricatedRecords,
+      text: panel.textContent
+    };
+    renderFocusReviewReadModel({
+      source_layer: "export or view",
+      page_question: "What needs my decision today?",
+      cards: [],
+      empty_state: { message: "No Focus Review items are currently open.", fabricated_records: false }
+    });
+    const missingWorkload = {
+      state: panel.dataset.state,
+      fabricated: panel.dataset.fabricatedRecords,
+      text: panel.textContent
+    };
+    renderFocusReviewReadModel({
+      source_layer: "export or view",
+      page_question: "What needs my decision today?",
+      workload_summary: { must_review: null, quick_check: "" },
+      cards: [],
+      empty_state: { message: "No Focus Review items are currently open.", fabricated_records: false }
+    });
+    const malformedWorkload = {
+      state: panel.dataset.state,
+      fabricated: panel.dataset.fabricatedRecords,
+      text: panel.textContent
+    };
+    renderFocusReviewReadModel({
+      source_layer: "export or view",
+      load_error: true,
+      error_message: "backend down",
+      page_question: "What needs my decision today?",
+      cards: [],
+      empty_state: { message: "Focus Review unavailable.", fabricated_records: false }
+    });
+    return {
+      loaded,
+      missingWorkload,
+      malformedWorkload,
+      error: {
+        state: panel.dataset.state,
+        fabricated: panel.dataset.fabricatedRecords,
+        text: panel.textContent
+      }
+    };
+  });
+  assert(
+    focusReviewRender.loaded.state === "loaded" &&
+      focusReviewRender.loaded.fabricated === "false" &&
+      focusReviewRender.loaded.text.includes("Must review 2") &&
+      focusReviewRender.loaded.text.includes("Quick check 1") &&
+      focusReviewRender.loaded.text.includes("source-card.png") &&
+      focusReviewRender.loaded.text.includes("M-001"),
+    "Focus Review read-model cards should render source-backed counts and evidence previews."
+  );
+  assert(
+    focusReviewRender.missingWorkload.state === "empty" &&
+      focusReviewRender.missingWorkload.fabricated === "false" &&
+      focusReviewRender.missingWorkload.text.includes("Counts unavailable") &&
+      !focusReviewRender.missingWorkload.text.includes("Must review 0"),
+    "Focus Review should not invent zero workload when workload_summary is missing."
+  );
+  assert(
+    focusReviewRender.malformedWorkload.state === "empty" &&
+      focusReviewRender.malformedWorkload.fabricated === "false" &&
+      focusReviewRender.malformedWorkload.text.includes("Counts unavailable") &&
+      !focusReviewRender.malformedWorkload.text.includes("Must review 0"),
+    "Focus Review should not invent zero workload when workload_summary values are malformed."
+  );
+  assert(
+    focusReviewRender.error.state === "error" &&
+      focusReviewRender.error.fabricated === "false" &&
+      focusReviewRender.error.text.includes("Focus Review unavailable") &&
+      focusReviewRender.error.text.includes("backend down"),
+    "Focus Review unavailable state should be explicit and non-fabricated."
   );
   const legacyWorkbookHtml = await staticPage.evaluate(() => legacyWorkbookRow({
     source_file_name: "legacy <source>.xlsx",

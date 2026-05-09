@@ -508,6 +508,32 @@
       color: var(--muted);
       font-size: 12px;
     }
+    .focus-review-read-model {
+      display: grid;
+      gap: 10px;
+      margin: 0 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fbfa;
+      padding: 12px;
+    }
+    .focus-review-read-model h3 {
+      margin: 0;
+      font-size: 14px;
+    }
+    .focus-review-read-model p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .focus-review-read-model[data-state="error"] {
+      border-color: var(--cue-must-line);
+      background: var(--cue-must-bg);
+    }
+    .focus-review-card {
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
     .review-card-actions {
       display: grid;
       gap: 8px;
@@ -2869,6 +2895,10 @@
       </div>
       <div class="review-workbench">
         <div class="review-list-panel">
+          <div class="focus-review-read-model" id="focusReviewReadModel" aria-live="polite">
+            <h3>Focus Review</h3>
+            <p>Loading evidence-backed review summary...</p>
+          </div>
           <div class="review-queue-summary" id="reviewQueueSummary"></div>
           <div class="review-card-list" id="reviewRows" aria-label="Review items"></div>
         </div>
@@ -3788,6 +3818,79 @@
         counts[level] = (counts[level] || 0) + 1;
         return counts;
       }, {});
+    }
+
+    async function loadFocusReviewReadModel() {
+      try {
+        return await api("/api/ui/focus-review");
+      } catch (error) {
+        return {
+          source_layer: "export or view",
+          load_error: true,
+          error_message: apiErrorMessage(error),
+          page_question: "What needs my decision today?",
+          cards: [],
+          empty_state: {
+            message: "Focus Review unavailable. Use the full review queue below while the read model reloads.",
+            fabricated_records: false
+          }
+        };
+      }
+    }
+
+    function renderFocusReviewReadModel(model) {
+      const panel = document.getElementById("focusReviewReadModel");
+      if (!panel) return;
+      const cards = Array.isArray(model?.cards) ? model.cards : [];
+      const workload = model?.workload_summary || {};
+      const emptyState = model?.empty_state || {};
+      const fabricatedRecords = emptyState.fabricated_records === true;
+      const hasWorkloadCounts = Number.isFinite(workload.must_review) && Number.isFinite(workload.quick_check);
+      const counts = model?.load_error || !hasWorkloadCounts
+        ? ["Counts unavailable"]
+        : [`Must review ${Number(workload.must_review || 0)}`, `Quick check ${Number(workload.quick_check || 0)}`];
+      const summary = `
+        <div class="section-kicker">
+          <div>
+            <h3>Focus Review</h3>
+            <p>${escapeHtml(model?.page_question || "What needs my decision today?")}</p>
+          </div>
+          <span class="chip">${escapeHtml(model?.source_layer || "export or view")}</span>
+        </div>
+        <div class="review-queue-summary">
+          ${counts.map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+          <span class="chip">Fabricated records: ${fabricatedRecords ? "yes" : "no"}</span>
+        </div>
+      `;
+      if (model?.load_error) {
+        panel.dataset.state = "error";
+        panel.dataset.fabricatedRecords = "false";
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Focus Review unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        return;
+      }
+      if (!cards.length) {
+        panel.dataset.state = "empty";
+        panel.dataset.fabricatedRecords = String(fabricatedRecords);
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "No Focus Review items are currently open.")}</p>`;
+        return;
+      }
+      panel.dataset.state = "loaded";
+      panel.dataset.fabricatedRecords = String(fabricatedRecords);
+      panel.innerHTML = `${summary}${cards.slice(0, 3).map((card) => {
+        const sourcePhoto = card.source_photo || {};
+        const reviewItems = Array.isArray(card.review_items) ? card.review_items : [];
+        const mouseRows = Array.isArray(card.mouse_rows) ? card.mouse_rows : [];
+        return `
+          <div class="focus-review-card">
+            <h3>${escapeHtml(sourcePhoto.filename || card.parse_id || "Source pending")}</h3>
+            <p>${escapeHtml(`${card.review_count || reviewItems.length} review items / ${mouseRows.length} mouse rows`)}</p>
+            <div class="review-meta">
+              ${reviewItems.slice(0, 3).map((item) => `<span class="chip">${escapeHtml(item.issue_label || item.issue || "Review item")}</span>`).join("")}
+              ${mouseRows.slice(0, 3).map((mouse) => `<span class="chip">${escapeHtml(mouse.mouse_id || "mouse id pending")}</span>`).join("")}
+            </div>
+          </div>
+        `;
+      }).join("")}`;
     }
 
     function reviewStatusLabel(value) {
@@ -5429,7 +5532,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -5444,6 +5547,7 @@
         api("/api/upload-batches"),
         api("/api/photos"),
         api("/api/review-items"),
+        loadFocusReviewReadModel(),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
         api("/api/note-items"),
         api("/api/card-snapshots"),
@@ -5462,6 +5566,7 @@
       ]);
 
       renderShellStatus({ health, photoWorkbench, photos, reviews, mice, evidenceComparison, preview });
+      renderFocusReviewReadModel(focusReview);
       const aiStatus = health.ai_draft || {};
       currentAiStatus = aiStatus;
       document.getElementById("aiDraftMessage").textContent = aiStatus.available
