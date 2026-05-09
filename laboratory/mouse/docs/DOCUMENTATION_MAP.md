@@ -31,6 +31,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | `final_mouse_colony_prd.md` | Adopted product PRD | Primary product reference. It lists adopted supporting documents but remains the behavior anchor. |
 | `README.md` | Operator/developer entry point | Runtime usage, commands, tests, and compact architecture summary. |
 | `tests/` and verification scripts | Executable contract | Current behavior evidence. Tests should be checked when docs and implementation differ. |
+| `config/breeding_rules.json` | Review item / workflow policy config | Non-canonical breeding thresholds and strain-scoped assumptions loaded by runtime rule helpers. |
 | `docs/artifact_contracts/*.schema.json` | Export/view artifact contracts | Schema references for proposed changesets, validation reports, and export manifests. |
 | `evals/cage_card_skill_gym/` | Non-canonical safety eval layer | Review/test probes only; does not define runtime behavior or schema. |
 

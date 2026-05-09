@@ -1,0 +1,33 @@
+{
+  "boundary": "review item / workflow policy config",
+  "canonical": false,
+  "rule_set_id": "breeding_rule_default_20260509",
+  "display_name": "Default breeding operation review rules",
+  "policy_scope": {
+    "scope_type": "project",
+    "strain_text": "",
+    "facility": "",
+    "effective_from": "2026-05-09",
+    "effective_to": ""
+  },
+  "active": true,
+  "signals": [],
+  "thresholds": {
+    "no_birth_review_after_days": 60,
+    "parent_replacement_review_after_days": 365,
+    "litter_separation_due_after_days": 30,
+    "litter_separation_overdue_after_days": 45,
+    "litter_separation_high_overdue_after_days": 60,
+    "schedule_due_soon_window_days": 30,
+    "separation_batch_max_dob_span_days": 14
+  },
+  "strain_specific_assumptions": [
+    {
+      "assumption_key": "default_genotype_for_pups",
+      "strain_text": "ApoM Tg/Tg",
+      "value": "Tg",
+      "rule_strength": "adopted_policy",
+      "review_required_before_global_use": true
+    }
+  ]
+}
