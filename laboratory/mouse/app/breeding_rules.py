@@ -62,13 +62,21 @@ def validate_breeding_rule_set(rule_set: dict[str, Any]) -> bool:
             return False
         if signal.get("rule_strength") not in ALLOWED_RULE_STRENGTHS:
             return False
+        if not str(signal.get("target_candidate_type") or "").strip():
+            return False
+        if type(signal.get("confidence_delta")) is not int:
+            return False
+        if not isinstance(signal.get("requires_any"), list):
+            return False
+        if not isinstance(signal.get("conflict_review_keys"), list):
+            return False
     thresholds = rule_set.get("thresholds")
     if not isinstance(thresholds, dict) or not thresholds:
         return False
     if not REQUIRED_THRESHOLD_KEYS.issubset(thresholds):
         return False
     for value in thresholds.values():
-        if not isinstance(value, int) or value < 0:
+        if type(value) is not int or value < 0:
             return False
     assumptions = rule_set.get("strain_specific_assumptions")
     if not isinstance(assumptions, list):
