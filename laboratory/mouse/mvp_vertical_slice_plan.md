@@ -279,6 +279,7 @@ Current verification command:
 - The duplicate active mouse fixture also verifies that resolving movement removes the conflict from the review queue and marks the previous active source as closed by movement review.
 - The animalsheet fixture verifies parent ID row splitting, litter row rendering, pup count mapping, source evidence, and traceability columns.
 - Labeling session rule checks verify that configured ear-label sequences reset per cage/card group, mouse-number matching remains evidence-backed, crossed-out handling is policy-driven, and sample IDs can map to mouse display IDs without overwriting raw sample evidence.
+- When a selected labeling rule says sample IDs equal mouse display IDs, genotyping requests must reject unmatched, duplicate, or different-mouse sample IDs before creating genotyping rows or updating latest mouse sample fields.
 
 ## UI Acceptance Checklist
 

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+from fastapi import HTTPException
+
 from app import db
 from app.labeling_rules import (
     apply_ear_sequence,
@@ -11,6 +14,7 @@ from app.labeling_rules import (
 from app.main import (
     GenotypingRequestCreate,
     create_card_snapshot,
+    list_labeling_rule_sets,
     request_genotyping,
     write_note_items_and_mouse_candidates,
 )
@@ -357,5 +361,66 @@ def test_genotyping_request_uses_rule_set_default_target_without_overwriting_sam
         assert record["mouse_id"] == "mouse_24"
         assert record["sample_id"] == "24"
         assert record["target_name"] == "ApoM-tg"
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_labeling_rule_api_lists_active_rule_with_sequence(tmp_path):
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+
+        rules = list_labeling_rule_sets()
+
+        [rule] = [item for item in rules if item["rule_set_id"] == "label_rule_apom_tgtg_20260506"]
+        assert rule["display_name"] == "ApoM Tg/Tg 2026-05-06"
+        assert rule["active"] is True
+        assert rule["sample_mapping"] == "sample_id_equals_mouse_display_id"
+        assert rule["genotyping_target"] == "ApoM-tg"
+        assert rule["ear_label_sequence"][:2] == ["R_PRIME", "L_PRIME"]
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_genotyping_request_rejects_rule_set_sample_id_mismatch(tmp_path):
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO mouse_master
+                    (mouse_id, display_id, raw_strain_text, status, last_verified_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    ("mouse_24", "24", "ApoM Tg/Tg", "active", "2026-05-06T00:00:00Z"),
+                    ("mouse_25", "25", "ApoM Tg/Tg", "active", "2026-05-06T00:00:00Z"),
+                ],
+            )
+
+        with pytest.raises(HTTPException) as exc_info:
+            request_genotyping(
+                GenotypingRequestCreate(
+                    mouse_id="mouse_24",
+                    sample_id="25",
+                    target_name="",
+                    labeling_rule_set_id="label_rule_apom_tgtg_20260506",
+                )
+            )
+
+        assert exc_info.value.status_code == 409
+        with db.connection() as conn:
+            records = conn.execute("SELECT COUNT(*) AS count FROM genotyping_record").fetchone()
+            mouse = conn.execute(
+                "SELECT sample_id, genotyping_status FROM mouse_master WHERE mouse_id = ?",
+                ("mouse_24",),
+            ).fetchone()
+
+        assert records["count"] == 0
+        assert mouse["sample_id"] is None
+        assert mouse["genotyping_status"] == "not_sampled"
     finally:
         db.DB_PATH = old_db_path

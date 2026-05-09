@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 import httpx
 
 from .db import ROOT, connection, init_db
-from .labeling_rules import interpret_crossed_out_status
+from .labeling_rules import interpret_crossed_out_status, match_samples_to_mice
 from .matching import MatchCandidate, match_candidate
 from .storage import new_id, save_legacy_workbook, save_upload, utc_now
 from scripts.parse_legacy_workbooks import parse_workbook
@@ -4432,6 +4432,64 @@ def load_labeling_rule_genotyping_target(conn: Any, rule_set_id: str) -> str:
     return str(row["genotyping_target"] or "").strip() if row else ""
 
 
+def load_labeling_rule_sample_mapping(conn: Any, rule_set_id: str) -> str:
+    rule_id = str(rule_set_id or "").strip()
+    if not rule_id:
+        return ""
+    row = conn.execute(
+        """
+        SELECT sample_mapping
+        FROM labeling_rule_set
+        WHERE rule_set_id = ?
+        """,
+        (rule_id,),
+    ).fetchone()
+    return str(row["sample_mapping"] or "").strip() if row else ""
+
+
+@app.get("/api/labeling-rule-sets")
+def list_labeling_rule_sets() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT rule_set_id, display_name, applies_to_strain_text, session_date,
+                   numbering_order, mouse_number_scope, ear_sequence_scope,
+                   crossed_out_handling, sample_mapping, genotyping_target, active
+            FROM labeling_rule_set
+            ORDER BY active DESC, session_date DESC, display_name
+            """
+        ).fetchall()
+        sequence_rows = conn.execute(
+            """
+            SELECT rule_set_id, ear_label_code
+            FROM labeling_rule_ear_sequence
+            ORDER BY rule_set_id, sequence_index
+            """
+        ).fetchall()
+
+    sequences: dict[str, list[str]] = {}
+    for row in sequence_rows:
+        sequences.setdefault(str(row["rule_set_id"]), []).append(str(row["ear_label_code"]))
+
+    return [
+        {
+            "rule_set_id": row["rule_set_id"],
+            "display_name": row["display_name"],
+            "applies_to_strain_text": row["applies_to_strain_text"],
+            "session_date": row["session_date"],
+            "numbering_order": row["numbering_order"],
+            "mouse_number_scope": row["mouse_number_scope"],
+            "ear_sequence_scope": row["ear_sequence_scope"],
+            "crossed_out_handling": row["crossed_out_handling"],
+            "sample_mapping": row["sample_mapping"],
+            "genotyping_target": row["genotyping_target"],
+            "active": bool(row["active"]),
+            "ear_label_sequence": sequences.get(str(row["rule_set_id"]), []),
+        }
+        for row in rows
+    ]
+
+
 def active_mouse_note_count(record: dict[str, Any]) -> int:
     card_type = str(record.get("type") or "unknown").lower()
     notes = record.get("notes") if isinstance(record.get("notes"), list) else []
@@ -6219,6 +6277,31 @@ def request_genotyping(payload: GenotypingRequestCreate) -> dict[str, Any]:
 
         before = dict(existing)
         sample_id = payload.sample_id.strip() or existing["display_id"]
+        sample_mapping = load_labeling_rule_sample_mapping(conn, payload.labeling_rule_set_id)
+        if sample_mapping == "sample_id_equals_mouse_display_id":
+            candidate_rows = conn.execute(
+                """
+                SELECT mouse_id, display_id
+                FROM mouse_master
+                WHERE display_id = ?
+                  AND status NOT IN ('dead', 'sacrificed', 'archived', 'transferred')
+                """,
+                (sample_id,),
+            ).fetchall()
+            [sample_match] = match_samples_to_mice(
+                [{"sample_id": sample_id}],
+                [dict(row) for row in candidate_rows],
+            )
+            if sample_match["match_status"] != "matched":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Sample ID could not be uniquely matched to a mouse display ID under the selected labeling rule.",
+                )
+            if sample_match["mouse_id"] != payload.mouse_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Sample ID matches a different mouse display ID under the selected labeling rule.",
+                )
         target_name = payload.target_name.strip() or load_labeling_rule_genotyping_target(
             conn, payload.labeling_rule_set_id
         )
