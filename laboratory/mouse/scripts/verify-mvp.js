@@ -224,7 +224,21 @@ async function main() {
             parse_id: "parse_focus_static_contract",
             source_photo: { photo_id: "photo_focus_static_contract", filename: "focus-card.png" },
             review_count: 1,
-            review_items: [{ review_id: reviewItem.review_id, issue_label: "Count mismatch", attention_level: "must_review" }],
+            review_items: [
+              {
+                review_id: reviewItem.review_id,
+                issue_label: "Count mismatch",
+                attention_level: "must_review",
+                action_hint: {
+                  source_layer: "export or view",
+                  mode: "manual_review_required",
+                  primary_label: "Inspect source evidence",
+                  requires_note: true,
+                  requires_source_photo: true,
+                  safe_quick_resolve: false
+                }
+              }
+            ],
             mouse_rows: [{ mouse_id: "MT401", raw_line: "MT401 R'" }]
           }
         ],
@@ -294,6 +308,10 @@ async function main() {
     (await staticPage.locator("#focusReviewReadModel").filter({ hasText: "Must review 1" }).filter({ hasText: "focus-card.png" }).count()) === 1,
     "Static app startup should render the Focus Review read model from /api/ui/focus-review."
   );
+  assert(
+    (await staticPage.locator("#focusReviewReadModel").filter({ hasText: "Inspect source evidence" }).filter({ hasText: "manual_review_required" }).count()) === 1,
+    "Static Focus Review cards should render read-model action hints without inventing actions."
+  );
   const attentionCue = await staticPage.evaluate(() => {
     const item = { review_id: "review_dom_contract", attention_level: "quick_check", status: "open" };
     const visual = reviewVisual(item);
@@ -332,7 +350,19 @@ async function main() {
           parse_id: "parse_focus_contract",
           source_photo: { filename: "source-card.png" },
           review_count: 2,
-          review_items: [{ issue_label: "Count mismatch" }],
+          review_items: [
+            {
+              issue_label: "Count mismatch",
+              action_hint: {
+                source_layer: "export or view",
+                mode: "manual_review_required",
+                primary_label: "Inspect source evidence",
+                requires_note: true,
+                requires_source_photo: true,
+                safe_quick_resolve: false
+              }
+            }
+          ],
           mouse_rows: [{ mouse_id: "M-001" }]
         }
       ],
@@ -391,7 +421,8 @@ async function main() {
       focusReviewRender.loaded.text.includes("Must review 2") &&
       focusReviewRender.loaded.text.includes("Quick check 1") &&
       focusReviewRender.loaded.text.includes("source-card.png") &&
-      focusReviewRender.loaded.text.includes("M-001"),
+      focusReviewRender.loaded.text.includes("M-001") &&
+      focusReviewRender.loaded.text.includes("Inspect source evidence"),
     "Focus Review read-model cards should render source-backed counts and evidence previews."
   );
   assert(

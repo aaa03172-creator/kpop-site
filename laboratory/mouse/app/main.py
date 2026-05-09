@@ -496,9 +496,41 @@ def focus_review_issue_label(item: dict[str, Any]) -> str:
     return "Trace only"
 
 
+def focus_review_action_hint(item: dict[str, Any]) -> dict[str, Any]:
+    issue = str(item.get("issue") or "").lower()
+    level = str(item.get("attention_level") or "")
+    has_photo = bool(item.get("photo_id") or item.get("image_url"))
+    safe_quick_resolve_issues = {
+        "low-confidence strain alias",
+        "fixture auto-filled by policy",
+    }
+    safe_quick_resolve = level == "quick_check" and issue in safe_quick_resolve_issues
+    if safe_quick_resolve:
+        mode = "quick_confirmation"
+        primary_label = "Confirm from evidence"
+    else:
+        mode = "manual_review_required"
+        primary_label = "Inspect source evidence"
+    return {
+        "source_layer": "export or view",
+        "mode": mode,
+        "primary_label": primary_label,
+        "requires_note": True,
+        "requires_source_photo": has_photo,
+        "safe_quick_resolve": safe_quick_resolve,
+    }
+
+
 def focus_review_empty_state() -> dict[str, Any]:
     return {
         "message": "No Focus Review items are currently open.",
+        "fabricated_records": False,
+    }
+
+
+def colony_state_empty_state() -> dict[str, Any]:
+    return {
+        "message": "No accepted active colony records are available yet.",
         "fabricated_records": False,
     }
 
@@ -7386,6 +7418,7 @@ def ui_focus_review() -> dict[str, Any]:
                         "attention_reason": item.get("attention_reason"),
                         "review_check_targets": item.get("review_check_targets", []),
                         "evidence_preview": item.get("evidence_preview") or item.get("suggested_value") or "",
+                        "action_hint": focus_review_action_hint(item),
                     }
                     for item in items
                 ],
@@ -7407,6 +7440,155 @@ def ui_focus_review() -> dict[str, Any]:
         "workload_summary": focus_review_workload_summary(reviews),
         "cards": cards,
         "empty_state": focus_review_empty_state(),
+    }
+
+
+@app.get("/api/ui/colony-state")
+def ui_colony_state() -> dict[str, Any]:
+    actionable_reviews = [
+        item for item in list_review_items()
+        if item.get("status") == "open" and item.get("attention_level") in {"must_review", "quick_check"}
+    ]
+    review_counts_by_parse: dict[str, dict[str, int]] = {}
+    for item in actionable_reviews:
+        parse_id = str(item.get("parse_id") or "")
+        level = str(item.get("attention_level") or "")
+        if not parse_id or level not in {"must_review", "quick_check"}:
+            continue
+        review_counts_by_parse.setdefault(parse_id, {"must_review": 0, "quick_check": 0})
+        review_counts_by_parse[parse_id][level] += 1
+
+    with connection() as conn:
+        attention_counts = open_review_attention_counts(conn)
+        active_mice = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM mouse_master
+            WHERE status = 'active'
+            """
+        ).fetchone()[0]
+        active_matings = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM mating_registry
+            WHERE status = 'active'
+            """
+        ).fetchone()[0]
+        active_litters = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM litter_registry
+            WHERE status IN ('active', 'born')
+            """
+        ).fetchone()[0]
+        strain_rows = conn.execute(
+            """
+            SELECT COALESCE(NULLIF(raw_strain_text, ''), 'Unknown') AS strain,
+                   COUNT(*) AS active_mice
+            FROM mouse_master
+            WHERE status = 'active'
+            GROUP BY COALESCE(NULLIF(raw_strain_text, ''), 'Unknown')
+            ORDER BY active_mice DESC, strain COLLATE NOCASE
+            """
+        ).fetchall()
+        status_rows = conn.execute(
+            """
+            SELECT status, COUNT(*) AS mouse_count
+            FROM mouse_master
+            GROUP BY status
+            ORDER BY mouse_count DESC, status COLLATE NOCASE
+            """
+        ).fetchall()
+        card_rows = conn.execute(
+            """
+            SELECT card.card_snapshot_id, card.parse_id, card.photo_id, card.card_type,
+                   card.card_id_raw, card.raw_strain_text, card.matched_strain_text,
+                   card.sex_raw, card.sex_normalized, card.count_value, card.dob_raw,
+                   card.status, card.source_layer, photo.original_filename,
+                   COUNT(mouse.mouse_id) AS mouse_count,
+                   COALESCE((
+                       SELECT COUNT(*)
+                       FROM card_note_item_log note
+                       WHERE note.card_snapshot_id = card.card_snapshot_id
+                   ), 0) AS note_line_count
+            FROM card_snapshot card
+            JOIN mouse_master mouse
+              ON mouse.current_card_snapshot_id = card.card_snapshot_id
+             AND mouse.status = 'active'
+            LEFT JOIN photo_log photo ON photo.photo_id = card.photo_id
+            WHERE card.status IN ('accepted', 'active', 'current')
+              AND card.source_layer = 'canonical structured state'
+            GROUP BY card.card_snapshot_id, card.parse_id, card.photo_id, card.card_type,
+                     card.card_id_raw, card.raw_strain_text, card.matched_strain_text,
+                     card.sex_raw, card.sex_normalized, card.count_value, card.dob_raw,
+                     card.status, card.source_layer, photo.original_filename
+            ORDER BY card.updated_at DESC, card.card_snapshot_id
+            """
+        ).fetchall()
+
+    cards: list[dict[str, Any]] = []
+    for row in card_rows:
+        parse_id = str(row["parse_id"] or "")
+        review_counts = review_counts_by_parse.get(parse_id, {"must_review": 0, "quick_check": 0})
+        cards.append(
+            {
+                "card_snapshot_id": row["card_snapshot_id"],
+                "parse_id": parse_id,
+                "card_type": row["card_type"],
+                "card_id_raw": row["card_id_raw"],
+                "raw_strain_text": row["raw_strain_text"],
+                "matched_strain_text": row["matched_strain_text"],
+                "sex_raw": row["sex_raw"],
+                "sex_normalized": row["sex_normalized"],
+                "count_value": row["count_value"],
+                "dob_raw": row["dob_raw"],
+                "status": row["status"],
+                "source_layer": row["source_layer"],
+                "mouse_count": row["mouse_count"],
+                "source_photo": {
+                    "photo_id": row["photo_id"] or "",
+                    "filename": row["original_filename"] or "",
+                    "source_photo_role": "primary_evidence" if row["photo_id"] else "not_available",
+                    "open_source_photo_label": "Open source photo",
+                },
+                "collapsed_sections": {
+                    "mice": row["mouse_count"],
+                    "note_lines": row["note_line_count"],
+                    "review_blockers": review_counts["must_review"],
+                    "source_evidence": 1 if row["photo_id"] else 0,
+                },
+            }
+        )
+
+    attention_links = []
+    must_review = int(attention_counts.get("must_review", 0))
+    quick_check = int(attention_counts.get("quick_check", 0))
+    if must_review or quick_check:
+        attention_links.append(
+            {
+                "label": "Focus Review",
+                "target_path": "/api/ui/focus-review",
+                "must_review": must_review,
+                "quick_check": quick_check,
+            }
+        )
+
+    return {
+        "source_layer": "export or view",
+        "page_question": "What is active now?",
+        "summary": {
+            "active_mice": active_mice,
+            "active_card_snapshots": len(cards),
+            "active_matings": active_matings,
+            "active_litters": active_litters,
+            "must_review": must_review,
+            "quick_check": quick_check,
+        },
+        "active_card_snapshots": cards,
+        "strain_summary": [dict(row) for row in strain_rows],
+        "status_summary": [dict(row) for row in status_rows],
+        "attention_links": attention_links,
+        "empty_state": colony_state_empty_state(),
     }
 
 
