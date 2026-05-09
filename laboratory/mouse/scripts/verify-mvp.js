@@ -149,13 +149,6 @@ async function main() {
       staticHtml.includes("calendar_mirror"),
     "Colony Schedule UI should consume the read-only read model and keep calendar sync as a non-canonical mirror."
   );
-  assert(
-    html.includes("review-evidence-strip") &&
-      html.includes("review-evidence-item") &&
-      html.includes("drawer-next-button") &&
-      html.includes("Evidence stays in view"),
-    "Review Queue should include compact evidence guidance and a stable drawer next-item control."
-  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);

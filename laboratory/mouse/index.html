@@ -414,42 +414,6 @@
       flex-shrink: 0;
     }
 
-    .review-evidence-strip {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
-      padding: 12px 20px;
-      border-bottom: 1px solid var(--line);
-      background: var(--surface);
-      flex-shrink: 0;
-    }
-
-    .review-evidence-item {
-      min-width: 0;
-      border: 1px solid var(--line-soft);
-      border-radius: 6px;
-      background: var(--surface-soft);
-      padding: 10px 12px;
-    }
-
-    .review-evidence-item strong,
-    .review-evidence-item span {
-      display: block;
-    }
-
-    .review-evidence-item strong {
-      color: var(--ink);
-      font-size: 12px;
-      line-height: 16px;
-    }
-
-    .review-evidence-item span {
-      margin-top: 3px;
-      color: var(--quiet);
-      font-size: 12px;
-      line-height: 16px;
-    }
-
     .workbook-preview {
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
@@ -1218,7 +1182,6 @@
     .drawer-title {
       display: grid;
       gap: 5px;
-      min-width: 0;
     }
 
     .drawer-title h2 {
@@ -1229,11 +1192,6 @@
     .drawer-title .meta {
       color: var(--muted);
       font-size: 12px;
-    }
-
-    .drawer-next-button {
-      flex-shrink: 0;
-      min-width: 88px;
     }
 
     .drawer-body {
@@ -1720,11 +1678,6 @@
         grid-template-columns: 1fr;
       }
 
-      .review-evidence-strip {
-        grid-template-columns: 1fr;
-        padding: 10px 20px;
-      }
-
       .search {
         display: none;
       }
@@ -2116,20 +2069,6 @@
             <span class="muted" id="reviewImpact">0 exports blocked</span>
             <button class="small-button" type="button" id="jumpFirstReview">Open first pending item</button>
           </div>
-          <div class="review-evidence-strip" aria-label="Review queue evidence guidance">
-            <div class="review-evidence-item">
-              <strong>Evidence stays in view</strong>
-              <span>Source photo, parsed fields, note lines, and action log stay beside the queue.</span>
-            </div>
-            <div class="review-evidence-item">
-              <strong>Before / after first</strong>
-              <span>Corrections require a reviewed value or a dismiss reason before state changes.</span>
-            </div>
-            <div class="review-evidence-item">
-              <strong>Exports remain blocked</strong>
-              <span>Review and conflict items stay out of final Excel output until resolved.</span>
-            </div>
-          </div>
           <div class="table-wrap">
             <table aria-label="Review queue">
               <thead>
@@ -2354,7 +2293,7 @@
               <h2 id="drawerTitle">Card Snapshot</h2>
               <div class="meta" id="drawerMeta"></div>
             </div>
-            <button class="small-button drawer-next-button" type="button" id="nextItem" aria-label="Next item">Next item</button>
+            <button class="icon-button" type="button" id="nextItem" aria-label="Next item">Next</button>
           </div>
 
           <div class="drawer-body">
