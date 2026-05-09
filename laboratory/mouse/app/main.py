@@ -59,6 +59,12 @@ class AssignedStrainCreate(BaseModel):
     notes: str = ""
 
 
+class EvidenceComparisonReviewCreate(BaseModel):
+    manual_parse_id: str = ""
+    photo_id: str = ""
+    upload_batch_id: str = ""
+
+
 class DistributionImportPayload(BaseModel):
     layer: str = ""
     description: str = ""
@@ -4065,7 +4071,7 @@ def build_evidence_comparison_payload(conn: Any) -> dict[str, Any]:
     manual_rows = conn.execute(
         """
         SELECT parse.parse_id, parse.photo_id, parse.raw_payload, parse.parsed_at,
-               photo.original_filename
+               photo.original_filename, photo.upload_batch_id
         FROM parse_result parse
         LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
         WHERE parse.source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
@@ -4135,6 +4141,7 @@ def build_evidence_comparison_payload(conn: Any) -> dict[str, Any]:
                 "source_layer": "export or view",
                 "manual_parse_id": manual["parse_id"],
                 "photo_id": manual["photo_id"],
+                "upload_batch_id": manual["upload_batch_id"] or "",
                 "photo_filename": manual["original_filename"] or "",
                 "manual_summary": manual_summary,
                 "legacy_candidate": legacy_payload,
@@ -8793,16 +8800,36 @@ def evidence_comparison() -> dict[str, Any]:
         return build_evidence_comparison_payload(conn)
 
 
+def comparison_matches_review_scope(comparison: dict[str, Any], scope: EvidenceComparisonReviewCreate | None) -> bool:
+    if scope is None:
+        return True
+    manual_parse_id = scope.manual_parse_id.strip()
+    photo_id = scope.photo_id.strip()
+    upload_batch_id = scope.upload_batch_id.strip()
+    if manual_parse_id and comparison.get("manual_parse_id") != manual_parse_id:
+        return False
+    if photo_id and comparison.get("photo_id") != photo_id:
+        return False
+    if upload_batch_id:
+        return comparison.get("upload_batch_id") == upload_batch_id
+    return True
+
+
 @app.post("/api/evidence-comparison/review-candidates")
-def create_evidence_comparison_reviews() -> dict[str, Any]:
+def create_evidence_comparison_reviews(payload: EvidenceComparisonReviewCreate | None = None) -> dict[str, Any]:
     created = 0
     existing = 0
     skipped = 0
     review_ids: list[str] = []
     now = utc_now()
     with connection() as conn:
-        payload = build_evidence_comparison_payload(conn)
-        for comparison in payload["comparisons"]:
+        comparison_payload = build_evidence_comparison_payload(conn)
+        scoped_comparisons = [
+            comparison
+            for comparison in comparison_payload["comparisons"]
+            if comparison_matches_review_scope(comparison, payload)
+        ]
+        for comparison in scoped_comparisons:
             if not comparison.get("review_required"):
                 skipped += 1
                 continue
@@ -8884,6 +8911,12 @@ def create_evidence_comparison_reviews() -> dict[str, Any]:
             review_ids.append(review_id)
     return {
         "boundary": "review item",
+        "scope": {
+            "manual_parse_id": payload.manual_parse_id.strip() if payload else "",
+            "photo_id": payload.photo_id.strip() if payload else "",
+            "upload_batch_id": payload.upload_batch_id.strip() if payload else "",
+            "matched_comparisons": len(scoped_comparisons),
+        },
         "created_review_candidates": created,
         "existing_review_candidates": existing,
         "skipped_exact_matches": skipped,

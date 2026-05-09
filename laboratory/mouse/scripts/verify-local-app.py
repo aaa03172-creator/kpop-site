@@ -753,6 +753,7 @@ def main() -> None:
                 assert_true("uploadBatchReleasePanel" in index_html and "Preview release" in index_html, "Local UI should expose upload batch release checks.")
                 assert_true("Photo worklist" in index_html and "next_action" in index_html, "Local UI should show photo-level batch release blockers.")
                 assert_true("open-batch-worklist-target" in index_html and "item.action_target_type" in index_html, "Local UI should link batch release worklist rows to the next review action.")
+                assert_true("manual_parse_id" in index_html and "scoped comparison review" in index_html, "Batch release action links should create scoped comparison review items.")
                 assert_true("/release-preview" in index_html and "Close Batch" in index_html, "Local UI should preview and close upload batches only after release checks.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -1383,7 +1384,14 @@ def main() -> None:
                     client.get("/api/mice").json() == mice_before_comparison,
                     "Evidence comparison should not write canonical mouse state.",
                 )
-                comparison_review = client.post("/api/evidence-comparison/review-candidates")
+                scoped_comparison = next(
+                    item for item in comparison_payload["comparisons"]
+                    if item["review_required"]
+                )
+                comparison_review = client.post(
+                    "/api/evidence-comparison/review-candidates",
+                    json={"manual_parse_id": scoped_comparison["manual_parse_id"]},
+                )
                 assert_true(
                     comparison_review.status_code == 200,
                     f"Could not create evidence comparison review candidates: {comparison_review.text}",
@@ -1394,8 +1402,10 @@ def main() -> None:
                     "Evidence comparison review candidate creation should stay in the review layer.",
                 )
                 assert_true(
-                    comparison_review_payload["created_review_items"] >= 1,
-                    "Evidence comparison mismatches should create review candidates.",
+                    comparison_review_payload["scope"]["manual_parse_id"] == scoped_comparison["manual_parse_id"]
+                    and comparison_review_payload["scope"]["matched_comparisons"] == 1
+                    and comparison_review_payload["created_review_items"] == 1,
+                    "Scoped evidence comparison review creation should only create the targeted manual parse review.",
                 )
                 comparison_review_ids = set(comparison_review_payload["review_ids"])
                 review_items_after_comparison = client.get("/api/review-items").json()
@@ -1422,10 +1432,13 @@ def main() -> None:
                     comparison_review_states and set(comparison_review_states.values()) == {"open"},
                     "Evidence comparison rows should reflect Review Queue state after candidate creation.",
                 )
-                idempotent_comparison_review = client.post("/api/evidence-comparison/review-candidates")
+                idempotent_comparison_review = client.post(
+                    "/api/evidence-comparison/review-candidates",
+                    json={"manual_parse_id": scoped_comparison["manual_parse_id"]},
+                )
                 assert_true(
                     idempotent_comparison_review.json()["created_review_items"] == 0,
-                    "Evidence comparison review candidate creation should be idempotent.",
+                    "Scoped evidence comparison review candidate creation should be idempotent.",
                 )
                 assert_true(
                     client.get("/api/mice").json() == mice_before_comparison,
@@ -1934,6 +1947,25 @@ def main() -> None:
                     and export_log[0]["generated_by"] == "local_user",
                     "Export log should expose persona ownership for generated export views.",
                 )
+                with db.connection() as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO review_queue
+                            (review_id, parse_id, severity, issue, current_value, suggested_value,
+                             review_reason, status, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (
+                            "review_export_blocker_after_scoped_comparison",
+                            photo_payload["review_candidate"]["parse_id"],
+                            "High",
+                            "Export readiness blocker after scoped comparison review",
+                            "scoped comparison verified",
+                            "resolve before final export",
+                            "Keeps final export readiness checks covered after the scoped comparison review is resolved.",
+                            "open",
+                        ),
+                    )
                 blocked_export = client.get("/api/exports/mice.csv", params={"query": "MT321", "require_ready": "true"})
                 assert_true(blocked_export.status_code == 409, "Final CSV export should be blocked by open review items.")
                 blocked_separation_xlsx = client.get("/api/exports/separation.xlsx")

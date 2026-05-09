@@ -5969,6 +5969,20 @@
           document.getElementById("uploadMessage").textContent = `Opened review ${targetId} from the batch worklist.`;
           return;
         }
+        if (targetType === "parse_result" && targetId) {
+          const result = await api("/api/evidence-comparison/review-candidates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ manual_parse_id: targetId })
+          });
+          reviewStatusFilter = "all";
+          selectedReviewId = result.review_ids?.[0] || "";
+          setActiveView(selectedReviewId ? "review" : "comparison");
+          await refresh();
+          document.getElementById("uploadMessage").textContent =
+            `Created ${result.created_review_items} scoped comparison review item(s); ${result.existing_review_items} already existed.`;
+          return;
+        }
         if (targetType === "canonical_candidate" && targetId) {
           setActiveView("comparison");
           document.getElementById("uploadMessage").textContent = `Open canonical candidate ${targetId} in Candidate Drafts.`;
