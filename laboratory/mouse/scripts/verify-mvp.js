@@ -119,6 +119,15 @@ async function main() {
       staticHtml.includes("DESIGN.md-inspired"),
     "Local UI should expose Airtable/Linear-inspired design tokens without copying brand surfaces."
   );
+  assert(
+    staticHtml.includes("attention-must-review") &&
+      staticHtml.includes("attention-quick-check") &&
+      staticHtml.includes("attention-trace-only") &&
+      staticHtml.includes("Needs quick confirmation") &&
+      staticHtml.includes("Trace only") &&
+      staticHtml.includes("data-attention-level"),
+    "Focus Review should expose low-fatigue attention cues with text, structure, and stable classes."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);
