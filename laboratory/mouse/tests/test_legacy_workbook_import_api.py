@@ -333,6 +333,64 @@ def test_legacy_strain_registry_candidate_apply_creates_source_backed_registry_l
         db.DB_PATH = old_db_path
 
 
+def test_legacy_strain_registry_candidate_apply_rejects_mismatched_existing_strain_mapping(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        client = TestClient(app)
+        existing = client.post(
+            "/api/strains",
+            json={
+                "strain_name": "Reviewed Different Strain",
+                "gene": "ExistingGene",
+                "allele": "ExistingAllele",
+            },
+        )
+        assert existing.status_code == 200
+        genes_before = client.get("/api/genes").json()
+        alleles_before = client.get("/api/alleles").json()
+        imported = client.post(
+            "/api/legacy-workbook-imports",
+            data={"kind": "animal"},
+            files={
+                "file": (
+                    "animal-sheet.xlsx",
+                    workbook_bytes(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        assert imported.status_code == 200
+        [registry_review] = [
+            item
+            for item in client.get("/api/review-items").json()
+            if item["issue"] == "Legacy strain registry candidate requires review"
+        ]
+
+        response = client.post(
+            f"/api/review-items/{registry_review['review_id']}/resolve",
+            json={
+                "resolution_note": "Attempt to link reviewed text to a different existing strain.",
+                "legacy_decision": "apply_strain_registry_candidate",
+                "canonical_entity_type": "strain",
+                "canonical_entity_id": existing.json()["strain_id"],
+                "reviewed_strain_name": "ApoM Tg/Tg",
+                "reviewed_gene_symbol": "ApoM",
+                "reviewed_allele_name": "Tg transgene",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Reviewed strain name" in response.json()["detail"]
+        strains = client.get("/api/strains").json()
+        assert [strain["strain_name"] for strain in strains] == ["Reviewed Different Strain"]
+        assert client.get("/api/genes").json() == genes_before
+        assert client.get("/api/alleles").json() == alleles_before
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_legacy_strain_registry_candidate_apply_reuses_existing_strain_without_overwriting_raw_fields(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     db.DB_PATH = tmp_path / "mouse_lims.sqlite"
@@ -387,5 +445,80 @@ def test_legacy_strain_registry_candidate_apply_reuses_existing_strain_without_o
         assert strains[0]["gene"] == "ExistingGene"
         assert strains[0]["allele"] == "ExistingAllele"
         assert any(link["gene_symbol"] == "ApoM" and link["allele_name"] == "Tg transgene" for link in strains[0]["alleles"])
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_legacy_strain_registry_candidate_apply_audits_existing_allele_gene_link(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        client = TestClient(app)
+        imported = client.post(
+            "/api/legacy-workbook-imports",
+            data={"kind": "animal"},
+            files={
+                "file": (
+                    "animal-sheet.xlsx",
+                    workbook_bytes(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        assert imported.status_code == 200
+        source_record_id = imported.json()["source_record_id"]
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO allele_master
+                    (allele_id, allele_symbol, display_name, gene_id, source_record_id, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "allele_existing_unlinked",
+                    "Tg transgene",
+                    "",
+                    None,
+                    source_record_id,
+                    1,
+                    "2026-05-09T00:00:00Z",
+                    "2026-05-09T00:00:00Z",
+                ),
+            )
+        [registry_review] = [
+            item
+            for item in client.get("/api/review-items").json()
+            if item["issue"] == "Legacy strain registry candidate requires review"
+        ]
+
+        response = client.post(
+            f"/api/review-items/{registry_review['review_id']}/resolve",
+            json={
+                "resolution_note": "Curated legacy candidate with existing unlinked allele.",
+                "legacy_decision": "apply_strain_registry_candidate",
+                "reviewed_strain_name": "ApoM Tg/Tg",
+                "reviewed_gene_symbol": "ApoM",
+                "reviewed_allele_name": "Tg transgene",
+            },
+        )
+
+        assert response.status_code == 200
+        [gene] = client.get("/api/genes").json()
+        with db.connection() as conn:
+            action = conn.execute(
+                """
+                SELECT target_id, before_value, after_value
+                FROM action_log
+                WHERE action_type = 'allele_master_gene_linked'
+                """
+            ).fetchone()
+        assert action is not None
+        assert action["target_id"] == "allele_existing_unlinked"
+        before = json.loads(action["before_value"])
+        after = json.loads(action["after_value"])
+        assert before["gene_id"] == ""
+        assert after["gene_id"] == gene["gene_id"]
+        assert after["source_record_id"] == source_record_id
     finally:
         db.DB_PATH = old_db_path

@@ -2608,6 +2608,11 @@ def get_or_create_allele_master(
     ).fetchone()
     if existing is not None:
         if gene_id and not existing["gene_id"]:
+            before = {
+                "allele_id": existing["allele_id"],
+                "allele_symbol": clean_symbol,
+                "gene_id": existing["gene_id"] or "",
+            }
             conn.execute(
                 """
                 UPDATE allele_master
@@ -2616,6 +2621,28 @@ def get_or_create_allele_master(
                 WHERE allele_id = ?
                 """,
                 (gene_id, now, existing["allele_id"]),
+            )
+            conn.execute(
+                """
+                INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("action"),
+                    "allele_master_gene_linked",
+                    existing["allele_id"],
+                    json.dumps(before, ensure_ascii=False),
+                    json.dumps(
+                        {
+                            "allele_id": existing["allele_id"],
+                            "allele_symbol": clean_symbol,
+                            "gene_id": gene_id,
+                            "source_record_id": source_record_id or "",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    now,
+                ),
             )
         return existing["allele_id"]
     allele_id = new_id("allele")
@@ -2706,6 +2733,25 @@ def get_or_create_strain_registry_from_review(
     clean_name = normalized_registry_text(strain_name)
     if not clean_name:
         raise HTTPException(status_code=400, detail="Reviewed strain name is required.")
+    if canonical_entity_id or canonical_entity_type:
+        if canonical_entity_type != "strain" or not canonical_entity_id:
+            raise HTTPException(
+                status_code=400,
+                detail="canonical_entity_id must explicitly map the existing strain before applying a registry candidate.",
+            )
+        mapped = conn.execute(
+            """
+            SELECT strain_id, strain_name
+            FROM strain_registry
+            WHERE strain_id = ?
+            """,
+            (canonical_entity_id,),
+        ).fetchone()
+        if mapped is None:
+            raise HTTPException(status_code=400, detail="Mapped canonical strain was not found.")
+        if normalized_registry_text(mapped["strain_name"]).lower() != clean_name.lower():
+            raise HTTPException(status_code=400, detail="Reviewed strain name must match the mapped canonical strain.")
+        return mapped["strain_id"], False
     existing = conn.execute(
         """
         SELECT strain_id
