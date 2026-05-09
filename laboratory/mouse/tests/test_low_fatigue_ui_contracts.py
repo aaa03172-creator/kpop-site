@@ -752,6 +752,11 @@ def test_colony_schedule_derives_tasks_from_accepted_litter_and_rules(tmp_path: 
     old_db_path = db.DB_PATH
     try:
         seed_colony_state_records(tmp_path)
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE litter_registry SET status = ? WHERE litter_id = ?",
+                ("pre_weaning", "litter_colony_state"),
+            )
         client = TestClient(app)
 
         response = client.get("/api/ui/colony-schedule?as_of=2026-05-09")

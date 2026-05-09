@@ -7614,7 +7614,7 @@ def ui_colony_state(as_of: str = "") -> dict[str, Any]:
             SELECT m.mating_id, m.mating_label, m.strain_goal, m.expected_genotype,
                    m.start_date, m.status, m.purpose, m.source_record_id,
                    COUNT(DISTINCT CASE WHEN mm.removed_date IS NULL THEN mm.mouse_id END) AS parent_count,
-                   COUNT(DISTINCT CASE WHEN l.status IN ('active', 'born') THEN l.litter_id END) AS active_litter_count
+                   COUNT(DISTINCT CASE WHEN l.status IN ('active', 'born', 'pre_weaning', 'weaning_pending') THEN l.litter_id END) AS active_litter_count
             FROM mating_registry m
             LEFT JOIN mating_mouse mm ON mm.mating_id = m.mating_id
             LEFT JOIN litter_registry l ON l.mating_id = m.mating_id
@@ -7631,7 +7631,7 @@ def ui_colony_state(as_of: str = "") -> dict[str, Any]:
                    l.weaning_date, l.status, l.source_record_id
             FROM litter_registry l
             JOIN mating_registry m ON m.mating_id = l.mating_id
-            WHERE l.status IN ('active', 'born')
+            WHERE l.status IN ('active', 'born', 'pre_weaning', 'weaning_pending')
             ORDER BY l.birth_date DESC, l.litter_label COLLATE NOCASE
             """
         ).fetchall()
@@ -7781,7 +7781,7 @@ def ui_colony_schedule(as_of: str = "") -> dict[str, Any]:
                    l.weaning_date, l.status, l.source_record_id
             FROM litter_registry l
             JOIN mating_registry m ON m.mating_id = l.mating_id
-            WHERE l.status IN ('active', 'born')
+            WHERE l.status IN ('active', 'born', 'pre_weaning', 'weaning_pending')
               AND COALESCE(l.birth_date, '') <> ''
               AND COALESCE(l.weaning_date, '') = ''
             ORDER BY l.birth_date ASC, l.litter_label COLLATE NOCASE
