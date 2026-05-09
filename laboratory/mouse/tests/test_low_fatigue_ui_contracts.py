@@ -1119,9 +1119,10 @@ def test_mouse_pedigree_shows_selected_path_and_field_evidence(tmp_path: Path) -
                 "source_layer": "review item",
                 "source": {
                     "source_record_id": "",
-                    "label": "Open Focus Review",
-                    "source_type": "review",
+                    "label": "No accepted parent evidence",
+                    "source_type": "pending_relationship",
                 },
+                "not_inferred": True,
             },
             {
                 "field": "father_id",
@@ -1161,12 +1162,82 @@ def test_mouse_pedigree_shows_selected_path_and_field_evidence(tmp_path: Path) -
             {
                 "label": "Open Focus Review",
                 "target_path": "/api/ui/focus-review",
+                "reason": "pending_relationship",
                 "must_review": 1,
                 "quick_check": 0,
             }
         ]
         assert "review_items" not in payload
         assert payload["empty_state"]["fabricated_records"] is False
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_mouse_pedigree_pending_parent_link_without_open_review_workload(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO mouse_master
+                    (mouse_id, display_id, raw_strain_text, sex, dob_raw, dob_start,
+                     current_card_snapshot_id, status, source_photo_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "MT777",
+                    "MT777",
+                    "B6J",
+                    "female",
+                    "2026-05-01",
+                    "2026-05-01",
+                    None,
+                    "active",
+                    None,
+                    "2026-05-09T13:00:00Z",
+                    "2026-05-09T13:00:00Z",
+                ),
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/mouse-pedigree", params={"mouse_id": "MT777"})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["relationship_summary"] == {
+            "confirmed_relationships": 0,
+            "pending_relationships": 2,
+            "same_litter_siblings": 0,
+            "offspring_events": 0,
+            "must_review": 0,
+            "quick_check": 0,
+        }
+        assert [row["source"] for row in payload["evidence_rows"]] == [
+            {
+                "source_record_id": "",
+                "label": "No accepted parent evidence",
+                "source_type": "pending_relationship",
+            },
+            {
+                "source_record_id": "",
+                "label": "No accepted parent evidence",
+                "source_type": "pending_relationship",
+            },
+        ]
+        assert all(row["source_layer"] == "review item" for row in payload["evidence_rows"])
+        assert all(row["not_inferred"] is True for row in payload["evidence_rows"])
+        assert payload["attention_links"] == [
+            {
+                "label": "Open Focus Review",
+                "target_path": "/api/ui/focus-review",
+                "reason": "pending_relationship",
+                "must_review": 0,
+                "quick_check": 0,
+            }
+        ]
+        assert "review_items" not in payload
     finally:
         db.DB_PATH = old_db_path
 

@@ -418,12 +418,12 @@ async function main() {
           ]
         },
         evidence_rows: [
-          { field: "mother_id", value: "Parent pending", status: "pending_review", source_layer: "review item", source: { source_record_id: "", label: "Open Focus Review", source_type: "review" } },
+          { field: "mother_id", value: "Parent pending", status: "pending_review", source_layer: "review item", source: { source_record_id: "", label: "No accepted parent evidence", source_type: "pending_relationship" }, not_inferred: true },
           { field: "father_id", value: "MT402", status: "confirmed", source_layer: "canonical structured state", source: { source_record_id: "source_static", label: "Reviewed mating cage C-12", source_type: "manual_review" } },
           { field: "litter_id", value: "litter_static", status: "confirmed", source_layer: "canonical structured state", source: { source_record_id: "source_static", label: "Reviewed mating cage C-12", source_type: "manual_review" } },
           { field: "mating_id", value: "mating_static", status: "confirmed", source_layer: "canonical structured state", source: { source_record_id: "source_static", label: "Reviewed mating cage C-12", source_type: "manual_review" } }
         ],
-        attention_links: [{ label: "Open Focus Review", target_path: "/api/ui/focus-review", must_review: 1, quick_check: 0 }],
+        attention_links: [{ label: "Open Focus Review", target_path: "/api/ui/focus-review", reason: "pending_relationship", must_review: 1, quick_check: 0 }],
         empty_state: { message: "", fabricated_records: false }
       },
       "/api/ui/evidence-ledger": {

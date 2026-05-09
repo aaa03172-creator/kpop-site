@@ -8175,6 +8175,13 @@ def ui_mouse_pedigree(mouse_id: str = "") -> dict[str, Any]:
             "source_type": source.get("source_type", ""),
         }
 
+    def missing_parent_source() -> dict[str, str]:
+        return {
+            "source_record_id": "",
+            "label": "No accepted parent evidence",
+            "source_type": "pending_relationship",
+        }
+
     lineage_source_record_id = ""
     if litter is not None:
         lineage_source_record_id = litter["mating_source_record_id"] or litter["source_record_id"] or ""
@@ -8247,11 +8254,8 @@ def ui_mouse_pedigree(mouse_id: str = "") -> dict[str, Any]:
                     "value": "Parent pending",
                     "status": "pending_review",
                     "source_layer": "review item",
-                    "source": {
-                        "source_record_id": "",
-                        "label": "Open Focus Review",
-                        "source_type": "review",
-                    },
+                    "source": missing_parent_source(),
+                    "not_inferred": True,
                 }
             )
     if litter is not None:
@@ -8275,12 +8279,14 @@ def ui_mouse_pedigree(mouse_id: str = "") -> dict[str, Any]:
                 }
             )
 
+    pending_relationships = sum(1 for row in evidence_rows if row["status"] == "pending_review")
     attention_links = []
-    if must_review or quick_check:
+    if pending_relationships or must_review or quick_check:
         attention_links.append(
             {
                 "label": "Open Focus Review",
                 "target_path": "/api/ui/focus-review",
+                "reason": "pending_relationship" if pending_relationships else "open_review_workload",
                 "must_review": must_review,
                 "quick_check": quick_check,
             }
@@ -8298,7 +8304,7 @@ def ui_mouse_pedigree(mouse_id: str = "") -> dict[str, Any]:
         },
         "relationship_summary": {
             "confirmed_relationships": sum(1 for row in evidence_rows if row["status"] == "confirmed"),
-            "pending_relationships": sum(1 for row in evidence_rows if row["status"] == "pending_review"),
+            "pending_relationships": pending_relationships,
             "same_litter_siblings": len(sibling_rows),
             "offspring_events": int(offspring_events),
             "must_review": must_review,
