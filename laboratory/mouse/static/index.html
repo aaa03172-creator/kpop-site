@@ -4014,7 +4014,27 @@
     function reviewResolutionControls(item) {
       if (!item || item.status !== "open") return escapeHtml(item?.resolution_note || "Resolved");
       const quickLabel = item.attention_level === "must_review" ? "Accept after check" : "Looks OK";
-      const allowQuickResolve = !["Unlabeled numeric note needs review", "Ear label needs review"].includes(item.issue);
+      const allowQuickResolve = ![
+        "Unlabeled numeric note needs review",
+        "Ear label needs review",
+        "Legacy strain registry candidate requires review"
+      ].includes(item.issue);
+      const currentCandidate = (() => {
+        try {
+          return JSON.parse(item.current_value || "{}");
+        } catch (error) {
+          return {};
+        }
+      })();
+      const normalizedCandidate = currentCandidate.normalized_candidate || {};
+      const strainApplyControls = item.issue === "Legacy strain registry candidate requires review"
+        ? `
+          <input class="reviewed-strain-name" type="text" value="${escapeHtml(normalizedCandidate.strain_name || currentCandidate.strain_raw || "")}" placeholder="Reviewed strain name" aria-label="Reviewed strain name">
+          <input class="reviewed-gene-symbol" type="text" value="${escapeHtml(normalizedCandidate.gene_symbol || "")}" placeholder="Reviewed gene symbol" aria-label="Reviewed gene symbol">
+          <input class="reviewed-allele-name" type="text" value="${escapeHtml(normalizedCandidate.allele_name || "")}" placeholder="Reviewed allele name" aria-label="Reviewed allele name">
+          <input class="reviewed-existing-strain-id" type="text" value="" placeholder="Existing strain ID if linking" aria-label="Existing strain ID if linking">
+        `
+        : "";
       const noteLabelControls = item.issue === "Unlabeled numeric note needs review"
         ? `
           <select class="note-label-decision" aria-label="Note label decision">
@@ -4038,9 +4058,13 @@
             <option value="accept_legacy_candidate">Accept legacy as reviewed context</option>
             <option value="reject_legacy_candidate">Reject legacy candidate</option>
             <option value="map_to_canonical_candidate">Map candidate draft</option>
+            ${item.issue === "Legacy strain registry candidate requires review"
+              ? '<option value="apply_strain_registry_candidate">Apply reviewed strain registry link</option>'
+              : ""}
           </select>
           ${resolvedValueControl}
           <input class="review-resolution-note" type="text" placeholder="Resolution note required" aria-label="Resolution note">
+          ${strainApplyControls}
           ${noteLabelControls}
           ${allowQuickResolve ? `<button class="quick-resolve-review" type="button"
             data-review-id="${escapeHtml(item.review_id)}"
@@ -4137,15 +4161,29 @@
         resolvedValueInput.focus();
         return null;
       }
+      const reviewedStrainName = container.querySelector(".reviewed-strain-name")?.value.trim() || "";
+      const reviewedGeneSymbol = container.querySelector(".reviewed-gene-symbol")?.value.trim() || "";
+      const reviewedAlleleName = container.querySelector(".reviewed-allele-name")?.value.trim() || "";
+      const reviewedExistingStrainId = container.querySelector(".reviewed-existing-strain-id")?.value.trim() || "";
+      const selectedLegacyDecision = container.querySelector(".review-legacy-decision").value;
+      if (selectedLegacyDecision === "apply_strain_registry_candidate" && (!reviewedStrainName || !reviewedGeneSymbol || !reviewedAlleleName)) {
+        (container.querySelector(".reviewed-strain-name") || resolvedValueInput).focus();
+        return null;
+      }
       return {
         resolution_note: note,
         resolved_value: resolvedValue || "",
-        legacy_decision: container.querySelector(".review-legacy-decision").value,
+        legacy_decision: selectedLegacyDecision,
+        canonical_entity_type: reviewedExistingStrainId ? "strain" : "",
+        canonical_entity_id: reviewedExistingStrainId,
         correction_entity_type: "review_item",
         correction_entity_id: button.dataset.reviewId,
         correction_field_name: "reviewed_value",
         correction_before_value: button.dataset.currentValue || "",
         correction_after_value: resolvedValue || "",
+        reviewed_strain_name: reviewedStrainName,
+        reviewed_gene_symbol: reviewedGeneSymbol,
+        reviewed_allele_name: reviewedAlleleName,
         note_item_id: button.dataset.noteItemId || "",
         note_label_decision: noteLabelDecision?.value || "",
         note_label_mouse_id: container.querySelector(".note-label-mouse-id")?.value || "",

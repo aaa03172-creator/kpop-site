@@ -133,6 +133,9 @@ class ReviewResolutionCreate(BaseModel):
     legacy_decision: str = "resolve"
     canonical_entity_type: str = ""
     canonical_entity_id: str = ""
+    reviewed_strain_name: str = ""
+    reviewed_gene_symbol: str = ""
+    reviewed_allele_name: str = ""
     correction_entity_type: str = ""
     correction_entity_id: str = ""
     correction_field_name: str = ""
@@ -2687,6 +2690,165 @@ def link_strain_allele_master(
             now,
         ),
     )
+
+
+def get_or_create_strain_registry_from_review(
+    conn: Any,
+    *,
+    strain_name: str,
+    gene_symbol: str,
+    allele_name: str,
+    source_record_id: str | None,
+    canonical_entity_type: str,
+    canonical_entity_id: str,
+    now: str,
+) -> tuple[str, bool]:
+    clean_name = normalized_registry_text(strain_name)
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Reviewed strain name is required.")
+    existing = conn.execute(
+        """
+        SELECT strain_id
+        FROM strain_registry
+        WHERE LOWER(strain_name) = LOWER(?)
+        ORDER BY status = 'active' DESC, created_at
+        LIMIT 1
+        """,
+        (clean_name,),
+    ).fetchone()
+    if existing is not None:
+        if canonical_entity_type != "strain" or canonical_entity_id != existing["strain_id"]:
+            raise HTTPException(
+                status_code=400,
+                detail="canonical_entity_id must explicitly map the existing strain before applying a registry candidate.",
+            )
+        return existing["strain_id"], False
+    strain_id = new_id("strain")
+    conn.execute(
+        """
+        INSERT INTO strain_registry
+            (strain_id, strain_name, common_name, official_name, gene,
+             allele, background, source, status, breeding_note,
+             genotyping_note, owner, source_record_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            strain_id,
+            clean_name,
+            "",
+            "",
+            normalized_registry_text(gene_symbol),
+            normalized_registry_text(allele_name),
+            "",
+            "legacy_workbook_review",
+            "active",
+            "",
+            "",
+            "",
+            source_record_id,
+            now,
+            now,
+        ),
+    )
+    return strain_id, True
+
+
+def legacy_source_record_id_for_parse(conn: Any, parse_id: str) -> str | None:
+    prefix = "legacy_parse_"
+    if not parse_id.startswith(prefix):
+        return None
+    legacy_import_id = parse_id[len(prefix) :]
+    row = conn.execute(
+        """
+        SELECT source_record_id
+        FROM legacy_workbook_import
+        WHERE legacy_import_id = ?
+        """,
+        (legacy_import_id,),
+    ).fetchone()
+    return row["source_record_id"] if row is not None else None
+
+
+def apply_legacy_strain_registry_candidate(
+    conn: Any,
+    *,
+    review: Any,
+    payload: ReviewResolutionCreate,
+    resolved_at: str,
+) -> dict[str, Any]:
+    if str(review["issue"] or "") != "Legacy strain registry candidate requires review":
+        raise HTTPException(status_code=400, detail="This review item is not a legacy strain registry candidate.")
+    strain_name = normalized_registry_text(payload.reviewed_strain_name)
+    gene_symbol = normalized_registry_text(payload.reviewed_gene_symbol)
+    allele_name = normalized_registry_text(payload.reviewed_allele_name)
+    if not all([strain_name, gene_symbol, allele_name]):
+        raise HTTPException(
+            status_code=400,
+            detail="Reviewed strain name, gene symbol, and allele name are required before applying a registry candidate.",
+        )
+    candidate = json_object(str(review["current_value"] or "{}"))
+    source_record_id = legacy_source_record_id_for_parse(conn, str(review["parse_id"] or ""))
+    if not source_record_id:
+        raise HTTPException(status_code=400, detail="A source record is required before applying a registry candidate.")
+    before = {
+        "review_id": review["review_id"],
+        "parse_id": review["parse_id"],
+        "candidate": candidate,
+        "review_status": review["status"],
+    }
+    strain_id, created_strain = get_or_create_strain_registry_from_review(
+        conn,
+        strain_name=strain_name,
+        gene_symbol=gene_symbol,
+        allele_name=allele_name,
+        source_record_id=source_record_id,
+        canonical_entity_type=payload.canonical_entity_type.strip(),
+        canonical_entity_id=payload.canonical_entity_id.strip(),
+        now=resolved_at,
+    )
+    gene_id = get_or_create_gene_master(conn, gene_symbol, source_record_id, resolved_at)
+    allele_id = get_or_create_allele_master(
+        conn,
+        allele_symbol=allele_name,
+        gene_id=gene_id,
+        source_record_id=source_record_id,
+        now=resolved_at,
+    )
+    link_strain_allele_master(
+        conn,
+        strain_id=strain_id,
+        gene_id=gene_id,
+        allele_id=allele_id,
+        source_record_id=source_record_id,
+        now=resolved_at,
+    )
+    after = {
+        "strain_id": strain_id,
+        "created_strain": created_strain,
+        "strain_name": strain_name,
+        "gene_id": gene_id,
+        "gene_symbol": gene_symbol,
+        "allele_id": allele_id,
+        "allele_name": allele_name,
+        "source_record_id": source_record_id,
+        "candidate": candidate,
+        "boundary": "canonical structured state",
+    }
+    conn.execute(
+        """
+        INSERT INTO action_log (action_id, action_type, target_id, before_value, after_value, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id("action"),
+            "legacy_strain_registry_candidate_applied",
+            review["review_id"],
+            json.dumps(before, ensure_ascii=False),
+            json.dumps(after, ensure_ascii=False),
+            resolved_at,
+        ),
+    )
+    return after
 
 
 def strain_allele_rows(conn: Any, strain_id: str) -> list[dict[str, Any]]:
@@ -7216,10 +7378,11 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "accept_legacy_candidate",
         "reject_legacy_candidate",
         "map_to_canonical_candidate",
+        "apply_strain_registry_candidate",
     }
     legacy_decision = payload.legacy_decision.strip() or "resolve"
     if legacy_decision not in allowed_legacy_decisions:
-        raise HTTPException(status_code=400, detail="Legacy decision must be resolve, accept, reject, or map.")
+        raise HTTPException(status_code=400, detail="Legacy decision must be resolve, accept, reject, map, or apply strain registry.")
     legacy_status_by_decision = {
         "accept_legacy_candidate": "accepted",
         "reject_legacy_candidate": "rejected",
@@ -7260,6 +7423,14 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         canonical_candidate_id = None
         note_label_update = None
         ear_label_update = None
+        strain_registry_apply = None
+        if legacy_decision == "apply_strain_registry_candidate":
+            strain_registry_apply = apply_legacy_strain_registry_candidate(
+                conn,
+                review=existing,
+                payload=payload,
+                resolved_at=resolved_at,
+            )
         after = {
             "status": "resolved",
             "resolved_value": payload.resolved_value,
@@ -7267,6 +7438,9 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
             "legacy_decision": legacy_decision,
             "canonical_entity_type": payload.canonical_entity_type,
             "canonical_entity_id": payload.canonical_entity_id,
+            "reviewed_strain_name": payload.reviewed_strain_name,
+            "reviewed_gene_symbol": payload.reviewed_gene_symbol,
+            "reviewed_allele_name": payload.reviewed_allele_name,
         }
         conn.execute(
             """
@@ -7362,6 +7536,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
             {
                 "correction_id": correction_id,
                 "canonical_candidate_id": canonical_candidate_id,
+                "strain_registry_apply": strain_registry_apply,
                 "legacy_row_review_status": legacy_row_review_status,
                 "note_label_update": note_label_update,
                 "ear_label_update": ear_label_update,
@@ -7397,6 +7572,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "legacy_decision": legacy_decision,
         "legacy_row_review_status": legacy_row_review_status,
         "canonical_candidate_id": canonical_candidate_id,
+        "strain_registry_apply": strain_registry_apply,
         "correction_id": correction_id,
         "note_label_update": note_label_update,
         "ear_label_update": ear_label_update,

@@ -56,10 +56,10 @@
 - Test: `tests/test_legacy_workbook_import_api.py`
 - Test: `tests/test_review_attention.py`
 
-- [ ] Add a narrow review resolution path that lets a Strain Curator create or link a strain/gene/allele relationship from an open legacy strain registry candidate.
-- [ ] Require explicit reviewed `strain_name`, `gene_symbol`, and `allele_name` inputs before canonical registry writes.
-- [ ] Preserve raw legacy workbook candidate JSON and source row evidence on the review item and source record.
-- [ ] Preserve before/after values in `action_log`.
-- [ ] Keep unresolved or partially filled candidates open rather than writing incomplete canonical records.
+- [x] Add a narrow review resolution path that lets a Strain Curator create or link a strain/gene/allele relationship from an open legacy strain registry candidate.
+- [x] Require explicit reviewed `strain_name`, `gene_symbol`, and `allele_name` inputs before canonical registry writes.
+- [x] Preserve raw legacy workbook candidate JSON and source row evidence on the review item and source record.
+- [x] Preserve before/after values in `action_log`.
+- [x] Keep unresolved or partially filled candidates open rather than writing incomplete canonical records.
 - [ ] Run `python -m pytest tests/test_strain_knowledge_graph.py tests/test_legacy_workbook_import_api.py tests/test_review_attention.py -q`.
 - [ ] Run `npm test`, `npm run test:local`, and `npm run test:acceptance`.
