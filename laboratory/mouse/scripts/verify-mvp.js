@@ -170,6 +170,11 @@ async function main() {
       staticHtml.includes("observed_raw_text"),
     "Evidence Ledger UI should consume the read-only read model and separate observed, OCR, and interpreted evidence."
   );
+  assert(
+    staticHtml.includes("const cropImageUrl = escapeHtml(crop.image_url || \"\")") &&
+      staticHtml.includes('src="${cropImageUrl}&t=${Date.now()}"'),
+    "ROI crop image URLs should be escaped before insertion into innerHTML attributes."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);

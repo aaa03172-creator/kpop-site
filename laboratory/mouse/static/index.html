@@ -5142,13 +5142,16 @@
         status.textContent =
           `${preview.template_label || preview.template_type} / ${preview.card_bbox?.source || "detected"} / ${preview.card_orientation || "as_detected"} / ${preview.card_trim || "untrimmed"} / ${preview.boundary}`;
         cardImage.src = `${preview.card_image_url}&t=${Date.now()}`;
-        grid.innerHTML = (preview.crops || []).map((crop) => `
-          <div class="roi-crop">
-            <strong>${escapeHtml(crop.display_name || crop.label)}</strong>
-            <img src="${crop.image_url}&t=${Date.now()}" alt="${escapeHtml(crop.display_name || crop.label)} ROI crop">
-            <span>${escapeHtml((crop.target_fields || []).join(", ") || crop.mode || "")}</span>
-          </div>
-        `).join("");
+        grid.innerHTML = (preview.crops || []).map((crop) => {
+          const cropImageUrl = escapeHtml(crop.image_url || "");
+          return `
+            <div class="roi-crop">
+              <strong>${escapeHtml(crop.display_name || crop.label)}</strong>
+              <img src="${cropImageUrl}&t=${Date.now()}" alt="${escapeHtml(crop.display_name || crop.label)} ROI crop">
+              <span>${escapeHtml((crop.target_fields || []).join(", ") || crop.mode || "")}</span>
+            </div>
+          `;
+        }).join("");
       } catch (error) {
         if (requestId !== roiPreviewRequestId || photoId !== selectedTranscriptionPhotoId) return;
         clearRoiPreview(error.message || "ROI preview could not be generated for this photo.");
