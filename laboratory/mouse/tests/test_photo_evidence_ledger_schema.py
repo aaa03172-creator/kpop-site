@@ -484,7 +484,7 @@ def test_canonical_candidate_apply_links_note_evidence_to_created_event(tmp_path
                     92,
                     "Reviewer accepted mouse note line.",
                     0,
-                    "accepted",
+                    "review_open",
                     "2026-05-09T00:00:05Z",
                     "2026-05-09T00:00:05Z",
                 ),

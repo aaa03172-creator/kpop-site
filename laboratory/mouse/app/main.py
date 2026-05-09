@@ -4025,8 +4025,13 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
                 SELECT photo_evidence_id, source_photo_id
                 FROM photo_evidence_item
                 WHERE note_item_id = ?
-                  AND status IN ('accepted', 'linked')
-                ORDER BY confidence DESC, created_at DESC, photo_evidence_id
+                  AND status NOT IN ('rejected', 'superseded')
+                ORDER BY
+                  CASE evidence_kind WHEN 'note_line' THEN 0 ELSE 1 END,
+                  CASE status WHEN 'accepted' THEN 0 WHEN 'review_open' THEN 1 WHEN 'draft' THEN 2 WHEN 'linked' THEN 3 ELSE 4 END,
+                  confidence DESC,
+                  created_at DESC,
+                  photo_evidence_id
                 LIMIT 1
                 """,
                 (note["note_item_id"],),
