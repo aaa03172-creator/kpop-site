@@ -100,3 +100,89 @@ def test_persist_validation_report_artifact_blocks_missing_trace(
         check["check_key"] == "missing_source_trace" and check["status"] == "blocked"
         for check in artifact["checks"]
     )
+
+
+def test_export_validation_report_blocks_open_focus_reviews(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(app_main, "ARTIFACT_ROOT", tmp_path / "mousedb_artifacts")
+    preview = {
+        "export_type": "separation_preview",
+        "blocked_review_items": 2,
+        "latest_data_change_at": "2026-05-09T11:30:00Z",
+        "expected_separation_filename": "2026-05-09 ApoM TgTg 분리 현황표.xlsx",
+        "review_blockers": [
+            {
+                "review_id": "review_blocker_001",
+                "severity": "High",
+                "issue": "Duplicate active mouse",
+            }
+        ],
+        "separation_rows": [
+            {
+                "source_photo_ids": "photo_010",
+                "source_note_item_ids": "note_010, note_011",
+            }
+        ],
+        "animal_sheet_rows": [],
+    }
+
+    report = app_main.build_export_validation_report(
+        preview,
+        export_type="separation_xlsx",
+        query="ApoM TgTg",
+        filename="2026-05-09 ApoM TgTg 분리 현황표.xlsx",
+        created_at="2026-05-09T12:10:00Z",
+    )
+    result = app_main.persist_validation_report_artifact(report)
+
+    artifact_path = Path(result["artifact_path"])
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert artifact["artifact_type"] == "validation_report"
+    assert artifact["scope"] == "export"
+    assert artifact["status"] == "blocked"
+    assert artifact["state_watermark"] == "2026-05-09T11:30:00Z"
+    assert artifact["source_refs"]["photo_ids"] == ["photo_010"]
+    assert artifact["source_refs"]["note_item_ids"] == ["note_010", "note_011"]
+    assert artifact["source_refs"]["review_ids"] == ["review_blocker_001"]
+    assert any(
+        check["check_key"] == "open_focus_review_blocker" and check["status"] == "blocked"
+        for check in artifact["checks"]
+    )
+
+
+def test_export_validation_report_endpoint_uses_current_preview(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(app_main, "ARTIFACT_ROOT", tmp_path / "mousedb_artifacts")
+    monkeypatch.setattr(
+        app_main,
+        "export_preview",
+        lambda: {
+            "export_type": "separation_preview",
+            "blocked_review_items": 0,
+            "latest_data_change_at": "2026-05-09T11:45:00Z",
+            "expected_separation_filename": "2026-05-09 selected strain 분리 현황표.xlsx",
+            "review_blockers": [],
+            "separation_rows": [
+                {
+                    "source_photo_ids": "photo_020",
+                    "source_note_item_ids": "note_020",
+                }
+            ],
+            "animal_sheet_rows": [],
+        },
+    )
+
+    result = app_main.create_export_validation_report_artifact(
+        export_type="separation_xlsx",
+        query="",
+    )
+
+    artifact = result["artifact"]
+    assert artifact["scope"] == "export"
+    assert artifact["status"] == "pass"
+    assert artifact["state_watermark"] == "2026-05-09T11:45:00Z"
+    assert artifact["source_refs"]["photo_ids"] == ["photo_020"]

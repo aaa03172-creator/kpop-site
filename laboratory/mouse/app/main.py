@@ -3442,6 +3442,97 @@ def persist_validation_report_artifact(report: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def split_export_ref_values(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return unique_nonempty(value)
+    return unique_nonempty(str(value or "").replace(";", ",").split(","))
+
+
+def build_export_validation_report(
+    preview: dict[str, Any],
+    *,
+    export_type: str,
+    query: str = "",
+    filename: str = "",
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    created_at = created_at or utc_now()
+    review_blockers = preview.get("review_blockers") if isinstance(preview.get("review_blockers"), list) else []
+    blocked_review_count = int(preview.get("blocked_review_items") or len(review_blockers) or 0)
+    export_rows = []
+    if export_type == "animal_sheet_xlsx":
+        export_rows = preview.get("animal_sheet_rows") if isinstance(preview.get("animal_sheet_rows"), list) else []
+    else:
+        export_rows = preview.get("separation_rows") if isinstance(preview.get("separation_rows"), list) else []
+
+    photo_ids: list[str] = []
+    note_item_ids: list[str] = []
+    mouse_ids: list[str] = []
+    for row in export_rows:
+        if not isinstance(row, dict):
+            continue
+        photo_ids.extend(split_export_ref_values(row.get("source_photo_ids") or row.get("source_photo_id")))
+        note_item_ids.extend(split_export_ref_values(row.get("source_note_item_ids") or row.get("source")))
+        mouse_ids.extend(split_export_ref_values(row.get("mouse_id")))
+    review_ids = unique_nonempty(
+        [item.get("review_id") for item in review_blockers if isinstance(item, dict)]
+    )
+    checks = [
+        {
+            "check_key": "open_focus_review_blocker",
+            "status": "blocked" if blocked_review_count else "pass",
+            "severity": "high" if blocked_review_count else "low",
+            "message": (
+                f"{blocked_review_count} Focus Review blocker(s) remain open before final export."
+                if blocked_review_count
+                else "No Focus Review blockers remain for final export."
+            ),
+            "target_refs": review_ids,
+            "evidence_refs": review_ids,
+            "recommended_action": "Resolve Focus Review blockers before generating final export.",
+        },
+        {
+            "check_key": "missing_source_trace",
+            "status": "warning" if export_rows and not unique_nonempty(photo_ids + note_item_ids) else "pass",
+            "severity": "medium" if export_rows and not unique_nonempty(photo_ids + note_item_ids) else "low",
+            "message": (
+                "Export rows are present but source photo/note trace could not be found in preview rows."
+                if export_rows and not unique_nonempty(photo_ids + note_item_ids)
+                else "Export preview includes source trace or has no rows to export."
+            ),
+            "target_refs": unique_nonempty(mouse_ids),
+            "evidence_refs": unique_nonempty(photo_ids + note_item_ids),
+            "recommended_action": "Review export trace sheet before handoff.",
+        },
+    ]
+    report_id = f"validation_report_export_{safe_artifact_slug(export_type)}_{safe_artifact_slug(query or filename or 'all')}"
+    return {
+        "report_id": report_id,
+        "artifact_type": "validation_report",
+        "source_layer": "export or view",
+        "created_at": created_at,
+        "created_by": "local_user",
+        "scope": "export",
+        "status": validation_report_status(checks),
+        "related_artifact_id": "",
+        "canonical_candidate_id": "",
+        "export_id": "",
+        "state_watermark": str(preview.get("latest_data_change_at") or ""),
+        "source_refs": {
+            "photo_ids": unique_nonempty(photo_ids),
+            "parse_ids": [],
+            "review_ids": review_ids,
+            "note_item_ids": unique_nonempty(note_item_ids),
+            "mouse_ids": unique_nonempty(mouse_ids),
+        },
+        "checks": checks,
+        "summary": (
+            f"Export validation report for {export_type}; "
+            f"query={query.strip() or 'all'}, filename={filename or 'not selected'}."
+        ),
+    }
+
+
 def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str, Any]:
     candidate = conn.execute(
         """
@@ -4896,6 +4987,140 @@ def refresh_card_snapshot_summary(conn: Any, card_snapshot_id: str, updated_at: 
     return {"card_snapshot_id": card_snapshot_id, "status": status, "note_summary": summary}
 
 
+PHOTO_EVIDENCE_FIELD_MAP = {
+    "raw_strain": ("rawStrain", "raw_strain"),
+    "matched_strain": ("matchedStrain", "raw_strain"),
+    "sex_raw": ("sexRaw", "sex_raw"),
+    "sex_normalized": ("sexNormalized", "sex_raw"),
+    "id_raw": ("idRaw", "id_raw"),
+    "dob_raw": ("dobRaw", "dob_raw"),
+    "dob_normalized": ("dobNormalized", "dob_raw"),
+    "mating_date_raw": ("matingDateRaw", "mating_date_raw"),
+    "mating_date_normalized": ("matingDateNormalized", "mating_date_raw"),
+    "lmo_raw": ("lmoRaw", "lmo_raw"),
+    "mouse_count": ("mouseCount", "sex_raw"),
+}
+
+
+def roi_label_for_field(record: dict[str, Any], field_name: str) -> str:
+    for region in record.get("extractionRegions") or []:
+        if not isinstance(region, dict):
+            continue
+        target_fields = region.get("targetFields") if isinstance(region.get("targetFields"), list) else []
+        if field_name in {str(field).strip() for field in target_fields}:
+            return str(region.get("label") or field_name)
+    return PHOTO_EVIDENCE_FIELD_MAP.get(field_name, ("", field_name))[1]
+
+
+def write_photo_evidence_items(
+    conn: Any,
+    *,
+    parse_id: str,
+    photo_id: str,
+    card_snapshot_id: str,
+    record: dict[str, Any],
+    created_at: str,
+) -> int:
+    uncertain_fields = {
+        normalize_uncertain_field_name(field)
+        for field in record.get("uncertainFields", [])
+        if normalize_uncertain_field_name(field)
+    }
+    card_type = str(record.get("type") or "")
+    written = 0
+
+    for field_name, (record_key, _default_roi) in PHOTO_EVIDENCE_FIELD_MAP.items():
+        observed_value = str(record.get(record_key) or "").strip()
+        if not observed_value:
+            continue
+        needs_review = 1 if field_name in uncertain_fields else 0
+        review_reason = f"Field {field_name} was marked uncertain by the transcription draft." if needs_review else ""
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO photo_evidence_item
+                (photo_evidence_id, source_photo_id, parse_id, card_snapshot_id,
+                 card_type, evidence_kind, roi_label, observed_raw_text,
+                 ocr_text, parsed_value, confidence, interpretation,
+                 needs_review, review_reason, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"pe_{parse_id}_{field_name}",
+                photo_id,
+                parse_id,
+                card_snapshot_id or None,
+                card_type,
+                "card_field",
+                roi_label_for_field(record, field_name),
+                observed_value,
+                observed_value,
+                observed_value,
+                bounded_float(record.get("confidence")),
+                "",
+                needs_review,
+                review_reason,
+                "review_open" if needs_review else "draft",
+                created_at,
+                created_at,
+            ),
+        )
+        written += 1
+
+    note_rows = conn.execute(
+        """
+        SELECT note_item_id, card_type, raw_line_text, parsed_type,
+               parsed_mouse_display_id, parsed_ear_label_raw,
+               parsed_ear_label_code, confidence, needs_review
+        FROM card_note_item_log
+        WHERE parse_id = ?
+        ORDER BY line_number
+        """,
+        (parse_id,),
+    ).fetchall()
+    for row in note_rows:
+        parsed_bits = [
+            str(row["parsed_type"] or ""),
+            str(row["parsed_mouse_display_id"] or ""),
+            str(row["parsed_ear_label_code"] or row["parsed_ear_label_raw"] or ""),
+        ]
+        parsed_value = " ".join(bit for bit in parsed_bits if bit).strip()
+        needs_review = int(row["needs_review"] or 0)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO photo_evidence_item
+                (photo_evidence_id, source_photo_id, parse_id, card_snapshot_id,
+                 note_item_id, card_type, evidence_kind, roi_label,
+                 observed_raw_text, ocr_text, parsed_value, confidence,
+                 interpretation, needs_review, review_reason, status,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"pe_{row['note_item_id']}",
+                photo_id,
+                parse_id,
+                card_snapshot_id or None,
+                row["note_item_id"],
+                row["card_type"] or card_type,
+                "note_line",
+                roi_label_for_field(record, "notes"),
+                row["raw_line_text"] or "",
+                row["raw_line_text"] or "",
+                parsed_value,
+                bounded_float(row["confidence"]),
+                "",
+                needs_review,
+                "Note line requires review before canonical use." if needs_review else "",
+                "review_open" if needs_review else "draft",
+                created_at,
+                created_at,
+            ),
+        )
+        written += 1
+
+    return written
+
+
 def validation_review_for_record(conn: Any, record: dict[str, Any], status: str) -> dict[str, str] | None:
     if status in {"review", "conflict"}:
         return None
@@ -5933,6 +6158,14 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             "review",
             card_snapshot_id,
         )
+        evidence_count = write_photo_evidence_items(
+            conn,
+            parse_id=parse_id,
+            photo_id=photo_id,
+            card_snapshot_id=card_snapshot_id,
+            record=record,
+            created_at=now,
+        )
         review_id = f"review_{parse_id}"
         conn.execute(
             """
@@ -5998,6 +6231,7 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                     "card_snapshot_id": card_snapshot_id,
                     "review_id": review_id,
                     "note_count": note_count,
+                    "evidence_count": evidence_count,
                     "source_name": source_name,
                     "resolved_photo_review_items": len(resolved_photo_review_ids),
                     "superseded_ai_parse_ids": superseded_ai["superseded_parse_ids"],
@@ -6015,6 +6249,7 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
         "card_snapshot_id": card_snapshot_id,
         "photo_id": photo_id,
         "created_note_items": note_count,
+        "created_photo_evidence_items": evidence_count,
         "created_mouse_candidates": mouse_count,
         "created_ear_review_items": ear_review_count,
         "resolved_photo_review_items": len(resolved_photo_review_ids),
@@ -9326,6 +9561,28 @@ def export_genotyping_worklist_csv(query: str = "") -> Response:
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.post("/api/exports/{export_type}/validation-report-artifact")
+def create_export_validation_report_artifact(export_type: str, query: str = "") -> dict[str, Any]:
+    if export_type not in {"separation_xlsx", "animal_sheet_xlsx", "mouse_csv", "genotyping_worklist_csv"}:
+        raise HTTPException(status_code=400, detail="Unsupported export type.")
+    preview = export_preview()
+    if export_type == "animal_sheet_xlsx":
+        filename = export_filename("animal", preview, query)
+    elif export_type == "separation_xlsx":
+        filename = export_filename("separation", preview, query)
+    elif export_type == "genotyping_worklist_csv":
+        filename = "genotyping_worklist_filtered.csv" if query.strip() else "genotyping_worklist.csv"
+    else:
+        filename = "mouse_records_filtered.csv" if query.strip() else "mouse_records.csv"
+    report = build_export_validation_report(
+        preview,
+        export_type=export_type,
+        query=query,
+        filename=filename,
+    )
+    return persist_validation_report_artifact(report)
 
 
 @app.get("/api/export-log")

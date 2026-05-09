@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from app import db
+from app.main import PhotoManualTranscriptionCreate, create_photo_manual_transcription
 
 
 def test_photo_evidence_item_schema_links_photo_parse_and_note(tmp_path: Path) -> None:
@@ -157,5 +158,100 @@ def test_photo_evidence_item_schema_links_photo_parse_and_note(tmp_path: Path) -
                         "2026-05-09T00:00:03Z",
                     ),
                 )
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_manual_transcription_creates_photo_evidence_items(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_transcription_evidence",
+                    "transcription-card.jpg",
+                    "data/photos/test/transcription-card.jpg",
+                    "2026-05-09T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+
+        result = create_photo_manual_transcription(
+            "photo_transcription_evidence",
+            PhotoManualTranscriptionCreate(
+                card_type="Separated",
+                raw_strain="ApoM Tg/Tg",
+                sex_raw="F",
+                mouse_count="2 total",
+                confidence=64,
+                uncertain_fields=["sex_raw"],
+                raw_visible_text_lines=["ApoM Tg/Tg", "F 2 total", "318 R0"],
+                extraction_regions=[
+                    {
+                        "label": "raw_strain",
+                        "target_fields": ["raw_strain", "matched_strain"],
+                        "mode": "single_line_field",
+                    },
+                    {
+                        "label": "notes",
+                        "target_fields": ["notes", "raw_visible_text_lines"],
+                        "mode": "multi_line_evidence",
+                    },
+                ],
+                notes=[
+                    {"raw": "318 R0", "meaning": "possible mouse", "strike": "none"},
+                    {"raw": "319 L'", "meaning": "mouse", "strike": "none"},
+                ],
+            ),
+        )
+
+        with db.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT source_photo_id, parse_id, note_item_id, card_type,
+                       evidence_kind, roi_label, observed_raw_text,
+                       ocr_text, parsed_value, confidence, needs_review,
+                       review_reason, status
+                FROM photo_evidence_item
+                WHERE parse_id = ?
+                ORDER BY evidence_kind, roi_label, observed_raw_text
+                """,
+                (result["parse_id"],),
+            ).fetchall()
+
+        payloads = [dict(row) for row in rows]
+        assert any(
+            item["evidence_kind"] == "card_field"
+            and item["roi_label"] == "raw_strain"
+            and item["observed_raw_text"] == "ApoM Tg/Tg"
+            and item["parsed_value"] == "ApoM Tg/Tg"
+            and item["needs_review"] == 0
+            for item in payloads
+        )
+        assert any(
+            item["evidence_kind"] == "card_field"
+            and item["roi_label"] == "sex_raw"
+            and item["observed_raw_text"] == "F"
+            and item["needs_review"] == 1
+            and "uncertain" in item["review_reason"].lower()
+            for item in payloads
+        )
+        assert any(
+            item["evidence_kind"] == "note_line"
+            and item["note_item_id"] == f"note_{result['parse_id']}_1"
+            and item["observed_raw_text"] == "318 R0"
+            and item["needs_review"] == 1
+            for item in payloads
+        )
+        assert all(item["source_photo_id"] == "photo_transcription_evidence" for item in payloads)
+        assert all(item["status"] in {"draft", "review_open"} for item in payloads)
     finally:
         db.DB_PATH = old_db_path
