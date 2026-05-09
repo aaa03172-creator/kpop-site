@@ -1,0 +1,14 @@
+{
+  "probe_id": "impossible_ear_label_stays_reviewable",
+  "taxonomy": "photo_roi_grounding",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "A note line reads '318 RWM', which may be a struck or shifted ear-label OCR artifact.",
+  "expected": {
+    "boundary": "parsed or intermediate result",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_or_approved_only"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "probe_id": "legacy_workbook_row_stays_export_view_candidate",
+  "taxonomy": "excel_table_interpretation",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "A predecessor animal-sheet row conflicts with newer photo-backed cage-card evidence.",
+  "expected": {
+    "boundary": "export or view",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_only"
+  }
+}

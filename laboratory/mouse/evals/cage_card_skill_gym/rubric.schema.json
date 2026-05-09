@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cage Card Skill Gym Probe",
+  "type": "object",
+  "required": ["probe_id", "taxonomy", "boundary", "canonical", "scenario", "expected"],
+  "properties": {
+    "probe_id": { "type": "string" },
+    "taxonomy": { "type": "string" },
+    "boundary": { "const": "review item / test fixture" },
+    "canonical": { "const": false },
+    "scenario": { "type": "string" },
+    "expected": {
+      "type": "object",
+      "required": [
+        "boundary",
+        "must_route_to_review",
+        "must_preserve_traceability",
+        "must_not_write_canonical",
+        "external_inference_policy"
+      ],
+      "properties": {
+        "boundary": {
+          "enum": [
+            "raw source",
+            "parsed or intermediate result",
+            "canonical structured state",
+            "review item",
+            "review item / test fixture",
+            "export or view",
+            "cache"
+          ]
+        },
+        "must_route_to_review": { "const": true },
+        "must_preserve_traceability": { "const": true },
+        "must_not_write_canonical": { "const": true },
+        "external_inference_policy": {
+          "enum": ["local_only", "local_or_approved_only"]
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

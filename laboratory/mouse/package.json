@@ -13,7 +13,8 @@
     "test:local": "python scripts/verify-local-app.py",
     "test:photo-e2e": "python scripts/verify-photo-e2e-cases.py",
     "test:python": "python -m pytest tests",
-    "verify": "npm test && npm run test:acceptance && npm run test:local && npm run test:photo-e2e && npm run test:python"
+    "test:cage-card-skill-gym": "python evals/cage_card_skill_gym/run_baseline.py --probes evals/cage_card_skill_gym/probes",
+    "verify": "npm test && npm run test:acceptance && npm run test:local && npm run test:photo-e2e && npm run test:cage-card-skill-gym && npm run test:python"
   },
   "keywords": [],
   "author": "",

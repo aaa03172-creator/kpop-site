@@ -1,0 +1,14 @@
+{
+  "probe_id": "numeric_notes_are_not_mouse_ids",
+  "taxonomy": "unsupported_unknown_logging",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "Numeric-only note lines appear after separation and could be temporary labels rather than mouse IDs.",
+  "expected": {
+    "boundary": "review item",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_or_approved_only"
+  }
+}
