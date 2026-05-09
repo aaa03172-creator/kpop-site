@@ -24,4 +24,42 @@
 - [x] Extend `GET /api/strains` rows with an `alleles` array while preserving existing top-level `gene` and `allele` fields.
 - [x] Run `python -m pytest tests/test_strain_knowledge_graph.py -q`.
 - [x] Run `npm run verify`.
-- [ ] Commit exact files.
+- [x] Commit exact files.
+
+---
+
+### Task 2: Legacy Workbook Candidate Surfacing
+
+**Files:**
+- Modify: `scripts/parse_legacy_workbooks.py`
+- Modify: `app/main.py`
+- Modify: `static/index.html`
+- Test: `tests/test_legacy_workbook_parser.py`
+- Test: `tests/test_legacy_workbook_import_api.py`
+- Test: `tests/test_review_attention.py`
+
+- [x] Parse legacy workbook strain/genotype text into `strain_registry_candidates` without inferring gene or allele values.
+- [x] Keep candidate rows parsed/intermediate and source-backed; do not write canonical gene, allele, or strain-allele records from import alone.
+- [x] Route legacy strain registry candidates to `Strain Curator` review.
+- [x] Show candidate count and raw strain/genotype review summary in the Legacy Workbook Import UI.
+- [x] Add review check targets: `Strain registry`, `Raw strain/genotype`, `Gene/allele link`, and `Workbook row evidence`.
+- [x] Verify candidate display escaping in the browser MVP verifier.
+
+---
+
+### Task 3: Curated Review Apply Flow
+
+**Files:**
+- Modify: `app/main.py`
+- Modify: `static/index.html`
+- Test: `tests/test_strain_knowledge_graph.py`
+- Test: `tests/test_legacy_workbook_import_api.py`
+- Test: `tests/test_review_attention.py`
+
+- [ ] Add a narrow review resolution path that lets a Strain Curator create or link a strain/gene/allele relationship from an open legacy strain registry candidate.
+- [ ] Require explicit reviewed `strain_name`, `gene_symbol`, and `allele_name` inputs before canonical registry writes.
+- [ ] Preserve raw legacy workbook candidate JSON and source row evidence on the review item and source record.
+- [ ] Preserve before/after values in `action_log`.
+- [ ] Keep unresolved or partially filled candidates open rather than writing incomplete canonical records.
+- [ ] Run `python -m pytest tests/test_strain_knowledge_graph.py tests/test_legacy_workbook_import_api.py tests/test_review_attention.py -q`.
+- [ ] Run `npm test`, `npm run test:local`, and `npm run test:acceptance`.
