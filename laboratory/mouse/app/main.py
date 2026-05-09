@@ -161,6 +161,12 @@ class AiDraftSettingsUpdate(BaseModel):
     api_key: str = ""
 
 
+class UploadBatchCreate(BaseModel):
+    batch_label: str = ""
+    expected_photo_count: int = Field(default=0, ge=0)
+    note: str = ""
+
+
 class GenotypingUpdate(BaseModel):
     mouse_id: str = Field(min_length=1)
     sample_id: str = ""
@@ -456,6 +462,135 @@ def health() -> dict[str, Any]:
     }
 
 
+def create_upload_batch_record(
+    conn: Any,
+    *,
+    batch_label: str = "",
+    expected_photo_count: int = 0,
+    note: str = "",
+) -> dict[str, Any]:
+    now = utc_now()
+    upload_batch_id = new_id("batch")
+    label = batch_label.strip() or f"Cage card upload {now[:10]}"
+    conn.execute(
+        """
+        INSERT INTO upload_batch
+            (upload_batch_id, batch_label, expected_photo_count, status,
+             source_layer, note, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            upload_batch_id,
+            label,
+            max(0, expected_photo_count),
+            "open",
+            "raw source",
+            note.strip(),
+            now,
+            now,
+        ),
+    )
+    return {
+        "upload_batch_id": upload_batch_id,
+        "batch_label": label,
+        "expected_photo_count": max(0, expected_photo_count),
+        "status": "open",
+        "source_layer": "raw source",
+        "note": note.strip(),
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def upload_batch_payload(row: Any) -> dict[str, Any]:
+    photo_count = int(row["photo_count"] or 0)
+    pending = int(row["pending_transcription_count"] or 0)
+    open_reviews = int(row["open_review_count"] or 0)
+    if photo_count == 0 or pending:
+        derived_status = "upload_or_transcription_pending"
+    elif open_reviews:
+        derived_status = "review_pending"
+    else:
+        derived_status = "ready_for_mapping"
+    payload = dict(row)
+    payload["photo_count"] = photo_count
+    payload["transcribed_photo_count"] = int(payload["transcribed_photo_count"] or 0)
+    payload["pending_transcription_count"] = pending
+    payload["total_review_count"] = int(payload["total_review_count"] or 0)
+    payload["open_review_count"] = open_reviews
+    payload["resolved_review_count"] = max(0, payload["total_review_count"] - open_reviews)
+    payload["derived_status"] = derived_status
+    payload["boundary"] = "raw source"
+    return payload
+
+
+@app.post("/api/upload-batches")
+def create_upload_batch(payload: UploadBatchCreate) -> dict[str, Any]:
+    with connection() as conn:
+        batch = create_upload_batch_record(
+            conn,
+            batch_label=payload.batch_label,
+            expected_photo_count=payload.expected_photo_count,
+            note=payload.note,
+        )
+    return batch
+
+
+@app.get("/api/upload-batches")
+def list_upload_batches() -> dict[str, Any]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT batch.upload_batch_id, batch.batch_label,
+                   batch.expected_photo_count, batch.status,
+                   batch.source_layer, batch.note, batch.created_at, batch.updated_at,
+                   COUNT(photo.photo_id) AS photo_count,
+                   SUM(CASE WHEN transcribed.photo_id IS NOT NULL THEN 1 ELSE 0 END) AS transcribed_photo_count,
+                   SUM(CASE WHEN photo.photo_id IS NOT NULL AND transcribed.photo_id IS NULL THEN 1 ELSE 0 END) AS pending_transcription_count,
+                   COALESCE(SUM(review_counts.total_reviews), 0) AS total_review_count,
+                   COALESCE(SUM(review_counts.open_reviews), 0) AS open_review_count,
+                   MIN(photo.uploaded_at) AS first_photo_uploaded_at,
+                   MAX(photo.uploaded_at) AS latest_photo_uploaded_at
+            FROM upload_batch batch
+            LEFT JOIN photo_log photo
+                ON photo.upload_batch_id = batch.upload_batch_id
+            LEFT JOIN (
+                SELECT DISTINCT photo_id
+                FROM parse_result
+                WHERE source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
+            ) transcribed ON transcribed.photo_id = photo.photo_id
+            LEFT JOIN (
+                SELECT parse.photo_id,
+                       COUNT(review.review_id) AS total_reviews,
+                       SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_reviews
+                FROM parse_result parse
+                JOIN review_queue review ON review.parse_id = parse.parse_id
+                GROUP BY parse.photo_id
+            ) review_counts ON review_counts.photo_id = photo.photo_id
+            GROUP BY batch.upload_batch_id
+            ORDER BY batch.created_at DESC
+            """
+        ).fetchall()
+        unbatched = conn.execute(
+            """
+            SELECT COUNT(*) AS photo_count
+            FROM photo_log
+            WHERE upload_batch_id IS NULL OR upload_batch_id = ''
+            """
+        ).fetchone()
+    batches = [upload_batch_payload(row) for row in rows]
+    return {
+        "boundary": "export or view",
+        "source_layer": "raw source summary",
+        "batch_count": len(batches),
+        "photo_count": sum(batch["photo_count"] for batch in batches) + int(unbatched["photo_count"] or 0),
+        "pending_transcription_count": sum(batch["pending_transcription_count"] for batch in batches),
+        "open_review_count": sum(batch["open_review_count"] for batch in batches),
+        "unbatched_photo_count": int(unbatched["photo_count"] or 0),
+        "rows": batches,
+    }
+
+
 @app.post("/api/ai-draft-settings")
 def update_ai_draft_settings(payload: AiDraftSettingsUpdate) -> dict[str, Any]:
     global RUNTIME_OPENAI_API_KEY
@@ -473,10 +608,13 @@ def list_photos() -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT photo.photo_id, photo.original_filename, photo.stored_path,
+                   photo.upload_batch_id, batch.batch_label,
                    photo.uploaded_at, photo.status, photo.raw_source_kind,
                    COALESCE(review_counts.open_reviews, 0) AS open_review_count,
                    review_counts.latest_parse_id
             FROM photo_log photo
+            LEFT JOIN upload_batch batch
+                ON batch.upload_batch_id = photo.upload_batch_id
             LEFT JOIN (
                 SELECT parse.photo_id, COUNT(review.review_id) AS open_reviews,
                        MAX(parse.parse_id) AS latest_parse_id
@@ -502,7 +640,7 @@ def photo_image_path(photo_id: str) -> tuple[Any, Path, str]:
     with connection() as conn:
         photo = conn.execute(
             """
-            SELECT photo_id, original_filename, stored_path, uploaded_at, status
+            SELECT photo_id, original_filename, stored_path, uploaded_at, status, upload_batch_id
             FROM photo_log
             WHERE photo_id = ?
             """,
@@ -1704,9 +1842,12 @@ def photo_review_workbench() -> dict[str, Any]:
     with connection() as conn:
         photos = conn.execute(
             """
-            SELECT photo_id, original_filename, uploaded_at, status, raw_source_kind
-            FROM photo_log
-            ORDER BY uploaded_at DESC
+            SELECT photo.photo_id, photo.original_filename, photo.upload_batch_id,
+                   batch.batch_label, photo.uploaded_at, photo.status, photo.raw_source_kind
+            FROM photo_log photo
+            LEFT JOIN upload_batch batch
+                ON batch.upload_batch_id = photo.upload_batch_id
+            ORDER BY photo.uploaded_at DESC
             """
         ).fetchall()
         rows = []
@@ -1782,6 +1923,8 @@ def photo_review_workbench() -> dict[str, Any]:
                 {
                     "source_layer": "export or view",
                     "photo_id": photo["photo_id"],
+                    "upload_batch_id": photo["upload_batch_id"] or "",
+                    "batch_label": photo["batch_label"] or "",
                     "original_filename": photo["original_filename"],
                     "uploaded_at": photo["uploaded_at"],
                     "status": photo["status"],
@@ -1799,12 +1942,16 @@ def photo_review_workbench() -> dict[str, Any]:
                     "next_action": next_action,
                 }
             )
+    batch_summary = list_upload_batches()
     return {
         "boundary": "export or view",
         "source_priority": ["raw source photo", "manual transcription", "review item", "canonical candidate"],
         "photo_count": len(rows),
         "pending_transcription_count": sum(1 for row in rows if row["next_action"] == "transcribe_photo"),
         "open_review_count": sum(row["open_review_count"] for row in rows),
+        "batch_count": batch_summary["batch_count"],
+        "unbatched_photo_count": batch_summary["unbatched_photo_count"],
+        "batches": batch_summary["rows"],
         "rows": rows,
     }
 
@@ -4801,7 +4948,7 @@ def create_legacy_workbook_import(
 
 
 @app.post("/api/photos")
-def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
+def upload_photo(file: UploadFile = File(...), upload_batch_id: str = Form("")) -> dict[str, Any]:
     if not file.filename:
         raise HTTPException(status_code=400, detail="A filename is required.")
     photo_id = new_id("photo")
@@ -4809,20 +4956,44 @@ def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
     uploaded_at = utc_now()
     try:
         with connection() as conn:
+            batch_id = upload_batch_id.strip()
+            if batch_id:
+                batch = conn.execute(
+                    "SELECT upload_batch_id FROM upload_batch WHERE upload_batch_id = ?",
+                    (batch_id,),
+                ).fetchone()
+                if batch is None:
+                    raise HTTPException(status_code=404, detail="Upload batch not found.")
+                conn.execute(
+                    "UPDATE upload_batch SET updated_at = ? WHERE upload_batch_id = ?",
+                    (uploaded_at, batch_id),
+                )
+            else:
+                batch = create_upload_batch_record(
+                    conn,
+                    batch_label=f"Single photo upload - {file.filename}",
+                    expected_photo_count=1,
+                    note="Automatically created for a direct photo upload.",
+                )
+                batch_id = batch["upload_batch_id"]
             source_record_id = create_source_record(
                 conn,
                 source_type="photo",
                 source_uri=str(stored_path.relative_to(ROOT)),
                 source_label=file.filename,
-                raw_payload=json.dumps({"original_filename": file.filename}, ensure_ascii=False),
+                raw_payload=json.dumps(
+                    {"original_filename": file.filename, "upload_batch_id": batch_id},
+                    ensure_ascii=False,
+                ),
                 note="Uploaded cage card photo retained as raw source evidence.",
             )
             conn.execute(
                 """
-                INSERT INTO photo_log (photo_id, original_filename, stored_path, uploaded_at, status)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO photo_log
+                    (photo_id, upload_batch_id, original_filename, stored_path, uploaded_at, status)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (photo_id, file.filename, str(stored_path.relative_to(ROOT)), uploaded_at, "uploaded"),
+                (photo_id, batch_id, file.filename, str(stored_path.relative_to(ROOT)), uploaded_at, "uploaded"),
             )
             review_candidate = ensure_photo_review_candidate(
                 conn,
@@ -4841,6 +5012,7 @@ def upload_photo(file: UploadFile = File(...)) -> dict[str, Any]:
         "stored_path": str(stored_path.relative_to(ROOT)),
         "uploaded_at": uploaded_at,
         "status": "review_pending",
+        "upload_batch_id": batch_id,
         "source_record_id": source_record_id,
         "review_candidate": review_candidate,
     }
