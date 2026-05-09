@@ -11,6 +11,7 @@ Layer classification: implementation verification / non-canonical project note.
 - Mouse continuity는 mouse ID와 note-line evidence를 중심으로 추적한다.
 - Cage/card records는 snapshot이고, durable history는 event/action/correction으로 남긴다.
 - Export는 source of truth가 아니라 canonical/reviewed state에서 생성되는 view이다.
+- `evals/cage_card_skill_gym/`은 non-canonical safety eval layer이다. Probe는 review/test fixture이며 runtime, DB, API, canonical state, 또는 최종 workflow를 정의하지 않는다.
 
 ## Acceptance Matrix
 
@@ -36,6 +37,7 @@ Layer classification: implementation verification / non-canonical project note.
 | A18 | Final Exports | review blockers 해소 후 CSV/XLSX export가 생성되고 traceability sheet/context를 포함한다. | Done | ready CSV, separation XLSX, animal sheet XLSX assertions |
 | A19 | Dashboard/Views | dashboard, mouse detail, strain detail, records views는 hard-coded demo data 없이 API state로 렌더한다. | Done | UI string and anti-demo assertions |
 | A20 | Data Boundaries | source, parsed, review, canonical, export/view boundary가 주요 응답에 명시된다. | Mostly Done | API boundary assertions across source/parsed/review/canonical/export flows |
+| A21 | Safety Eval Layer | cage-card workflow safety probes가 non-canonical fixture로 재생되며 raw evidence, review routing, traceability, no-direct-canonical-write 원칙을 확인한다. | Done | `npm run test:cage-card-skill-gym` |
 
 ## 주요 Gap / 다음 검증 후보
 
