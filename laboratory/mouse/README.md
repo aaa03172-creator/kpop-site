@@ -4,6 +4,16 @@ MouseDB is a CLI-first local tool for managing mouse strains, mouse individuals,
 
 It is designed as an independent tool. It should not hard-code PaperPipe integration. A future Research Assistant, API, or MCP server can call the same MouseDB service layer or stable CLI JSON output.
 
+## Documentation
+
+Start with `docs/DOCUMENTATION_MAP.md` when deciding which project document to trust. The short version:
+
+- `AGENTS.md` defines active agent, data-boundary, and Git hygiene rules.
+- `final_mouse_colony_prd.md` is the primary adopted product reference.
+- `README.md` is the setup, command, and verification entry point.
+- Design, review, and implementation planning notes are supporting context unless explicitly adopted by the PRD.
+- When documentation and implementation differ, check committed tests and call out the mismatch before changing behavior.
+
 ## Install
 
 ```powershell
