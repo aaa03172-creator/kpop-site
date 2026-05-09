@@ -1620,6 +1620,14 @@ Rule application must preserve raw note text, raw ear-label tokens, raw sample I
 
 When a selected rule set declares that sample IDs equal mouse display IDs, genotyping submission should verify the sample ID against active mouse display IDs before writing a genotyping record or updating the mouse's latest sample state. Unmatched, duplicate, or different-mouse matches must be blocked or routed to review rather than silently attached to the requested mouse.
 
+### 18.5 Breeding Operation Rules
+
+Breeding operation rules should be configurable workflow policy used for review, next-action suggestions, and export readiness. They should not hard-code one strain's genotype expectations or force automatic sacrifice, parent replacement, or cage closure.
+
+Workbook notes and animal sheet patterns may suggest defaults such as mating parent ratio, expected parent age range, no-birth review windows, litter separation due dates, parent replacement review age, and separation DOB grouping windows. These values should be stored as editable assumptions and applied only after user review or explicit adoption.
+
+Strain-specific notes such as "all pups are Tg" must remain strain-specific candidate configuration. They should not become global genotype logic because inheritance patterns, genotype categories, and management targets differ by strain and cross.
+
 ## 19. Risks And Mitigations
 
 | Risk | Mitigation |
