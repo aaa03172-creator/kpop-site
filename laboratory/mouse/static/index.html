@@ -4075,6 +4075,7 @@
             data-review-id="${escapeHtml(item.review_id)}"
             data-current-value="${escapeHtml(item.current_value || "")}"
             data-note-item-id="${escapeHtml(item.note_item_id || "")}">Resolve with note</button>
+          <p class="muted review-resolution-message" role="status"></p>
         </div>
       `;
     }
@@ -4195,18 +4196,32 @@
     async function submitReviewResolution(button, item, allowAutoNote) {
       const payload = reviewResolutionPayload(button, item, allowAutoNote);
       if (!payload) return;
+      const container = button.closest(".review-actions");
+      const message = container?.querySelector(".review-resolution-message");
+      if (message) {
+        message.textContent = "Submitting reviewed decision...";
+        message.classList.remove("warn");
+      }
       const resolvedReviewId = button.dataset.reviewId;
       const resolvedIndex = currentVisibleReviews.findIndex((entry) => entry.review_id === resolvedReviewId);
       const nextReview = resolvedIndex >= 0
         ? currentVisibleReviews[resolvedIndex + 1] || currentVisibleReviews[resolvedIndex - 1]
         : null;
-      await api(`/api/review-items/${button.dataset.reviewId}/resolve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      selectedReviewId = nextReview?.review_id || "";
-      await refresh();
+      try {
+        await api(`/api/review-items/${button.dataset.reviewId}/resolve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        selectedReviewId = nextReview?.review_id || "";
+        await refresh();
+      } catch (error) {
+        selectedReviewId = resolvedReviewId;
+        if (message) {
+          message.textContent = apiErrorMessage(error);
+          message.classList.add("warn");
+        }
+      }
     }
 
     function selectedReviewPosition() {

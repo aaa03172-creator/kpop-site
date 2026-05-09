@@ -263,6 +263,12 @@ async function main() {
       const url = String(input);
       const path = url.startsWith("file:///api/") ? url.replace("file://", "") : url;
       const key = path.split("?")[0];
+      if (key === "/api/review-items/review_legacy_static/resolve") {
+        return new Response(JSON.stringify({ detail: "Reviewed strain name must match the mapped canonical strain." }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
       const body = Object.prototype.hasOwnProperty.call(responses, key) ? responses[key] : [];
       return new Response(JSON.stringify(body), {
         status: 200,
@@ -408,6 +414,47 @@ async function main() {
       focusReviewRender.error.text.includes("Focus Review unavailable") &&
       focusReviewRender.error.text.includes("backend down"),
     "Focus Review unavailable state should be explicit and non-fabricated."
+  );
+  const legacyApplyFailure = await staticPage.evaluate(async () => {
+    const item = {
+      review_id: "review_legacy_static",
+      parse_id: "legacy_parse_static",
+      status: "open",
+      issue: "Legacy strain registry candidate requires review",
+      severity: "High",
+      attention_level: "must_review",
+      priority: "high",
+      assigned_role: "Strain Curator",
+      current_value: JSON.stringify({
+        strain_raw: "ApoM Tg/Tg",
+        normalized_candidate: { strain_name: "ApoM Tg/Tg", gene_symbol: "", allele_name: "" }
+      }),
+      suggested_value: "",
+      review_reason: "Legacy workbook strain registry candidate requires reviewed values.",
+      evidence_preview: "animal-sheet.xlsx row 2"
+    };
+    currentVisibleReviews = [item];
+    selectedReviewId = item.review_id;
+    renderReviewDetail(item);
+    const panel = document.getElementById("reviewDetailPanel");
+    panel.querySelector(".review-legacy-decision").value = "apply_strain_registry_candidate";
+    panel.querySelector(".review-resolution-note").value = "Attempt mismatched canonical strain link.";
+    panel.querySelector(".reviewed-strain-name").value = "ApoM Tg/Tg";
+    panel.querySelector(".reviewed-gene-symbol").value = "ApoM";
+    panel.querySelector(".reviewed-allele-name").value = "Tg transgene";
+    panel.querySelector(".reviewed-existing-strain-id").value = "strain_different";
+    await submitReviewResolution(panel.querySelector(".resolve-review"), item, false);
+    return {
+      detailText: panel.textContent,
+      selectedReviewId,
+      status: item.status
+    };
+  });
+  assert(
+    legacyApplyFailure.selectedReviewId === "review_legacy_static" &&
+      legacyApplyFailure.status === "open" &&
+      legacyApplyFailure.detailText.includes("Reviewed strain name must match the mapped canonical strain."),
+    "Legacy strain apply failures should stay on the open review and show the backend guard message."
   );
   const legacyWorkbookHtml = await staticPage.evaluate(() => legacyWorkbookRow({
     source_file_name: "legacy <source>.xlsx",
