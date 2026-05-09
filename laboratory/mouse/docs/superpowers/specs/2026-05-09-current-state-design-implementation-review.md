@@ -8,17 +8,27 @@ Canonical status: non-canonical. This document summarizes project state as of 20
 
 - Date: 2026-05-09
 - Branch: `codex/artifact-workflow-contracts`
-- Latest observed commit: `ba6a927 feat: extend artifact evidence provenance`
-- Worktree state after status refresh: clean, branch reported as ahead by 1 commit
+- Latest observed commit before this documentation pass: `a11ddc0 fix: align evidence provenance verification`
+- Recent related commits:
+  - `a11ddc0 fix: align evidence provenance verification`
+  - `fbce449 test: align genotyping update fixture with evidence requirement`
+  - `c21a8f8 docs: align pvm evidence ledger progress`
+  - `ba6a927 feat: extend artifact evidence provenance`
+- Worktree state after latest verification: only this current-state document and the next-plan document are modified.
+- Branch state: `codex/artifact-workflow-contracts`.
 - Targeted verification passed:
   - `python -m pytest tests/test_artifact_workflow.py tests/test_photo_evidence_ledger_schema.py tests/test_genotyping_evidence_enforcement.py -q`
-  - Result: 12 passed, 78 FastAPI deprecation warnings
-- Full verification currently fails:
+  - Result after current changes: 13 passed, 78 FastAPI deprecation warnings
+- Local app verification passed after adding evidence to the genotype update verification path:
+  - `npm run test:local`
+  - Result: Local app scaffold verification passed.
+- Full verification passed after the stabilization changes:
   - Command: `npm run verify`
-  - Passing before failure: `npm test`, `npm run test:acceptance`
-  - Failing step: `npm run test:local`
-  - Failure: `scripts/verify-local-app.py` posts `/api/genotyping/update` without `source_photo_id`, `photo_evidence_id`, or `source_record_id`.
-  - Likely root cause: recent evidence enforcement correctly blocks genotype result confirmation without source evidence, while the local app verification script still uses the older evidence-free fixture update path.
+  - Result: 108 passed, 78 FastAPI deprecation warnings, plus MVP, acceptance, local app, photo E2E, and cage-card skill gym checks passed.
+- Previous failure resolved:
+  - Earlier failure: `scripts/verify-local-app.py` posted `/api/genotyping/update` without `source_photo_id`, `photo_evidence_id`, or `source_record_id`.
+  - Root cause: genotype evidence enforcement was correct, but the verification script still used the older evidence-free fixture update path.
+  - Current direction: keep the enforcement and make the fixture carry explicit source evidence.
 
 ## Original Design Intent
 
@@ -69,7 +79,7 @@ Important mismatches against the broader design:
 - Experiment traceability is still thin compared with the original `Experiment` and `ExperimentMouse` design.
 - Visualization remains secondary. Network graph, pedigree tree, radar chart, heatmap, and Sankey-style breeding flow are not yet the practical center of the product.
 - Controlled vocabulary is only partly centralized. Some statuses, workflow rules, and genotype categories are improved, but the system still needs a stronger configurable master layer.
-- The current local app E2E script has a stale assumption: it attempts genotype result confirmation without evidence.
+- The previous local app E2E stale assumption has been addressed: genotype result confirmation now carries source evidence in the verifier.
 - `mvp_acceptance_matrix_ko.md` appears mojibake-encoded in the current checkout. The verifier still passes structurally, but humans cannot reliably review the Korean content.
 
 ## Current Data Layer Classification
@@ -114,13 +124,12 @@ This keeps the initial product from disrupting the animal room while still build
 
 ## Recommended Next Direction
 
-The next step should be a stabilization slice, not a new domain feature:
+The next step should finish the stabilization slice before a new domain feature:
 
-1. Fix the stale local verification script so genotype result updates include explicit source evidence.
-2. Re-run full verification.
-3. Keep the artifact/evidence/export manifest branch clean and coherent.
-4. Repair or rewrite the mojibake Korean acceptance matrix.
-5. Add acceptance rows for photo evidence ledger, genotype evidence enforcement, validation reports, and export manifests.
+1. Review and commit the two documentation files created in this pass if they match intent.
+2. Repair or rewrite the mojibake Korean acceptance matrix.
+3. Add acceptance rows for photo evidence ledger, genotype evidence enforcement, high-risk mouse event evidence enforcement, validation reports, and export manifests.
+4. Keep the artifact/evidence/export manifest branch clean and coherent after each slice.
 
 After that, the next product choice should be one of:
 

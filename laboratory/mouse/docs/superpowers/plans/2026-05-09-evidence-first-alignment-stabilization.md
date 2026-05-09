@@ -34,7 +34,7 @@
 - Read: `app/main.py`
 - Read: `tests/test_genotyping_evidence_enforcement.py`
 
-- [ ] **Step 1: Run the failing command**
+- [x] **Step 1: Run the failing command**
 
 Run:
 
@@ -42,9 +42,9 @@ Run:
 npm run test:local
 ```
 
-Expected: FAIL at `Could not update genotyping workflow state.`
+Observed before the verifier fix: FAIL at `Could not update genotyping workflow state.`
 
-- [ ] **Step 2: Inspect the stale request payload**
+- [x] **Step 2: Inspect the stale request payload**
 
 Check `scripts/verify-local-app.py` around the `/api/genotyping/update` call. The stale payload currently has this shape:
 
@@ -62,7 +62,7 @@ genotyping_update = client.post(
 
 Expected finding: the payload confirms a genotype result but does not provide `source_photo_id`, `photo_evidence_id`, or `source_record_id`.
 
-- [ ] **Step 3: Confirm the app-side enforcement**
+- [x] **Step 3: Confirm the app-side enforcement**
 
 Read `app/main.py` in `genotyping_result_evidence_refs`. The behavior to preserve is:
 
@@ -84,36 +84,28 @@ Expected: this enforcement is correct and should not be weakened.
 **Files:**
 - Modify: `scripts/verify-local-app.py`
 
-- [ ] **Step 1: Find an existing source photo for MT321**
+- [x] **Step 1: Find existing evidence for MT321**
 
-In the script, use the photo or source evidence already created for the MT321 note/card flow. Prefer a real seeded photo ID over an invented fixture ID. A safe patch shape is:
-
-```python
-                genotyping_source_photo_id = genotyping_target.get("source_photo_id") or mt321_export_row.get("source_photo_id")
-```
-
-If `mt321_export_row` stores compacted `source_photo_ids`, split the first non-empty value before use:
+In the script, use source evidence already created for the MT321 note/card flow. Prefer a real source record or source photo over an invented fixture ID. The working-tree patch uses the existing audit trace source record:
 
 ```python
-                genotyping_source_photo_id = (
-                    genotyping_target.get("source_photo_id")
-                    or mt321_export_row.get("source_photo_id")
-                    or str(mt321_export_row.get("source_photo_ids") or "").split(";")[0].strip()
+                genotyping_evidence_record_id = genotyping_target.get("source_record_id") or (
+                    audit_payload["source_records"][0]["source_record_id"] if audit_payload["source_records"] else ""
                 )
 ```
 
-- [ ] **Step 2: Add a guard assertion before the update**
+- [x] **Step 2: Add a guard assertion before the update**
 
 Add this before the POST:
 
 ```python
                 assert_true(
-                    bool(genotyping_source_photo_id),
-                    "Genotyping result verification should use source photo evidence.",
+                    bool(genotyping_evidence_record_id),
+                    "Genotyping result verification needs source evidence for the target mouse.",
                 )
 ```
 
-- [ ] **Step 3: Include the source evidence in the POST**
+- [x] **Step 3: Include the source evidence in the POST**
 
 Change the request to:
 
@@ -125,12 +117,12 @@ Change the request to:
                         "sample_id": "MT321",
                         "raw_result": "Tg/Tg",
                         "normalized_result": "Tg/Tg",
-                        "source_photo_id": genotyping_source_photo_id,
+                        "source_record_id": genotyping_evidence_record_id,
                     },
                 )
 ```
 
-- [ ] **Step 4: Run the local verification**
+- [x] **Step 4: Run the local verification**
 
 Run:
 
@@ -138,14 +130,14 @@ Run:
 npm run test:local
 ```
 
-Expected: PASS, or the next failure should be unrelated to genotype evidence enforcement and should be investigated separately before changing code.
+Observed: PASS.
 
 ## Task 3: Protect The Behavior With Focused Tests
 
 **Files:**
 - Modify: `tests/test_genotyping_evidence_enforcement.py`
 
-- [ ] **Step 1: Verify the existing negative test remains**
+- [x] **Step 1: Verify the existing negative test remains**
 
 Keep this assertion:
 
@@ -154,7 +146,7 @@ assert exc_info.value.status_code == 409
 assert "evidence" in str(exc_info.value.detail).lower()
 ```
 
-- [ ] **Step 2: Verify the positive test records evidence**
+- [x] **Step 2: Verify the positive test records evidence**
 
 Keep or add this assertion:
 
@@ -164,7 +156,7 @@ assert event["event_type"] == "genotyped"
 assert "photo_gt_evidence" in event["details"]
 ```
 
-- [ ] **Step 3: Run the focused test**
+- [x] **Step 3: Run the focused test**
 
 Run:
 
@@ -172,7 +164,58 @@ Run:
 python -m pytest tests/test_genotyping_evidence_enforcement.py -q
 ```
 
-Expected: PASS.
+Observed: PASS as part of the focused evidence tests.
+
+## Task 3A: Protect High-Risk Mouse Events With Evidence
+
+**Files:**
+- Create or keep: `tests/test_mouse_event_evidence_enforcement.py`
+- Verify: `app/main.py`
+
+- [x] **Step 1: Add a negative test for evidence-free high-risk events**
+
+The test should call `create_mouse_event` with a high-risk event such as `death` and no evidence:
+
+```python
+with pytest.raises(HTTPException) as exc_info:
+    create_mouse_event(
+        MouseEventCreate(
+            mouse_id="mouse_event_evidence",
+            event_type="death",
+            event_date="2026-05-09",
+            details={"observed_status": "found dead"},
+        )
+    )
+
+assert exc_info.value.status_code == 409
+assert "evidence" in str(exc_info.value.detail).lower()
+```
+
+- [x] **Step 2: Keep positive tests for source record and photo evidence**
+
+The evidence-backed source record path should assert:
+
+```python
+assert row["event_type"] == "death"
+assert row["source_record_id"] == source_record_id
+```
+
+The photo evidence path should assert:
+
+```python
+assert details["source_photo_id"] == "photo_event_evidence"
+assert details["photo_evidence_id"] == "evidence_death_note"
+```
+
+- [x] **Step 3: Run the focused mouse event evidence test**
+
+Run:
+
+```powershell
+python -m pytest tests/test_mouse_event_evidence_enforcement.py -q
+```
+
+Observed: 3 passed.
 
 ## Task 4: Run Full Verification
 
@@ -181,7 +224,7 @@ Expected: PASS.
 - Verify: `scripts/verify-local-app.py`
 - Verify: Python tests under `tests/`
 
-- [ ] **Step 1: Run full verification**
+- [x] **Step 1: Run full verification**
 
 Run:
 
@@ -189,7 +232,7 @@ Run:
 npm run verify
 ```
 
-Expected: PASS through all stages:
+Observed: PASS through all stages:
 
 ```text
 npm test
@@ -200,7 +243,7 @@ npm run test:cage-card-skill-gym
 npm run test:python
 ```
 
-- [ ] **Step 2: Re-check worktree status**
+- [x] **Step 2: Re-check worktree status**
 
 Run:
 
@@ -208,7 +251,7 @@ Run:
 git status --short --branch --untracked-files=all
 ```
 
-Expected: only intentional source/doc/test files are modified.
+Observed after related implementation commits: only the current-state review document and this plan document remain modified.
 
 ## Task 5: Repair The Korean Acceptance Matrix
 
@@ -235,8 +278,9 @@ Append rows after the current safety eval row:
 ```markdown
 | A22 | Photo Evidence Ledger | photo/card/note evidence item이 source photo, raw observed text, confidence, reviewability, linked mouse/event trace를 보존한다. | Done | `tests/test_photo_evidence_ledger_schema.py` |
 | A23 | Genotype Evidence Enforcement | genotype result confirmation은 source photo, photo evidence item, 또는 source record 없이 canonical genotype state를 갱신하지 않는다. | Done | `tests/test_genotyping_evidence_enforcement.py` |
-| A24 | Validation Report Artifact | canonical apply/export 전 validation report artifact가 pass/block 상태와 source refs를 남긴다. | Done | `tests/test_artifact_workflow.py` |
-| A25 | Export Manifest Artifact | CSV/XLSX export는 manifest artifact로 validation report, source refs, state watermark, filename을 추적한다. | Done | `tests/test_artifact_workflow.py` |
+| A24 | High-Risk Mouse Event Evidence | death, sacrificed, moved, weaned 같은 high-risk mouse event는 source evidence 없이 canonical event를 생성하지 않는다. | Done | `tests/test_mouse_event_evidence_enforcement.py` |
+| A25 | Validation Report Artifact | canonical apply/export 전 validation report artifact가 pass/block 상태와 source refs를 남긴다. | Done | `tests/test_artifact_workflow.py` |
+| A26 | Export Manifest Artifact | CSV/XLSX export는 manifest artifact로 validation report, source refs, state watermark, filename을 추적한다. | Done | `tests/test_artifact_workflow.py` |
 ```
 
 - [ ] **Step 3: Run acceptance matrix verification**
@@ -255,30 +299,34 @@ Expected: `Acceptance matrix verification passed.`
 - Modify: `static/index.html`
 - Modify: `scripts/verify-local-app.py`
 
-- [ ] **Step 1: Add export provenance text to the existing export preview area**
+- [x] **Step 1: Add export provenance text to the existing export log area**
 
-Render validation and manifest status using existing API response fields. If the API does not expose manifest details yet, keep this task scoped to validation/export readiness already present in the response and create a separate API plan after verification.
+Render validation and manifest status using existing API response fields. The current working-tree patch adds structured provenance parsing to `/api/export-log` and displays manifest path, validation report ID, and state watermark in the export log table.
 
-Use wording that matches lab workflow:
-
-```javascript
-const provenanceBits = [
-  preview.export_ready ? 'Export ready' : 'Review needed before export',
-  preview.export_stale ? 'Data changed after last export' : '',
-].filter(Boolean);
-```
-
-- [ ] **Step 2: Add local verifier assertions**
-
-In `scripts/verify-local-app.py`, assert that the export preview shows blocker/readiness text after review blockers exist and ready text after blockers are resolved:
+The backend parser shape is:
 
 ```python
-assert_true("Review needed before export" in index_html or export_preview["export_ready"] is False, "Export preview should expose review-needed state.")
+def parse_export_log_provenance(note: str) -> dict[str, str]:
+    provenance = {
+        "export_manifest_path": "",
+        "validation_report_id": "",
+        "state_watermark": "",
+    }
+    ...
+    return provenance
 ```
 
-If the UI is rendered dynamically and not visible in static HTML, use API assertions instead of a brittle string check.
+- [x] **Step 2: Add artifact test assertions**
 
-- [ ] **Step 3: Run local verification**
+The artifact test checks the structured export log response:
+
+```python
+assert row["export_manifest_path"] == "mousedb_artifacts/export_manifests/animal_sheet.json"
+assert row["validation_report_id"] == "validation_report_export_animal_sheet_xlsx_ApoM"
+assert row["state_watermark"] == "2026-05-09T12:05:00Z"
+```
+
+- [x] **Step 3: Run local verification**
 
 Run:
 
@@ -286,7 +334,7 @@ Run:
 npm run test:local
 ```
 
-Expected: PASS.
+Observed: PASS.
 
 ## Task 7: Commit The Stabilization Slice
 
@@ -301,17 +349,17 @@ Run:
 git status --short --branch --untracked-files=all
 ```
 
-Expected: modified files are limited to the current task.
+Expected: modified files are limited to the current documentation task unless the acceptance matrix repair is added next.
 
 - [ ] **Step 2: Stage exact files**
 
 Run:
 
 ```powershell
-git add scripts/verify-local-app.py tests/test_genotyping_evidence_enforcement.py mvp_acceptance_matrix_ko.md scripts/verify-acceptance-matrix.py static/index.html
+git add docs/superpowers/specs/2026-05-09-current-state-design-implementation-review.md docs/superpowers/plans/2026-05-09-evidence-first-alignment-stabilization.md
 ```
 
-If `scripts/verify-acceptance-matrix.py` or `static/index.html` did not change, omit them from the command.
+If the acceptance matrix is repaired in the same slice, also stage `mvp_acceptance_matrix_ko.md` and `scripts/verify-acceptance-matrix.py` if that script changed. If implementation files change again during review, stage them only after re-running `npm run verify`.
 
 - [ ] **Step 3: Commit**
 
@@ -326,6 +374,6 @@ Expected: commit succeeds and `git status --short --branch --untracked-files=all
 ## Self-Review
 
 - Spec coverage: covers current verification failure, evidence enforcement, acceptance matrix repair, full verification, and the smallest UI provenance follow-up.
-- Placeholder scan: no `TBD`, no open-ended "handle later" steps.
+- Placeholder scan: no unresolved placeholder steps remain.
 - Type consistency: uses existing fields `source_photo_id`, `photo_evidence_id`, `source_record_id`, and existing commands from the repository.
 - Risk note: do not weaken genotype evidence enforcement to make the script pass. The script fixture should carry evidence because the product principle is evidence-backed canonical state.
