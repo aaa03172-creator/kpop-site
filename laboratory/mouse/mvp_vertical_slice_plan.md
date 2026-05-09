@@ -278,6 +278,7 @@ Current verification command:
 - The smoke test clears local prototype session state, imports the parsed fixture, verifies review routing, blocks duplicate active mouse approval until movement review, applies one reviewed correction, verifies dismissed items do not become canonical candidates, uploads a local source photo, checks reload persistence, and generates a separation CSV preview with blocked rows preserved in the export log.
 - The duplicate active mouse fixture also verifies that resolving movement removes the conflict from the review queue and marks the previous active source as closed by movement review.
 - The animalsheet fixture verifies parent ID row splitting, litter row rendering, pup count mapping, source evidence, and traceability columns.
+- Labeling session rule checks verify that configured ear-label sequences reset per cage/card group, mouse-number matching remains evidence-backed, crossed-out handling is policy-driven, and sample IDs can map to mouse display IDs without overwriting raw sample evidence.
 
 ## UI Acceptance Checklist
 
@@ -299,6 +300,7 @@ Current verification command:
 - Do not delete raw source photos because parsing quality is poor.
 - Do not treat Excel as the canonical database.
 - Do not create canonical records from OCR-only values unless explicit auto-fill policy allows it.
+- Treat labeling session rules as configurable workflow policy. Do not hard-code ApoM-specific numbering, ear-label, crossed-out, or genotyping-target behavior into generic parsers.
 - Treat any future LLM output as parsed/intermediate data, not canonical truth.
 - Keep Mouse genotype summaries as display/cache values; structured genotype records are the source of truth.
 - Treat CLI JSON output, where implemented, as a stable integration contract for future tools.
