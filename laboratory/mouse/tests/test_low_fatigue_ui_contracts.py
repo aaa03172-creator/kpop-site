@@ -138,7 +138,7 @@ def test_focus_review_groups_db_backed_review_items_by_photo_card(tmp_path: Path
             "requires_source_photo": True,
             "safe_quick_resolve": False,
         }
-        assert quick_item["action_hint"]["mode"] == "quick_confirmation"
+        assert quick_item["action_hint"]["mode"] == "manual_review_required"
         assert quick_item["action_hint"]["safe_quick_resolve"] is False
         assert quick_item["action_hint"]["requires_note"] is True
         assert [row["mouse_id"] for row in card["mouse_rows"]] == ["MT318", "MT319"]
@@ -221,6 +221,68 @@ def test_focus_review_excludes_hidden_default_fixture_reviews(tmp_path: Path) ->
         payload = response.json()
         assert payload["workload_summary"] == {"must_review": 0, "quick_check": 0}
         assert payload["cards"] == []
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_focus_review_action_hint_does_not_mark_unknown_quick_check_safe(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_unknown_quick",
+                    None,
+                    "manual_fixture",
+                    json.dumps({"confidence": 90, "rawStrain": "B6J"}, ensure_ascii=False),
+                    "2026-05-09T10:30:00Z",
+                    "review",
+                    90,
+                    1,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_unknown_quick",
+                    "parse_unknown_quick",
+                    "Medium",
+                    "New workflow review type",
+                    "unknown",
+                    "unknown",
+                    "Unknown issue types should stay manual until explicitly whitelisted.",
+                    "open",
+                    "2026-05-09T10:31:00Z",
+                ),
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/focus-review")
+
+        assert response.status_code == 200
+        [card] = response.json()["cards"]
+        [item] = card["review_items"]
+        assert item["attention_level"] == "quick_check"
+        assert item["action_hint"] == {
+            "source_layer": "export or view",
+            "mode": "manual_review_required",
+            "primary_label": "Inspect source evidence",
+            "requires_note": True,
+            "requires_source_photo": False,
+            "safe_quick_resolve": False,
+        }
     finally:
         db.DB_PATH = old_db_path
 
@@ -363,6 +425,7 @@ def test_colony_state_uses_only_db_backed_current_records(tmp_path: Path) -> Non
         }
         [card] = payload["active_card_snapshots"]
         assert card["card_snapshot_id"].startswith("card_")
+        assert card["source_layer"] == "canonical structured state"
         assert card["source_photo"]["photo_id"] == "photo_colony_state"
         assert card["source_photo"]["source_photo_role"] == "primary_evidence"
         assert card["mouse_count"] == 2
@@ -416,5 +479,32 @@ def test_colony_state_empty_state_does_not_fabricate_records(tmp_path: Path) -> 
             "message": "No accepted active colony records are available yet.",
             "fabricated_records": False,
         }
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_colony_state_excludes_noncanonical_card_snapshots(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        seed_colony_state_records(tmp_path)
+        with db.connection() as conn:
+            conn.execute(
+                """
+                UPDATE card_snapshot
+                SET source_layer = ?
+                WHERE parse_id = ?
+                """,
+                ("parsed or intermediate result", "parse_colony_state"),
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/colony-state")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["summary"]["active_mice"] == 2
+        assert payload["summary"]["active_card_snapshots"] == 0
+        assert payload["active_card_snapshots"] == []
+        assert payload["empty_state"]["fabricated_records"] is False
     finally:
         db.DB_PATH = old_db_path

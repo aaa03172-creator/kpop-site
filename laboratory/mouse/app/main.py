@@ -500,21 +500,14 @@ def focus_review_action_hint(item: dict[str, Any]) -> dict[str, Any]:
     issue = str(item.get("issue") or "").lower()
     level = str(item.get("attention_level") or "")
     has_photo = bool(item.get("photo_id") or item.get("image_url"))
-    safe_quick_resolve = level == "quick_check" and not any(
-        blocked in issue
-        for blocked in [
-            "duplicate active",
-            "unlabeled numeric note",
-            "ear label",
-            "legacy strain registry candidate",
-        ]
-    )
+    safe_quick_resolve_issues = {
+        "low-confidence strain alias",
+        "fixture auto-filled by policy",
+    }
+    safe_quick_resolve = level == "quick_check" and issue in safe_quick_resolve_issues
     if safe_quick_resolve:
         mode = "quick_confirmation"
         primary_label = "Confirm from evidence"
-    elif level == "quick_check":
-        mode = "quick_confirmation"
-        primary_label = "Inspect source evidence"
     else:
         mode = "manual_review_required"
         primary_label = "Inspect source evidence"
@@ -7511,7 +7504,7 @@ def ui_colony_state() -> dict[str, Any]:
             SELECT card.card_snapshot_id, card.parse_id, card.photo_id, card.card_type,
                    card.card_id_raw, card.raw_strain_text, card.matched_strain_text,
                    card.sex_raw, card.sex_normalized, card.count_value, card.dob_raw,
-                   card.status, photo.original_filename,
+                   card.status, card.source_layer, photo.original_filename,
                    COUNT(mouse.mouse_id) AS mouse_count,
                    COALESCE((
                        SELECT COUNT(*)
@@ -7524,10 +7517,11 @@ def ui_colony_state() -> dict[str, Any]:
              AND mouse.status = 'active'
             LEFT JOIN photo_log photo ON photo.photo_id = card.photo_id
             WHERE card.status IN ('accepted', 'active', 'current')
+              AND card.source_layer = 'canonical structured state'
             GROUP BY card.card_snapshot_id, card.parse_id, card.photo_id, card.card_type,
                      card.card_id_raw, card.raw_strain_text, card.matched_strain_text,
                      card.sex_raw, card.sex_normalized, card.count_value, card.dob_raw,
-                     card.status, photo.original_filename
+                     card.status, card.source_layer, photo.original_filename
             ORDER BY card.updated_at DESC, card.card_snapshot_id
             """
         ).fetchall()
@@ -7549,6 +7543,7 @@ def ui_colony_state() -> dict[str, Any]:
                 "count_value": row["count_value"],
                 "dob_raw": row["dob_raw"],
                 "status": row["status"],
+                "source_layer": row["source_layer"],
                 "mouse_count": row["mouse_count"],
                 "source_photo": {
                     "photo_id": row["photo_id"] or "",
