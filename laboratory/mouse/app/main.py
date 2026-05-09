@@ -2487,6 +2487,218 @@ def list_source_records() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def normalized_registry_text(value: str) -> str:
+    return " ".join(str(value or "").split())
+
+
+def get_or_create_gene_master(conn: Any, gene_symbol: str, source_record_id: str | None, now: str) -> str | None:
+    clean_symbol = normalized_registry_text(gene_symbol)
+    if not clean_symbol:
+        return None
+    existing = conn.execute(
+        """
+        SELECT gene_id, gene_symbol
+        FROM gene_master
+        WHERE LOWER(gene_symbol) = LOWER(?)
+        ORDER BY active DESC, created_at
+        LIMIT 1
+        """,
+        (clean_symbol,),
+    ).fetchone()
+    if existing is not None:
+        return existing["gene_id"]
+    gene_id = new_id("gene")
+    conn.execute(
+        """
+        INSERT INTO gene_master
+            (gene_id, gene_symbol, display_name, source_record_id, active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (gene_id, clean_symbol, "", source_record_id, 1, now, now),
+    )
+    return gene_id
+
+
+def get_or_create_allele_master(
+    conn: Any,
+    *,
+    allele_symbol: str,
+    gene_id: str | None,
+    source_record_id: str | None,
+    now: str,
+) -> str | None:
+    clean_symbol = normalized_registry_text(allele_symbol)
+    if not clean_symbol:
+        return None
+    existing = conn.execute(
+        """
+        SELECT allele_id, gene_id
+        FROM allele_master
+        WHERE LOWER(allele_symbol) = LOWER(?)
+          AND (gene_id = ? OR gene_id IS NULL OR ? IS NULL)
+        ORDER BY active DESC, CASE WHEN gene_id = ? THEN 0 ELSE 1 END, created_at
+        LIMIT 1
+        """,
+        (clean_symbol, gene_id, gene_id, gene_id),
+    ).fetchone()
+    if existing is not None:
+        if gene_id and not existing["gene_id"]:
+            conn.execute(
+                """
+                UPDATE allele_master
+                SET gene_id = ?,
+                    updated_at = ?
+                WHERE allele_id = ?
+                """,
+                (gene_id, now, existing["allele_id"]),
+            )
+        return existing["allele_id"]
+    allele_id = new_id("allele")
+    conn.execute(
+        """
+        INSERT INTO allele_master
+            (allele_id, allele_symbol, display_name, gene_id, source_record_id, active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (allele_id, clean_symbol, "", gene_id, source_record_id, 1, now, now),
+    )
+    return allele_id
+
+
+def link_strain_allele_master(
+    conn: Any,
+    *,
+    strain_id: str,
+    gene_id: str | None,
+    allele_id: str | None,
+    source_record_id: str | None,
+    now: str,
+) -> None:
+    if not allele_id:
+        return
+    existing = conn.execute(
+        """
+        SELECT relationship_id
+        FROM strain_allele_relationship
+        WHERE strain_id = ?
+          AND allele_id = ?
+          AND status = 'active'
+        LIMIT 1
+        """,
+        (strain_id, allele_id),
+    ).fetchone()
+    if existing is not None:
+        return
+    conn.execute(
+        """
+        INSERT INTO strain_allele_relationship
+            (relationship_id, strain_id, gene_id, allele_id, relationship_type,
+             source_record_id, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id("strain_allele"),
+            strain_id,
+            gene_id,
+            allele_id,
+            "configured_from_strain_registry",
+            source_record_id,
+            "active",
+            now,
+            now,
+        ),
+    )
+
+
+def strain_allele_rows(conn: Any, strain_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT allele.allele_id, gene.gene_id, gene.gene_symbol,
+               allele.allele_symbol AS allele_name,
+               relationship.relationship_type
+        FROM strain_allele_relationship relationship
+        JOIN allele_master allele ON allele.allele_id = relationship.allele_id
+        LEFT JOIN gene_master gene ON gene.gene_id = COALESCE(relationship.gene_id, allele.gene_id)
+        WHERE relationship.strain_id = ?
+          AND relationship.status = 'active'
+          AND allele.active = 1
+        ORDER BY gene.gene_symbol COLLATE NOCASE, allele.allele_symbol COLLATE NOCASE
+        """,
+        (strain_id,),
+    ).fetchall()
+    return [
+        {
+            "allele_id": row["allele_id"],
+            "gene_id": row["gene_id"] or "",
+            "gene_symbol": row["gene_symbol"] or "",
+            "allele_name": row["allele_name"],
+            "default_zygosity": "",
+            "note": "",
+        }
+        for row in rows
+    ]
+
+
+@app.get("/api/genes")
+def list_genes() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT gene_id, gene_symbol, display_name, source_record_id, created_at, updated_at
+            FROM gene_master
+            WHERE active = 1
+            ORDER BY gene_symbol COLLATE NOCASE
+            """
+        ).fetchall()
+    return [
+        {
+            "gene_id": row["gene_id"],
+            "gene_symbol": row["gene_symbol"],
+            "full_name": row["display_name"],
+            "organism": "mouse",
+            "description": "",
+            "external_reference": "",
+            "source_record_id": row["source_record_id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
+@app.get("/api/alleles")
+def list_alleles() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT allele.allele_id, allele.gene_id, gene.gene_symbol,
+                   allele.allele_symbol, allele.display_name, allele.source_record_id,
+                   allele.created_at, allele.updated_at
+            FROM allele_master allele
+            LEFT JOIN gene_master gene ON gene.gene_id = allele.gene_id
+            WHERE allele.active = 1
+            ORDER BY gene.gene_symbol COLLATE NOCASE, allele.allele_symbol COLLATE NOCASE
+            """
+        ).fetchall()
+    return [
+        {
+            "allele_id": row["allele_id"],
+            "gene_id": row["gene_id"] or "",
+            "gene_symbol": row["gene_symbol"] or "",
+            "allele_name": row["allele_symbol"],
+            "allele_type": "",
+            "description": row["display_name"],
+            "inheritance": "",
+            "zygosity_options": "",
+            "genotyping_protocol": "",
+            "source_record_id": row["source_record_id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
 @app.get("/api/strains")
 def list_strains() -> list[dict[str, Any]]:
     with connection() as conn:
@@ -2499,7 +2711,12 @@ def list_strains() -> list[dict[str, Any]]:
             ORDER BY status = 'active' DESC, strain_name COLLATE NOCASE
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            payload = dict(row)
+            payload["alleles"] = strain_allele_rows(conn, payload["strain_id"])
+            result.append(payload)
+    return result
 
 
 @app.post("/api/strains")
@@ -2554,6 +2771,22 @@ def create_strain(payload: StrainRegistryCreate) -> dict[str, Any]:
                 now,
                 now,
             ),
+        )
+        gene_id = get_or_create_gene_master(conn, payload.gene, source_record_id, now)
+        allele_id = get_or_create_allele_master(
+            conn,
+            allele_symbol=payload.allele,
+            gene_id=gene_id,
+            source_record_id=source_record_id,
+            now=now,
+        )
+        link_strain_allele_master(
+            conn,
+            strain_id=strain_id,
+            gene_id=gene_id,
+            allele_id=allele_id,
+            source_record_id=source_record_id,
+            now=now,
         )
         conn.execute(
             """

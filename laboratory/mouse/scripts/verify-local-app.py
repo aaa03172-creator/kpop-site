@@ -809,6 +809,22 @@ def main() -> None:
                 assert_true(strain_payload["source_record_id"], "Strain entry should create source evidence.")
                 strains = client.get("/api/strains").json()
                 assert_true(strains[0]["strain_name"] == "PV-Cre", "Strain registry did not persist entry.")
+                genes = client.get("/api/genes").json()
+                alleles = client.get("/api/alleles").json()
+                assert_true(
+                    any(item["gene_symbol"] == "Pvalb" for item in genes),
+                    "Strain creation should populate the normalized gene registry.",
+                )
+                assert_true(
+                    any(item["allele_name"] == "Pvalb-IRES-Cre" and item["gene_symbol"] == "Pvalb" for item in alleles),
+                    "Strain creation should populate the normalized allele registry.",
+                )
+                assert_true(
+                    strains[0]["alleles"]
+                    and strains[0]["alleles"][0]["allele_name"] == "Pvalb-IRES-Cre"
+                    and strains[0]["alleles"][0]["gene_symbol"] == "Pvalb",
+                    "Strain list should expose normalized strain-allele links while preserving legacy text fields.",
+                )
                 source_records = client.get("/api/source-records").json()
                 assert_true(
                     any(item["source_type"] == "manual_entry" for item in source_records),

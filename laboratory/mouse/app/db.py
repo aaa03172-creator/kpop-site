@@ -452,6 +452,46 @@ def init_db() -> None:
                 FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
             );
 
+            CREATE TABLE IF NOT EXISTS gene_master (
+                gene_id TEXT PRIMARY KEY,
+                gene_symbol TEXT NOT NULL,
+                display_name TEXT NOT NULL DEFAULT '',
+                source_record_id TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS allele_master (
+                allele_id TEXT PRIMARY KEY,
+                allele_symbol TEXT NOT NULL,
+                display_name TEXT NOT NULL DEFAULT '',
+                gene_id TEXT,
+                source_record_id TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (gene_id) REFERENCES gene_master(gene_id),
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS strain_allele_relationship (
+                relationship_id TEXT PRIMARY KEY,
+                strain_id TEXT NOT NULL,
+                gene_id TEXT,
+                allele_id TEXT,
+                relationship_type TEXT NOT NULL DEFAULT 'configured_from_strain_registry',
+                source_record_id TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (strain_id) REFERENCES strain_registry(strain_id),
+                FOREIGN KEY (gene_id) REFERENCES gene_master(gene_id),
+                FOREIGN KEY (allele_id) REFERENCES allele_master(allele_id),
+                FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+            );
+
             CREATE TABLE IF NOT EXISTS correction_log (
                 correction_id TEXT PRIMARY KEY,
                 entity_type TEXT NOT NULL,
@@ -938,6 +978,16 @@ def init_db() -> None:
                 ON legacy_workbook_row(review_id);
             CREATE INDEX IF NOT EXISTS idx_strain_registry_name
                 ON strain_registry(strain_name COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_gene_master_symbol
+                ON gene_master(gene_symbol COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_allele_master_symbol
+                ON allele_master(allele_symbol COLLATE NOCASE);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_gene_master_symbol_unique
+                ON gene_master(gene_symbol COLLATE NOCASE);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_allele_master_gene_symbol_unique
+                ON allele_master(COALESCE(gene_id, ''), allele_symbol COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_strain_allele_relationship_strain
+                ON strain_allele_relationship(strain_id, status);
             CREATE INDEX IF NOT EXISTS idx_source_record_type
                 ON source_record(source_type, imported_at);
             CREATE INDEX IF NOT EXISTS idx_correction_log_entity
