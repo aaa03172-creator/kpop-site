@@ -3726,6 +3726,19 @@
             ])).join("")}
           </tbody>
         </table>
+        <h3>Photo worklist</h3>
+        <table>
+          <thead><tr><th>Photo</th><th>Transcription</th><th>Reviews</th><th>Mapping</th><th>Next action</th></tr></thead>
+          <tbody>
+            ${(preview.worklist || []).map((item) => row([
+              item.original_filename || item.photo_id,
+              item.transcription_count ? "available" : "missing",
+              `${item.open_review_count || 0} open / ${item.total_review_count || 0} total`,
+              `${item.applied_candidate_count || 0}/${item.canonical_candidate_count || 0} applied`,
+              `${item.next_action || "--"}${item.blocker ? `: ${item.blocker}` : ""}`
+            ])).join("") || row(["No photos in this batch", "", "", "", ""])}
+          </tbody>
+        </table>
         <button class="release-upload-batch" type="button" data-batch-id="${escapeHtml(batch.upload_batch_id)}" ${preview.ready ? "" : "disabled"}>Close Batch</button>
       `;
     }

@@ -749,6 +749,7 @@ def main() -> None:
                 assert_true("multiple" in index_html and "Upload Photos" in index_html, "Local UI should support multi-photo upload.")
                 assert_true("uploadBatchRows" in index_html and "/api/upload-batches" in index_html, "Local UI should expose upload batch tracking.")
                 assert_true("uploadBatchReleasePanel" in index_html and "Preview release" in index_html, "Local UI should expose upload batch release checks.")
+                assert_true("Photo worklist" in index_html and "next_action" in index_html, "Local UI should show photo-level batch release blockers.")
                 assert_true("/release-preview" in index_html and "Close Batch" in index_html, "Local UI should preview and close upload batches only after release checks.")
                 assert_true("Manual Photo Transcription" in index_html, "Local UI should expose manual photo transcription.")
                 assert_true("Colony Dashboard" in index_html, "Local UI should expose the colony visualization dashboard.")
@@ -1021,9 +1022,13 @@ def main() -> None:
                 assert_true(
                     batch_release_payload["boundary"] == "export or view"
                     and batch_release_payload["ready"] is False
+                    and len(batch_release_payload["worklist"]) == 1
+                    and batch_release_payload["worklist"][0]["photo_id"] == photo_payload["photo_id"]
+                    and batch_release_payload["worklist"][0]["next_action"] == "transcribe_photo"
                     and any(item["key"] == "transcription_complete" for item in batch_release_payload["blockers"])
-                    and any(item["key"] == "canonical_mapping_applied" for item in batch_release_payload["blockers"]),
-                    "Upload batch release preview should block unfinished transcription and missing canonical mapping.",
+                    and any(item["key"] == "canonical_mapping_applied" for item in batch_release_payload["blockers"])
+                    and any(item["key"] == "photo_worklist_clear" for item in batch_release_payload["blockers"]),
+                    "Upload batch release preview should identify unfinished transcription and missing canonical mapping at batch and photo level.",
                 )
                 blocked_batch_release = client.post(
                     f"/api/upload-batches/{upload_batch_payload['upload_batch_id']}/release"

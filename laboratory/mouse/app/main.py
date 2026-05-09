@@ -602,6 +602,7 @@ def upload_batch_summary_row(conn: Any, upload_batch_id: str) -> Any:
 
 def upload_batch_release_preview_payload(conn: Any, upload_batch_id: str) -> dict[str, Any]:
     batch = upload_batch_payload(upload_batch_summary_row(conn, upload_batch_id))
+    worklist_rows = upload_batch_release_worklist(conn, upload_batch_id)
     blockers = []
     warnings = []
 
@@ -616,6 +617,7 @@ def upload_batch_release_preview_payload(conn: Any, upload_batch_id: str) -> dic
 
     expected = int(batch["expected_photo_count"] or 0)
     photo_count = int(batch["photo_count"] or 0)
+    worklist_blocker_count = sum(1 for item in worklist_rows if item["next_action"] != "ready_to_close")
     checklist = [
         add_check(
             "has_photos",
@@ -659,6 +661,12 @@ def upload_batch_release_preview_payload(conn: Any, upload_batch_id: str) -> dic
             int(batch["canonical_candidate_count"]) > 0 and int(batch["applied_candidate_count"]) >= int(batch["canonical_candidate_count"]),
             f"{batch['applied_candidate_count']} applied candidate(s) of {batch['canonical_candidate_count']} candidate(s).",
         ),
+        add_check(
+            "photo_worklist_clear",
+            "Every photo-level release action is complete",
+            worklist_blocker_count == 0,
+            f"{worklist_blocker_count} photo-level action(s) remain in the release worklist.",
+        ),
     ]
     ready = not blockers
     return {
@@ -668,10 +676,102 @@ def upload_batch_release_preview_payload(conn: Any, upload_batch_id: str) -> dic
         "release_status": "ready_to_close" if ready else "blocked",
         "batch": batch,
         "checklist": checklist,
+        "worklist": worklist_rows,
         "blockers": blockers,
         "warnings": warnings,
         "note": "Release changes only upload_batch status; it does not write mouse, event, genotype, or other canonical colony state.",
     }
+
+
+def upload_batch_release_worklist(conn: Any, upload_batch_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT photo.photo_id, photo.original_filename, photo.uploaded_at, photo.status,
+               COUNT(DISTINCT transcribed.parse_id) AS transcription_count,
+               COALESCE(review_counts.total_reviews, 0) AS total_review_count,
+               COALESCE(review_counts.open_reviews, 0) AS open_review_count,
+               COALESCE(comparison_counts.comparison_reviews, 0) AS comparison_review_count,
+               COALESCE(comparison_counts.open_comparison_reviews, 0) AS open_comparison_review_count,
+               COALESCE(candidate_counts.canonical_candidate_count, 0) AS canonical_candidate_count,
+               COALESCE(candidate_counts.applied_candidate_count, 0) AS applied_candidate_count
+        FROM photo_log photo
+        LEFT JOIN parse_result transcribed
+            ON transcribed.photo_id = photo.photo_id
+           AND transcribed.source_name IN ('manual_photo_transcription', 'ai_photo_extraction')
+        LEFT JOIN (
+            SELECT parse.photo_id,
+                   COUNT(review.review_id) AS total_reviews,
+                   SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_reviews
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            GROUP BY parse.photo_id
+        ) review_counts ON review_counts.photo_id = photo.photo_id
+        LEFT JOIN (
+            SELECT parse.photo_id,
+                   COUNT(review.review_id) AS comparison_reviews,
+                   SUM(CASE WHEN review.status = 'open' THEN 1 ELSE 0 END) AS open_comparison_reviews
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            WHERE review.issue LIKE 'Photo transcription%'
+            GROUP BY parse.photo_id
+        ) comparison_counts ON comparison_counts.photo_id = photo.photo_id
+        LEFT JOIN (
+            SELECT parse.photo_id,
+                   COUNT(candidate.candidate_id) AS canonical_candidate_count,
+                   SUM(CASE WHEN candidate.status = 'applied' THEN 1 ELSE 0 END) AS applied_candidate_count
+            FROM parse_result parse
+            JOIN review_queue review ON review.parse_id = parse.parse_id
+            JOIN canonical_candidate candidate ON candidate.review_id = review.review_id
+            GROUP BY parse.photo_id
+        ) candidate_counts ON candidate_counts.photo_id = photo.photo_id
+        WHERE photo.upload_batch_id = ?
+        GROUP BY photo.photo_id
+        ORDER BY photo.uploaded_at, photo.original_filename COLLATE NOCASE
+        """,
+        (upload_batch_id,),
+    ).fetchall()
+    worklist = []
+    for row in rows:
+        payload = dict(row)
+        transcription_count = int(payload["transcription_count"] or 0)
+        open_review_count = int(payload["open_review_count"] or 0)
+        comparison_review_count = int(payload["comparison_review_count"] or 0)
+        open_comparison_review_count = int(payload["open_comparison_review_count"] or 0)
+        canonical_candidate_count = int(payload["canonical_candidate_count"] or 0)
+        applied_candidate_count = int(payload["applied_candidate_count"] or 0)
+        if transcription_count == 0:
+            next_action = "transcribe_photo"
+            blocker = "No manual or AI transcription evidence is attached."
+        elif comparison_review_count == 0:
+            next_action = "create_comparison_review"
+            blocker = "Create the photo transcription comparison review."
+        elif open_review_count or open_comparison_review_count:
+            next_action = "resolve_reviews"
+            blocker = f"{open_review_count} open review item(s) remain."
+        elif canonical_candidate_count == 0:
+            next_action = "map_canonical_candidate"
+            blocker = "No canonical candidate draft is linked to this photo."
+        elif applied_candidate_count < canonical_candidate_count:
+            next_action = "apply_canonical_candidate"
+            blocker = f"{applied_candidate_count} of {canonical_candidate_count} canonical candidate(s) applied."
+        else:
+            next_action = "ready_to_close"
+            blocker = ""
+        worklist.append(
+            {
+                **payload,
+                "transcription_count": transcription_count,
+                "open_review_count": open_review_count,
+                "comparison_review_count": comparison_review_count,
+                "open_comparison_review_count": open_comparison_review_count,
+                "canonical_candidate_count": canonical_candidate_count,
+                "applied_candidate_count": applied_candidate_count,
+                "next_action": next_action,
+                "blocker": blocker,
+                "boundary": "export or view",
+            }
+        )
+    return worklist
 
 
 @app.post("/api/upload-batches")
