@@ -8,7 +8,9 @@ from fastapi import HTTPException
 
 from app import db
 from app.main import (
+    CorrectionCreate,
     ReviewResolutionCreate,
+    create_correction,
     create_card_snapshot,
     export_review_blocker_count,
     list_review_items,
@@ -74,6 +76,69 @@ def seed_numeric_note_parse(tmp_path: Path, parse_suffix: str, notes: list[dict[
             "review",
         )
     return parse_id, snapshot_id
+
+
+def test_correction_empty_source_record_does_not_create_orphan_source(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+
+        result = create_correction(
+            CorrectionCreate(
+                entity_type="mouse",
+                entity_id="MT401",
+                field_name="sex",
+                before_value="unknown",
+                after_value="female",
+                reason="Reviewed source evidence; no source record selected.",
+                source_record_id="",
+                review_id="",
+            )
+        )
+
+        with db.connection() as conn:
+            correction = conn.execute(
+                """
+                SELECT source_record_id, review_id
+                FROM correction_log
+                WHERE correction_id = ?
+                """,
+                (result["correction_id"],),
+            ).fetchone()
+        assert correction["source_record_id"] is None
+        assert correction["review_id"] is None
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_correction_rejects_missing_source_record_without_partial_write(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+
+        with pytest.raises(HTTPException) as exc_info:
+            create_correction(
+                CorrectionCreate(
+                    entity_type="mouse",
+                    entity_id="MT401",
+                    field_name="sex",
+                    before_value="unknown",
+                    after_value="female",
+                    reason="Reviewed source evidence.",
+                    source_record_id="source_missing",
+                )
+            )
+
+        assert exc_info.value.status_code == 400
+        with db.connection() as conn:
+            correction_count = conn.execute("SELECT COUNT(*) AS count FROM correction_log").fetchone()["count"]
+            action_count = conn.execute("SELECT COUNT(*) AS count FROM action_log").fetchone()["count"]
+        assert correction_count == 0
+        assert action_count == 0
+    finally:
+        db.DB_PATH = old_db_path
 
 
 def test_review_attention_hides_fixture_reviews_by_default() -> None:
