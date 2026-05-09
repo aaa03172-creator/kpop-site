@@ -58,6 +58,8 @@ Recommended fields:
 
 This table is a workflow policy/config layer. It should not by itself create canonical mice, deaths, or genotype results.
 
+The `crossed_out_handling = dead` setting applies to mouse-number note lines in the selected labeling session context. It should not be reused for litter rows, workbook cleanup notes, or free-text breeding statuses unless a separate source-specific rule says so.
+
 ## Ear Label Sequence
 
 Ear labels should remain normalized codes with display text separate from raw OCR/manual tokens.
@@ -156,5 +158,6 @@ Tests should cover the workflow using small fixtures rather than the full photo 
 - Replacing handwritten cage cards.
 - Inferring strain-specific biological rules from ApoM Tg/Tg.
 - Automatically interpreting every possible ear-marking system.
+- Treating crossed-out/dead notation as one global rule across labeling notes, mating litter rows, and workbook status text.
 - Sending full records to external OCR/LLM services.
 - Creating a final Excel export redesign.

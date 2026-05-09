@@ -302,7 +302,7 @@ Current verification command:
 - Do not treat Excel as the canonical database.
 - Do not create canonical records from OCR-only values unless explicit auto-fill policy allows it.
 - Treat labeling session rules as configurable workflow policy. Do not hard-code ApoM-specific numbering, ear-label, crossed-out, or genotyping-target behavior into generic parsers.
-- Treat breeding operation rules as configurable workflow policy. Use workbook-derived thresholds and notes for reviewable next-action suggestions, not automatic sacrifice, parent replacement, or strain-specific genotype assumptions.
+- Treat breeding operation rules as configurable workflow policy. Use workbook-derived thresholds and notes for reviewable next-action suggestions, not automatic sacrifice, parent replacement, strain-specific genotype assumptions, or proof-by-missing-evidence.
 - Treat any future LLM output as parsed/intermediate data, not canonical truth.
 - Keep Mouse genotype summaries as display/cache values; structured genotype records are the source of truth.
 - Treat CLI JSON output, where implemented, as a stable integration contract for future tools.
