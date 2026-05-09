@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from app import db
-from app.main import PhotoManualTranscriptionCreate, create_photo_manual_transcription
+from app.main import PhotoManualTranscriptionCreate, create_photo_manual_transcription, review_item_audit_view
 
 
 def test_photo_evidence_item_schema_links_photo_parse_and_note(tmp_path: Path) -> None:
@@ -18,6 +18,10 @@ def test_photo_evidence_item_schema_links_photo_parse_and_note(tmp_path: Path) -
             columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(photo_evidence_item)").fetchall()
+            }
+            link_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(review_evidence_link)").fetchall()
             }
 
             assert {
@@ -44,6 +48,13 @@ def test_photo_evidence_item_schema_links_photo_parse_and_note(tmp_path: Path) -
                 "created_at",
                 "updated_at",
             }.issubset(columns)
+            assert {
+                "link_id",
+                "review_id",
+                "photo_evidence_id",
+                "link_reason",
+                "created_at",
+            }.issubset(link_columns)
 
             conn.execute(
                 """
@@ -253,5 +264,84 @@ def test_manual_transcription_creates_photo_evidence_items(tmp_path: Path) -> No
         )
         assert all(item["source_photo_id"] == "photo_transcription_evidence" for item in payloads)
         assert all(item["status"] in {"draft", "review_open"} for item in payloads)
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_manual_transcription_links_review_to_photo_evidence_and_audit(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_review_evidence",
+                    "review-evidence-card.jpg",
+                    "data/photos/test/review-evidence-card.jpg",
+                    "2026-05-09T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+
+        result = create_photo_manual_transcription(
+            "photo_review_evidence",
+            PhotoManualTranscriptionCreate(
+                card_type="Separated",
+                raw_strain="ApoM Tg/Tg",
+                sex_raw="F",
+                mouse_count="1 total",
+                confidence=58,
+                uncertain_fields=["mouse_count"],
+                notes=[{"raw": "318 R0", "meaning": "possible mouse", "strike": "none"}],
+            ),
+        )
+
+        with db.connection() as conn:
+            linked_rows = conn.execute(
+                """
+                SELECT link.review_id, evidence.photo_evidence_id,
+                       evidence.evidence_kind, evidence.observed_raw_text,
+                       evidence.needs_review
+                FROM review_evidence_link link
+                JOIN photo_evidence_item evidence
+                  ON evidence.photo_evidence_id = link.photo_evidence_id
+                WHERE link.review_id = ?
+                ORDER BY evidence.evidence_kind, evidence.observed_raw_text
+                """,
+                (result["review_id"],),
+            ).fetchall()
+            audit = review_item_audit_view(conn, result["review_id"])
+
+        linked_payloads = [dict(row) for row in linked_rows]
+        assert any(
+            item["evidence_kind"] == "card_field"
+            and item["observed_raw_text"] == "1 total"
+            and item["needs_review"] == 1
+            for item in linked_payloads
+        )
+        assert any(
+            item["evidence_kind"] == "note_line"
+            and item["observed_raw_text"] == "318 R0"
+            for item in linked_payloads
+        )
+        assert audit["summary"]["photo_evidence_count"] == len(linked_payloads)
+        assert any(
+            item["evidence_kind"] == "card_field"
+            and item["observed_raw_text"] == "1 total"
+            and item["needs_review"] == 1
+            for item in audit["photo_evidence_items"]
+        )
+        assert any(
+            item["evidence_kind"] == "note_line"
+            and item["observed_raw_text"] == "318 R0"
+            for item in audit["photo_evidence_items"]
+        )
     finally:
         db.DB_PATH = old_db_path

@@ -183,6 +183,9 @@ class GenotypingUpdate(BaseModel):
     result_date: str = ""
     target_name: str = ""
     notes: str = ""
+    source_record_id: str | None = None
+    source_photo_id: str | None = None
+    photo_evidence_id: str | None = None
 
 
 class GenotypingRequestCreate(BaseModel):
@@ -2683,6 +2686,22 @@ def review_item_audit_view(conn: Any, review_id: str) -> dict[str, Any]:
         """,
         (review_id,),
     ).fetchall()
+    photo_evidence_rows = conn.execute(
+        """
+        SELECT evidence.source_photo_id, evidence.parse_id, evidence.note_item_id,
+               evidence.card_type, evidence.evidence_kind, evidence.roi_label,
+               evidence.observed_raw_text, evidence.ocr_text, evidence.parsed_value,
+               evidence.confidence, evidence.needs_review, evidence.review_reason,
+               evidence.status
+        FROM review_evidence_link link
+        JOIN photo_evidence_item evidence
+          ON evidence.photo_evidence_id = link.photo_evidence_id
+        WHERE link.review_id = ?
+        ORDER BY evidence.evidence_kind, evidence.roi_label,
+                 evidence.observed_raw_text, evidence.photo_evidence_id
+        """,
+        (review_id,),
+    ).fetchall()
     action_rows = conn.execute(
         """
         SELECT action_id, action_type, target_id, before_value, after_value,
@@ -2706,10 +2725,12 @@ def review_item_audit_view(conn: Any, review_id: str) -> dict[str, Any]:
         "boundary": "export or view",
         "review": review,
         "note_items": [dict(row) for row in note_rows],
+        "photo_evidence_items": [dict(row) for row in photo_evidence_rows],
         "corrections": [dict(row) for row in correction_rows],
         "actions": actions,
         "summary": {
             "note_item_count": len(note_rows),
+            "photo_evidence_count": len(photo_evidence_rows),
             "correction_count": len(correction_rows),
             "action_count": len(actions),
             "has_photo": bool(review.get("photo_id")),
@@ -3460,19 +3481,25 @@ def build_export_validation_report(
     review_blockers = preview.get("review_blockers") if isinstance(preview.get("review_blockers"), list) else []
     blocked_review_count = int(preview.get("blocked_review_items") or len(review_blockers) or 0)
     export_rows = []
+    trace_rows = []
     if export_type == "animal_sheet_xlsx":
         export_rows = preview.get("animal_sheet_rows") if isinstance(preview.get("animal_sheet_rows"), list) else []
-    else:
+        trace_rows = export_rows
+    elif export_type == "separation_xlsx":
         export_rows = preview.get("separation_rows") if isinstance(preview.get("separation_rows"), list) else []
+        trace_rows = preview.get("preview_rows") if isinstance(preview.get("preview_rows"), list) else export_rows
+    else:
+        export_rows = preview.get("preview_rows") if isinstance(preview.get("preview_rows"), list) else []
+        trace_rows = export_rows
 
     photo_ids: list[str] = []
     note_item_ids: list[str] = []
     mouse_ids: list[str] = []
-    for row in export_rows:
+    for row in trace_rows:
         if not isinstance(row, dict):
             continue
         photo_ids.extend(split_export_ref_values(row.get("source_photo_ids") or row.get("source_photo_id")))
-        note_item_ids.extend(split_export_ref_values(row.get("source_note_item_ids") or row.get("source")))
+        note_item_ids.extend(split_export_ref_values(row.get("source_note_item_ids") or row.get("source_note_item_id") or row.get("source")))
         mouse_ids.extend(split_export_ref_values(row.get("mouse_id")))
     review_ids = unique_nonempty(
         [item.get("review_id") for item in review_blockers if isinstance(item, dict)]
@@ -3530,6 +3557,102 @@ def build_export_validation_report(
             f"Export validation report for {export_type}; "
             f"query={query.strip() or 'all'}, filename={filename or 'not selected'}."
         ),
+    }
+
+
+def build_export_manifest(
+    *,
+    export_type: str,
+    filename: str,
+    query: str,
+    status: str,
+    row_count: int,
+    blocked_review_count: int,
+    validation_report: dict[str, Any],
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    created_at = created_at or utc_now()
+    report_artifact = validation_report.get("artifact") if isinstance(validation_report.get("artifact"), dict) else {}
+    source_refs = report_artifact.get("source_refs") if isinstance(report_artifact.get("source_refs"), dict) else {}
+    manifest_id = (
+        f"export_manifest_{safe_artifact_slug(export_type)}_"
+        f"{safe_artifact_slug(query or filename or created_at)}"
+    )
+    return {
+        "manifest_id": manifest_id,
+        "artifact_type": "export_manifest",
+        "source_layer": "export or view",
+        "created_at": created_at,
+        "created_by": "local_user",
+        "export_type": export_type,
+        "filename": filename,
+        "query": query.strip(),
+        "status": status,
+        "row_count": int(row_count),
+        "blocked_review_count": int(blocked_review_count),
+        "validation_report_id": str(validation_report.get("report_id") or report_artifact.get("report_id") or ""),
+        "validation_report_path": str(validation_report.get("artifact_path") or ""),
+        "state_watermark": str(report_artifact.get("state_watermark") or ""),
+        "source_refs": {
+            "photo_ids": unique_nonempty(source_refs.get("photo_ids", [])),
+            "note_item_ids": unique_nonempty(source_refs.get("note_item_ids", [])),
+            "review_ids": unique_nonempty(source_refs.get("review_ids", [])),
+            "mouse_ids": unique_nonempty(source_refs.get("mouse_ids", [])),
+        },
+        "notes": "Generated from export preview and validation report. This manifest is not canonical state.",
+    }
+
+
+def persist_export_manifest_artifact(manifest: dict[str, Any]) -> dict[str, Any]:
+    export_type = str(manifest.get("export_type") or "export")
+    filename = str(manifest.get("filename") or manifest.get("manifest_id") or "manifest")
+    target_dir = ARTIFACT_ROOT / "export_manifests"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = target_dir / f"{safe_artifact_slug(export_type)}_{safe_artifact_slug(filename)}.json"
+    artifact_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {
+        "manifest_id": manifest["manifest_id"],
+        "artifact_path": str(artifact_path),
+        "artifact": manifest,
+        "boundary": "export or view",
+    }
+
+
+def create_export_provenance_artifacts(
+    preview: dict[str, Any],
+    *,
+    export_type: str,
+    filename: str,
+    query: str,
+    status: str,
+    row_count: int,
+    blocked_review_count: int,
+) -> dict[str, Any]:
+    validation_report = persist_validation_report_artifact(
+        build_export_validation_report(
+            preview,
+            export_type=export_type,
+            query=query,
+            filename=filename,
+        )
+    )
+    manifest = persist_export_manifest_artifact(
+        build_export_manifest(
+            export_type=export_type,
+            filename=filename,
+            query=query,
+            status=status,
+            row_count=row_count,
+            blocked_review_count=blocked_review_count,
+            validation_report=validation_report,
+        )
+    )
+    return {
+        "validation_report": validation_report,
+        "manifest": manifest,
+        "manifest_artifact_path": manifest["artifact_path"],
+        "validation_report_id": validation_report["report_id"],
+        "state_watermark": manifest["artifact"].get("state_watermark", ""),
     }
 
 
@@ -5121,6 +5244,42 @@ def write_photo_evidence_items(
     return written
 
 
+def link_review_to_photo_evidence_items(
+    conn: Any,
+    *,
+    review_id: str,
+    parse_id: str,
+    created_at: str,
+) -> int:
+    evidence_rows = conn.execute(
+        """
+        SELECT photo_evidence_id
+        FROM photo_evidence_item
+        WHERE parse_id = ?
+        ORDER BY evidence_kind, roi_label, observed_raw_text, photo_evidence_id
+        """,
+        (parse_id,),
+    ).fetchall()
+    linked = 0
+    for row in evidence_rows:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO review_evidence_link
+                (link_id, review_id, photo_evidence_id, link_reason, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                f"rel_{review_id}_{row['photo_evidence_id']}",
+                review_id,
+                row["photo_evidence_id"],
+                "Review the parsed transcription against linked photo evidence before canonical writes.",
+                created_at,
+            ),
+        )
+        linked += max(cursor.rowcount, 0)
+    return linked
+
+
 def validation_review_for_record(conn: Any, record: dict[str, Any], status: str) -> dict[str, str] | None:
     if status in {"review", "conflict"}:
         return None
@@ -6186,6 +6345,12 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                 now,
             ),
         )
+        linked_evidence_count = link_review_to_photo_evidence_items(
+            conn,
+            review_id=review_id,
+            parse_id=parse_id,
+            created_at=now,
+        )
         conn.execute("UPDATE photo_log SET status = ? WHERE photo_id = ?", ("transcribed_review_pending", photo_id))
         photo_review_rows = conn.execute(
             """
@@ -6232,6 +6397,7 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                     "review_id": review_id,
                     "note_count": note_count,
                     "evidence_count": evidence_count,
+                    "linked_evidence_count": linked_evidence_count,
                     "source_name": source_name,
                     "resolved_photo_review_items": len(resolved_photo_review_ids),
                     "superseded_ai_parse_ids": superseded_ai["superseded_parse_ids"],
@@ -6250,6 +6416,7 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
         "photo_id": photo_id,
         "created_note_items": note_count,
         "created_photo_evidence_items": evidence_count,
+        "linked_photo_evidence_items": linked_evidence_count,
         "created_mouse_candidates": mouse_count,
         "created_ear_review_items": ear_review_count,
         "resolved_photo_review_items": len(resolved_photo_review_ids),
@@ -6625,6 +6792,55 @@ def suggested_genotyping_fields(normalized_result: str, target: dict[str, str] |
     }
 
 
+def genotyping_result_evidence_refs(conn: Any, payload: GenotypingUpdate, normalized_result: str) -> dict[str, str | None]:
+    if not normalized_result:
+        return {
+            "source_record_id": payload.source_record_id,
+            "source_photo_id": payload.source_photo_id,
+            "photo_evidence_id": payload.photo_evidence_id,
+        }
+
+    source_record_id = payload.source_record_id
+    source_photo_id = payload.source_photo_id
+    photo_evidence_id = payload.photo_evidence_id
+    if photo_evidence_id:
+        evidence = conn.execute(
+            """
+            SELECT photo_evidence_id, source_photo_id
+            FROM photo_evidence_item
+            WHERE photo_evidence_id = ?
+            """,
+            (photo_evidence_id,),
+        ).fetchone()
+        if evidence is None:
+            raise HTTPException(status_code=400, detail="photo_evidence_id does not exist.")
+        source_photo_id = source_photo_id or evidence["source_photo_id"]
+    if source_photo_id:
+        photo = conn.execute("SELECT 1 FROM photo_log WHERE photo_id = ?", (source_photo_id,)).fetchone()
+        if photo is None:
+            raise HTTPException(status_code=400, detail="source_photo_id does not exist.")
+    if source_record_id:
+        source = conn.execute(
+            "SELECT 1 FROM source_record WHERE source_record_id = ?",
+            (source_record_id,),
+        ).fetchone()
+        if source is None:
+            raise HTTPException(status_code=400, detail="source_record_id does not exist.")
+    if not any([source_record_id, source_photo_id, photo_evidence_id]):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Genotype result confirmation requires evidence: provide source_photo_id, "
+                "photo_evidence_id, or source_record_id."
+            ),
+        )
+    return {
+        "source_record_id": source_record_id,
+        "source_photo_id": source_photo_id,
+        "photo_evidence_id": photo_evidence_id,
+    }
+
+
 @app.post("/api/genotyping/update")
 def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
     updated_at = utc_now()
@@ -6644,6 +6860,7 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
         if existing is None:
             raise HTTPException(status_code=404, detail="Mouse not found.")
         before = dict(existing)
+        evidence_refs = genotyping_result_evidence_refs(conn, payload, normalized_result)
         target = target_suggestion(conn, existing, normalized_result) if normalized_result else None
         suggestions = suggested_genotyping_fields(normalized_result, target)
         conn.execute(
@@ -6685,8 +6902,9 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
             INSERT INTO genotyping_record
                 (genotyping_id, mouse_id, sample_id, sample_date, result_date,
                  target_name, raw_result, normalized_result, result_status,
+                 source_photo_id, source_record_id, photo_evidence_id,
                  confidence, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record_id,
@@ -6698,6 +6916,9 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
                 payload.raw_result,
                 normalized_result,
                 suggestions["genotyping_status"] if suggestions["genotyping_status"] != "sampled" else "pending",
+                evidence_refs["source_photo_id"],
+                evidence_refs["source_record_id"],
+                evidence_refs["photo_evidence_id"],
                 1.0 if normalized_result else 0.8,
                 payload.notes,
                 updated_at,
@@ -6724,10 +6945,40 @@ def update_genotyping(payload: GenotypingUpdate) -> dict[str, Any]:
                 "genotyping_resulted" if normalized_result else "sample_collected",
                 payload.mouse_id,
                 json.dumps(before, ensure_ascii=False),
-                json.dumps(dict(after), ensure_ascii=False),
+                json.dumps(dict(after) | {"evidence_refs": evidence_refs}, ensure_ascii=False),
                 updated_at,
             ),
         )
+        if normalized_result:
+            conn.execute(
+                """
+                INSERT INTO mouse_event
+                    (event_id, mouse_id, event_type, event_date, related_entity_type,
+                     related_entity_id, source_record_id, details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("event"),
+                    payload.mouse_id,
+                    "genotyped",
+                    result_date,
+                    "genotyping_record",
+                    record_id,
+                    evidence_refs["source_record_id"],
+                    json.dumps(
+                        {
+                            "sample_id": payload.sample_id or before["display_id"],
+                            "target_name": payload.target_name,
+                            "raw_result": payload.raw_result,
+                            "normalized_result": normalized_result,
+                            "source_photo_id": evidence_refs["source_photo_id"],
+                            "photo_evidence_id": evidence_refs["photo_evidence_id"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    updated_at,
+                ),
+            )
     return {"genotyping_id": record_id, **dict(after)}
 
 
@@ -8261,12 +8512,23 @@ def log_workbook_export(
     row_count: int,
     blocked_review_count: int,
     status: str,
+    manifest_artifact_path: str = "",
+    validation_report_id: str = "",
+    state_watermark: str = "",
 ) -> None:
     note = (
         "Blocked final XLSX export because Focus Review blockers remain."
         if status == "blocked"
         else "XLSX generated from workbook preview."
     )
+    provenance_bits = [
+        f"manifest={manifest_artifact_path}" if manifest_artifact_path else "",
+        f"validation_report={validation_report_id}" if validation_report_id else "",
+        f"state_watermark={state_watermark}" if state_watermark else "",
+    ]
+    provenance_note = "; ".join(bit for bit in provenance_bits if bit)
+    if provenance_note:
+        note = f"{note} {provenance_note}"
     with connection() as conn:
         conn.execute(
             """
@@ -9626,7 +9888,26 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
     filename = export_filename("separation", preview, query)
     blocked_count = preview["blocked_review_items"]
     if require_ready and blocked_count:
-        log_workbook_export("separation_xlsx", filename, query, len(rows), blocked_count, "blocked")
+        provenance = create_export_provenance_artifacts(
+            preview,
+            export_type="separation_xlsx",
+            filename=filename,
+            query=query,
+            status="blocked",
+            row_count=len(rows),
+            blocked_review_count=blocked_count,
+        )
+        log_workbook_export(
+            "separation_xlsx",
+            filename,
+            query,
+            len(rows),
+            blocked_count,
+            "blocked",
+            manifest_artifact_path=provenance["manifest_artifact_path"],
+            validation_report_id=provenance["validation_report_id"],
+            state_watermark=provenance["state_watermark"],
+        )
         raise HTTPException(
             status_code=409,
             detail={
@@ -9635,6 +9916,8 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
                 "review_blockers": preview["review_blockers"],
                 "filename": filename,
                 "source_layer": "export or view",
+                "export_manifest_path": provenance["manifest_artifact_path"],
+                "validation_report_id": provenance["validation_report_id"],
             },
         )
     payload = build_xlsx(
@@ -9644,7 +9927,26 @@ def export_separation_xlsx(query: str = "", require_ready: bool = True) -> Respo
         trace_rows_from_export_rows(filtered_rows, "source_note_item_ids"),
         [14, 22, 22, 12, 18, 10, 10, 22, 32],
     )
-    log_workbook_export("separation_xlsx", filename, query, len(rows), blocked_count, "generated")
+    provenance = create_export_provenance_artifacts(
+        preview,
+        export_type="separation_xlsx",
+        filename=filename,
+        query=query,
+        status="generated",
+        row_count=len(rows),
+        blocked_review_count=blocked_count,
+    )
+    log_workbook_export(
+        "separation_xlsx",
+        filename,
+        query,
+        len(rows),
+        blocked_count,
+        "generated",
+        manifest_artifact_path=provenance["manifest_artifact_path"],
+        validation_report_id=provenance["validation_report_id"],
+        state_watermark=provenance["state_watermark"],
+    )
     return Response(
         content=payload,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -9678,7 +9980,26 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
     filename = export_filename("animal", preview, query)
     blocked_count = preview["blocked_review_items"]
     if require_ready and blocked_count:
-        log_workbook_export("animal_sheet_xlsx", filename, query, len(rows), blocked_count, "blocked")
+        provenance = create_export_provenance_artifacts(
+            preview,
+            export_type="animal_sheet_xlsx",
+            filename=filename,
+            query=query,
+            status="blocked",
+            row_count=len(rows),
+            blocked_review_count=blocked_count,
+        )
+        log_workbook_export(
+            "animal_sheet_xlsx",
+            filename,
+            query,
+            len(rows),
+            blocked_count,
+            "blocked",
+            manifest_artifact_path=provenance["manifest_artifact_path"],
+            validation_report_id=provenance["validation_report_id"],
+            state_watermark=provenance["state_watermark"],
+        )
         raise HTTPException(
             status_code=409,
             detail={
@@ -9687,6 +10008,8 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
                 "review_blockers": preview["review_blockers"],
                 "filename": filename,
                 "source_layer": "export or view",
+                "export_manifest_path": provenance["manifest_artifact_path"],
+                "validation_report_id": provenance["validation_report_id"],
             },
         )
     payload = build_xlsx(
@@ -9696,7 +10019,26 @@ def export_animal_sheet_xlsx(query: str = "", require_ready: bool = True) -> Res
         trace_rows_from_export_rows(filtered_rows, "source"),
         [10, 22, 10, 18, 16, 16, 16, 18, 16, 32],
     )
-    log_workbook_export("animal_sheet_xlsx", filename, query, len(rows), blocked_count, "generated")
+    provenance = create_export_provenance_artifacts(
+        preview,
+        export_type="animal_sheet_xlsx",
+        filename=filename,
+        query=query,
+        status="generated",
+        row_count=len(rows),
+        blocked_review_count=blocked_count,
+    )
+    log_workbook_export(
+        "animal_sheet_xlsx",
+        filename,
+        query,
+        len(rows),
+        blocked_count,
+        "generated",
+        manifest_artifact_path=provenance["manifest_artifact_path"],
+        validation_report_id=provenance["validation_report_id"],
+        state_watermark=provenance["state_watermark"],
+    )
     return Response(
         content=payload,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

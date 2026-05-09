@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mousedb.local/schemas/export_manifest.schema.json",
+  "title": "MouseDB Export Manifest Artifact",
+  "description": "Provenance manifest for a generated or blocked MouseDB export. This artifact is an export/view record and is not canonical state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_id",
+    "artifact_type",
+    "source_layer",
+    "created_at",
+    "export_type",
+    "filename",
+    "query",
+    "status",
+    "row_count",
+    "blocked_review_count",
+    "source_refs"
+  ],
+  "properties": {
+    "manifest_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_type": {
+      "const": "export_manifest"
+    },
+    "source_layer": {
+      "const": "export or view"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_by": {
+      "type": "string",
+      "default": "local_user"
+    },
+    "export_type": {
+      "type": "string",
+      "enum": ["separation_xlsx", "animal_sheet_xlsx", "mouse_csv", "genotyping_worklist_csv"]
+    },
+    "filename": {
+      "type": "string",
+      "minLength": 1
+    },
+    "query": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["generated", "blocked"]
+    },
+    "row_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "blocked_review_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "validation_report_id": {
+      "type": "string"
+    },
+    "validation_report_path": {
+      "type": "string"
+    },
+    "state_watermark": {
+      "type": "string"
+    },
+    "source_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "photo_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "note_item_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "review_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "mouse_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "default": {}
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

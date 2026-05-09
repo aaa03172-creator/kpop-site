@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app import db
 from app import main as app_main
 
 
@@ -152,6 +153,56 @@ def test_export_validation_report_blocks_open_focus_reviews(
     )
 
 
+def test_export_validation_report_uses_uncompacted_preview_trace() -> None:
+    preview = {
+        "blocked_review_items": 0,
+        "latest_data_change_at": "2026-05-09T11:40:00Z",
+        "review_blockers": [],
+        "preview_rows": [
+            {
+                "mouse_id": "mouse_010",
+                "source_photo_id": "photo_010",
+                "source_note_item_id": "note_010",
+            },
+            {
+                "mouse_id": "mouse_011",
+                "source_photo_id": "photo_011",
+                "source_note_item_id": "note_011",
+            },
+            {
+                "mouse_id": "mouse_012",
+                "source_photo_id": "photo_012",
+                "source_note_item_id": "note_012",
+            },
+            {
+                "mouse_id": "mouse_013",
+                "source_photo_id": "photo_013",
+                "source_note_item_id": "note_013",
+            },
+        ],
+        "separation_rows": [
+            {
+                "source_photo_ids": "photo_010, +3",
+                "source_note_item_ids": "note_010, +3",
+            }
+        ],
+        "animal_sheet_rows": [],
+    }
+
+    report = app_main.build_export_validation_report(
+        preview,
+        export_type="separation_xlsx",
+        query="",
+        filename="separation.xlsx",
+        created_at="2026-05-09T12:10:00Z",
+    )
+
+    assert report["source_refs"]["photo_ids"] == ["photo_010", "photo_011", "photo_012", "photo_013"]
+    assert report["source_refs"]["note_item_ids"] == ["note_010", "note_011", "note_012", "note_013"]
+    assert report["source_refs"]["mouse_ids"] == ["mouse_010", "mouse_011", "mouse_012", "mouse_013"]
+    assert "+3" not in report["checks"][1]["evidence_refs"]
+
+
 def test_export_validation_report_endpoint_uses_current_preview(
     tmp_path: Path,
     monkeypatch,
@@ -186,3 +237,86 @@ def test_export_validation_report_endpoint_uses_current_preview(
     assert artifact["status"] == "pass"
     assert artifact["state_watermark"] == "2026-05-09T11:45:00Z"
     assert artifact["source_refs"]["photo_ids"] == ["photo_020"]
+
+
+def test_persist_export_manifest_links_validation_report_and_sources(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(app_main, "ARTIFACT_ROOT", tmp_path / "mousedb_artifacts")
+    validation_report = {
+        "report_id": "validation_report_export_separation_xlsx_ApoM",
+        "artifact_path": str(tmp_path / "mousedb_artifacts" / "validation_reports" / "report.json"),
+        "artifact": {
+            "state_watermark": "2026-05-09T11:45:00Z",
+            "source_refs": {
+                "photo_ids": ["photo_030"],
+                "note_item_ids": ["note_030"],
+                "review_ids": [],
+                "mouse_ids": ["mouse_030"],
+            },
+            "status": "pass",
+        },
+    }
+
+    result = app_main.persist_export_manifest_artifact(
+        app_main.build_export_manifest(
+            export_type="separation_xlsx",
+            filename="2026-05-09 ApoM TgTg 분리 현황표.xlsx",
+            query="ApoM TgTg",
+            status="generated",
+            row_count=1,
+            blocked_review_count=0,
+            validation_report=validation_report,
+            created_at="2026-05-09T12:20:00Z",
+        )
+    )
+
+    manifest_path = Path(result["artifact_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["artifact_type"] == "export_manifest"
+    assert manifest["source_layer"] == "export or view"
+    assert manifest["export_type"] == "separation_xlsx"
+    assert manifest["filename"] == "2026-05-09 ApoM TgTg 분리 현황표.xlsx"
+    assert manifest["status"] == "generated"
+    assert manifest["validation_report_id"] == "validation_report_export_separation_xlsx_ApoM"
+    assert manifest["validation_report_path"].endswith("report.json")
+    assert manifest["state_watermark"] == "2026-05-09T11:45:00Z"
+    assert manifest["source_refs"]["photo_ids"] == ["photo_030"]
+    assert manifest["source_refs"]["note_item_ids"] == ["note_030"]
+
+
+def test_log_workbook_export_preserves_manifest_provenance(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+
+        app_main.log_workbook_export(
+            "separation_xlsx",
+            "2026-05-09 ApoM TgTg 분리 현황표.xlsx",
+            "ApoM TgTg",
+            1,
+            0,
+            "generated",
+            manifest_artifact_path="mousedb_artifacts/export_manifests/separation.json",
+            validation_report_id="validation_report_export_separation_xlsx_ApoM",
+            state_watermark="2026-05-09T11:45:00Z",
+        )
+
+        with db.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT export_type, filename, note
+                FROM export_log
+                ORDER BY exported_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
+        assert row["export_type"] == "separation_xlsx"
+        assert "manifest=mousedb_artifacts/export_manifests/separation.json" in row["note"]
+        assert "validation_report=validation_report_export_separation_xlsx_ApoM" in row["note"]
+        assert "state_watermark=2026-05-09T11:45:00Z" in row["note"]
+    finally:
+        db.DB_PATH = old_db_path
