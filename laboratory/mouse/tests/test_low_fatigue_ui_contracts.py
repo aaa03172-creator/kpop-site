@@ -850,6 +850,157 @@ def test_colony_schedule_empty_state_does_not_fabricate_tasks(tmp_path: Path) ->
         db.DB_PATH = old_db_path
 
 
+def test_mouse_timeline_shows_accepted_events_without_review_details(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        seed_colony_state_records(tmp_path)
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE mouse_master SET litter_id = ? WHERE mouse_id = ?",
+                ("litter_colony_state", "MT401"),
+            )
+            conn.executemany(
+                """
+                INSERT INTO mouse_event
+                    (event_id, mouse_id, event_type, event_date, related_entity_type,
+                     related_entity_id, source_record_id, details, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "event_mt401_birth",
+                        "MT401",
+                        "born",
+                        "2026-05-01",
+                        "litter",
+                        "litter_colony_state",
+                        "source_mating_colony_state",
+                        json.dumps({"source_note_item_id": "note_birth"}, ensure_ascii=False),
+                        "local_user",
+                        "2026-05-09T11:16:00Z",
+                    ),
+                    (
+                        "event_mt401_weaned",
+                        "MT401",
+                        "weaned",
+                        "2026-05-31",
+                        "litter",
+                        "litter_colony_state",
+                        "source_mating_colony_state",
+                        json.dumps({"weaning_count": 5}, ensure_ascii=False),
+                        "local_user",
+                        "2026-05-31T09:00:00Z",
+                    ),
+                ],
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/mouse-timeline?mouse_id=MT401")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_layer"] == "export or view"
+        assert payload["page_question"] == "How did this mouse get here?"
+        assert payload["mouse"] == {
+            "mouse_id": "MT401",
+            "display_id": "MT401",
+            "status": "active",
+            "strain": "C57BL/6J",
+            "litter_id": "litter_colony_state",
+        }
+        assert payload["summary"] == {
+            "accepted_events": 2,
+            "source_records": 1,
+            "must_review": 1,
+            "quick_check": 0,
+        }
+        assert payload["lineage"] == {
+            "father": None,
+            "mother": None,
+            "litter": {
+                "litter_id": "litter_colony_state",
+                "litter_label": "F1",
+                "mating_id": "mating_colony_state",
+                "mating_label": "C-12 breeding pair",
+                "birth_date": "2026-05-01",
+            },
+        }
+        assert payload["events"] == [
+            {
+                "event_id": "event_mt401_birth",
+                "event_type": "born",
+                "event_date": "2026-05-01",
+                "label": "born",
+                "source_layer": "canonical structured state",
+                "related_entity": {
+                    "entity_type": "litter",
+                    "entity_id": "litter_colony_state",
+                },
+                "source_evidence": {
+                    "source_record_id": "source_mating_colony_state",
+                    "source_label": "Reviewed mating cage C-12",
+                    "source_type": "manual_review",
+                },
+            },
+            {
+                "event_id": "event_mt401_weaned",
+                "event_type": "weaned",
+                "event_date": "2026-05-31",
+                "label": "weaned",
+                "source_layer": "canonical structured state",
+                "related_entity": {
+                    "entity_type": "litter",
+                    "entity_id": "litter_colony_state",
+                },
+                "source_evidence": {
+                    "source_record_id": "source_mating_colony_state",
+                    "source_label": "Reviewed mating cage C-12",
+                    "source_type": "manual_review",
+                },
+            },
+        ]
+        assert payload["attention_links"] == [
+            {
+                "label": "Open Focus Review",
+                "target_path": "/api/ui/focus-review",
+                "must_review": 1,
+                "quick_check": 0,
+            }
+        ]
+        assert "review_items" not in payload
+        assert payload["empty_state"]["fabricated_records"] is False
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_mouse_timeline_empty_state_does_not_fabricate_events(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        client = TestClient(app)
+
+        response = client.get("/api/ui/mouse-timeline")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_layer"] == "export or view"
+        assert payload["mouse"] is None
+        assert payload["events"] == []
+        assert payload["summary"] == {
+            "accepted_events": 0,
+            "source_records": 0,
+            "must_review": 0,
+            "quick_check": 0,
+        }
+        assert payload["empty_state"] == {
+            "message": "Choose a mouse to view accepted timeline events.",
+            "fabricated_records": False,
+        }
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_colony_state_excludes_noncanonical_card_snapshots(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:

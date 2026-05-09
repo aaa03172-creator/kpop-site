@@ -149,6 +149,13 @@ async function main() {
       staticHtml.includes("calendar_mirror"),
     "Colony Schedule UI should consume the read-only read model and keep calendar sync as a non-canonical mirror."
   );
+  assert(
+    staticHtml.includes("/api/ui/mouse-timeline") &&
+      staticHtml.includes("renderMouseTimelineReadModel") &&
+      staticHtml.includes("Mouse Timeline unavailable") &&
+      staticHtml.includes("accepted_events"),
+    "Mouse Timeline UI should consume the read-only read model and render only accepted events by default."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);
@@ -323,6 +330,39 @@ async function main() {
         },
         empty_state: { message: "", fabricated_records: false }
       },
+      "/api/ui/mouse-timeline": {
+        source_layer: "export or view",
+        page_question: "How did this mouse get here?",
+        mouse: { mouse_id: "MT401", display_id: "MT401", status: "active", strain: "C57BL/6J", litter_id: "litter_static" },
+        summary: { accepted_events: 2, source_records: 1, must_review: 1, quick_check: 0 },
+        lineage: {
+          father: null,
+          mother: null,
+          litter: { litter_id: "litter_static", litter_label: "F1", mating_id: "mating_static", mating_label: "C-12 breeding pair", birth_date: "2026-05-01" }
+        },
+        events: [
+          {
+            event_id: "event_birth_static",
+            event_type: "born",
+            event_date: "2026-05-01",
+            label: "born",
+            source_layer: "canonical structured state",
+            related_entity: { entity_type: "litter", entity_id: "litter_static" },
+            source_evidence: { source_record_id: "source_static", source_label: "Reviewed mating cage C-12", source_type: "manual_review" }
+          },
+          {
+            event_id: "event_weaned_static",
+            event_type: "weaned",
+            event_date: "2026-05-31",
+            label: "weaned",
+            source_layer: "canonical structured state",
+            related_entity: { entity_type: "litter", entity_id: "litter_static" },
+            source_evidence: { source_record_id: "source_static", source_label: "Reviewed mating cage C-12", source_type: "manual_review" }
+          }
+        ],
+        attention_links: [{ label: "Open Focus Review", target_path: "/api/ui/focus-review", must_review: 1, quick_check: 0 }],
+        empty_state: { message: "", fabricated_records: false }
+      },
       "/api/mice": [],
       "/api/note-items": [],
       "/api/card-snapshots": [],
@@ -406,6 +446,14 @@ async function main() {
   assert(
     (await staticPage.locator("#colonyScheduleReadModel").filter({ hasText: "Open Focus Review" }).filter({ hasText: "Google Calendar mirror: not_configured" }).count()) === 1,
     "Static Colony Schedule should show blocked review links and non-canonical calendar mirror status."
+  );
+  assert(
+    (await staticPage.locator("#mouseTimelineReadModel").filter({ hasText: "Accepted events 2" }).filter({ hasText: "MT401" }).count()) === 1,
+    "Static app startup should render the Mouse Timeline read model from /api/ui/mouse-timeline."
+  );
+  assert(
+    (await staticPage.locator("#mouseTimelineReadModel").filter({ hasText: "born" }).filter({ hasText: "canonical structured state" }).count()) === 1,
+    "Static Mouse Timeline should show accepted canonical events without review-item detail."
   );
   const attentionCue = await staticPage.evaluate(() => {
     const item = { review_id: "review_dom_contract", attention_level: "quick_check", status: "open" };

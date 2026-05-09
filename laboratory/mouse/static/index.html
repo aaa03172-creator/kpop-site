@@ -510,7 +510,8 @@
     }
     .focus-review-read-model,
     .colony-state-read-model,
-    .colony-schedule-read-model {
+    .colony-schedule-read-model,
+    .mouse-timeline-read-model {
       display: grid;
       gap: 10px;
       margin: 0 0 12px;
@@ -523,26 +524,31 @@
     .colony-state-read-model h2,
     .colony-state-read-model h3,
     .colony-schedule-read-model h2,
-    .colony-schedule-read-model h3 {
+    .colony-schedule-read-model h3,
+    .mouse-timeline-read-model h2,
+    .mouse-timeline-read-model h3 {
       margin: 0;
       font-size: 14px;
     }
     .focus-review-read-model p,
     .colony-state-read-model p,
-    .colony-schedule-read-model p {
+    .colony-schedule-read-model p,
+    .mouse-timeline-read-model p {
       margin: 0;
       color: var(--muted);
       font-size: 12px;
     }
     .focus-review-read-model[data-state="error"],
     .colony-state-read-model[data-state="error"],
-    .colony-schedule-read-model[data-state="error"] {
+    .colony-schedule-read-model[data-state="error"],
+    .mouse-timeline-read-model[data-state="error"] {
       border-color: var(--cue-must-line);
       background: var(--cue-must-bg);
     }
     .focus-review-card,
     .colony-state-card,
-    .colony-schedule-card {
+    .colony-schedule-card,
+    .mouse-timeline-card {
       border-top: 1px solid var(--line);
       padding-top: 10px;
     }
@@ -2413,6 +2419,10 @@
         </article>
         <article class="viz-card span-4">
           <h3>Timeline</h3>
+          <div class="mouse-timeline-read-model" id="mouseTimelineReadModel" aria-live="polite">
+            <h3>Mouse Timeline</h3>
+            <p>Loading accepted mouse events...</p>
+          </div>
           <div id="detailTimelineVisual"></div>
           <table aria-label="Mouse event timeline">
             <tbody id="detailTimelineRows"></tbody>
@@ -3899,6 +3909,48 @@
       }
     }
 
+    async function loadMouseTimelineReadModel(mouseId = "") {
+      const query = mouseId ? `?mouse_id=${encodeURIComponent(mouseId)}` : "";
+      try {
+        return await api(`/api/ui/mouse-timeline${query}`);
+      } catch (error) {
+        return {
+          source_layer: "export or view",
+          load_error: true,
+          error_message: apiErrorMessage(error),
+          page_question: "How did this mouse get here?",
+          mouse: null,
+          events: [],
+          empty_state: {
+            message: "Mouse Timeline unavailable. Use the event table while the read model reloads.",
+            fabricated_records: false
+          }
+        };
+      }
+    }
+
+    async function loadMouseTimelineReadModel() {
+      try {
+        return await api("/api/ui/mouse-timeline");
+      } catch (error) {
+        return {
+          source_layer: "export or view",
+          load_error: true,
+          error_message: apiErrorMessage(error),
+          page_question: "How did this mouse get here?",
+          mouse: null,
+          summary: { accepted_events: 0, source_records: 0, must_review: 0, quick_check: 0 },
+          lineage: { father: null, mother: null, litter: null },
+          events: [],
+          attention_links: [],
+          empty_state: {
+            message: "Mouse Timeline unavailable. Use the full timeline table while the read model reloads.",
+            fabricated_records: false
+          }
+        };
+      }
+    }
+
     function renderFocusReviewReadModel(model) {
       const panel = document.getElementById("focusReviewReadModel");
       if (!panel) return;
@@ -4141,6 +4193,73 @@
       panel.querySelectorAll(".open-focus-review").forEach((button) => {
         button.addEventListener("click", () => setActiveView("review"));
       });
+    }
+
+    function renderMouseTimelineReadModel(model) {
+      const panel = document.getElementById("mouseTimelineReadModel");
+      if (!panel) return;
+      const events = Array.isArray(model?.events) ? model.events : [];
+      const summaryData = model?.summary || {};
+      const emptyState = model?.empty_state || {};
+      const fabricatedRecords = emptyState.fabricated_records === true;
+      const requiredSummaryKeys = ["accepted_events", "source_records", "must_review", "quick_check"];
+      const hasSummaryCounts = requiredSummaryKeys.every((key) => Number.isFinite(summaryData[key]));
+      const mouse = model?.mouse || {};
+      const lineage = model?.lineage || {};
+      const litter = lineage.litter || {};
+      const counts = model?.load_error || !hasSummaryCounts
+        ? ["Counts unavailable"]
+        : [
+            `Accepted events ${Number(summaryData.accepted_events || 0)}`,
+            `Source records ${Number(summaryData.source_records || 0)}`,
+            `Must review ${Number(summaryData.must_review || 0)}`,
+            `Quick check ${Number(summaryData.quick_check || 0)}`
+          ];
+      const summary = `
+        <div class="section-kicker">
+          <div>
+            <h3>Mouse Timeline</h3>
+            <p>${escapeHtml(model?.page_question || "How did this mouse get here?")}</p>
+          </div>
+          <span class="chip">${escapeHtml(model?.source_layer || "export or view")}</span>
+        </div>
+        <div class="review-queue-summary">
+          ${counts.map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+          <span class="chip">Mouse ${escapeHtml(mouse.display_id || mouse.mouse_id || "not selected")}</span>
+          ${litter.litter_id ? `<span class="chip">Litter ${escapeHtml(litter.litter_label || litter.litter_id)}</span>` : ""}
+          <span class="chip">Fabricated records: ${fabricatedRecords ? "yes" : "no"}</span>
+        </div>
+      `;
+      if (model?.load_error) {
+        panel.dataset.state = "error";
+        panel.dataset.fabricatedRecords = "false";
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Mouse Timeline unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        return;
+      }
+      if (!events.length) {
+        panel.dataset.state = "empty";
+        panel.dataset.fabricatedRecords = String(fabricatedRecords);
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Choose a mouse to view accepted timeline events.")}</p>`;
+        return;
+      }
+      panel.dataset.state = "loaded";
+      panel.dataset.fabricatedRecords = String(fabricatedRecords);
+      panel.innerHTML = `${summary}${events.slice(0, 5).map((event) => {
+        const related = event.related_entity || {};
+        const evidence = event.source_evidence || {};
+        return `
+          <div class="mouse-timeline-card">
+            <h3>${escapeHtml(event.label || event.event_type || "Accepted event")}</h3>
+            <p>${escapeHtml(event.event_date || "--")} / ${escapeHtml(event.source_layer || "canonical structured state")}</p>
+            <div class="review-meta">
+              <span class="chip">Event ${escapeHtml(event.event_id || "--")}</span>
+              <span class="chip">Related ${escapeHtml(related.entity_type || "--")} ${escapeHtml(related.entity_id || "")}</span>
+              <span class="chip">Evidence ${escapeHtml(evidence.source_record_id || "--")}</span>
+              <span class="chip">${escapeHtml(evidence.source_label || evidence.source_type || "source pending")}</span>
+            </div>
+          </div>
+        `;
+      }).join("")}`;
     }
 
     function reviewStatusLabel(value) {
@@ -5835,7 +5954,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, colonySchedule, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, colonySchedule, mouseTimeline, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -5853,6 +5972,7 @@
         loadFocusReviewReadModel(),
         loadColonyStateReadModel(),
         loadColonyScheduleReadModel(),
+        loadMouseTimelineReadModel(),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
         api("/api/note-items"),
         api("/api/card-snapshots"),
@@ -5874,6 +5994,7 @@
       renderFocusReviewReadModel(focusReview);
       renderColonyStateReadModel(colonyState);
       renderColonyScheduleReadModel(colonySchedule);
+      renderMouseTimelineReadModel(mouseTimeline);
       const aiStatus = health.ai_draft || {};
       currentAiStatus = aiStatus;
       document.getElementById("aiDraftMessage").textContent = aiStatus.available
