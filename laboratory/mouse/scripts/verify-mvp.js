@@ -6,6 +6,7 @@ const { chromium } = require("playwright");
 
 const root = path.resolve(__dirname, "..");
 const pagePath = path.join(root, "index.html");
+const staticPagePath = path.join(root, "static", "index.html");
 const fixturePath = path.join(root, "fixtures", "sample_parse_results.json");
 const distributionFixturePath = path.join(root, "fixtures", "sample_distribution_import.json");
 const distributionParserPath = path.join(root, "scripts", "parse_distribution_workbook.py");
@@ -93,6 +94,7 @@ wb.save(workbook_path)
 
 async function main() {
   assert(fs.existsSync(pagePath), "index.html is missing.");
+  assert(fs.existsSync(staticPagePath), "static/index.html is missing.");
   assert(fs.existsSync(fixturePath), "fixtures/sample_parse_results.json is missing.");
   assert(fs.existsSync(distributionFixturePath), "fixtures/sample_distribution_import.json is missing.");
   assert(fs.existsSync(distributionParserPath), "Distribution workbook parser is missing.");
@@ -137,6 +139,51 @@ async function main() {
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
   await page.waitForSelector("#inboxRows tr");
+
+  const staticPage = await context.newPage();
+  await staticPage.goto(fileUrl(staticPagePath));
+  await staticPage.waitForFunction(() => typeof legacyWorkbookRow === "function");
+  const legacyWorkbookHtml = await staticPage.evaluate(() => legacyWorkbookRow({
+    source_file_name: "legacy <source>.xlsx",
+    workbook_kind: "animal",
+    sheet_name: "Sheet <1>",
+    source_record_id: "source <img src=x onerror=alert(1)>",
+    open_review_count: 1,
+    review_count: 2,
+    rows: [
+      {
+        raw_row: {
+          cage_no_raw: "Cage <A>",
+          strain_raw: "ApoM <bad>",
+          display_id_raw: "M\"1",
+          total_raw: "2",
+          dob_raw: "2026-01-01"
+        }
+      }
+    ],
+    strain_registry_candidates: [
+      {
+        strain_raw: "ApoM <script>",
+        genotype_raw: "tg/+ \"quoted\"",
+        normalized_candidate: {
+          gene_symbol: "ApoM",
+          allele_name: "<allele>"
+        }
+      }
+    ]
+  }));
+  await staticPage.setContent(`<table><tbody>${legacyWorkbookHtml}</tbody></table>`);
+  const legacyCells = await staticPage.locator("tbody tr td").allTextContents();
+  assert(legacyCells.length === 7, `Legacy workbook rows should render 7 cells, saw ${legacyCells.length}.`);
+  assert(
+    legacyCells[4].includes("ApoM <script> / tg/+ \"quoted\" -> ApoM / <allele>"),
+    "Legacy strain registry candidate text should remain visible after escaping."
+  );
+  assert(
+    (await staticPage.locator("tbody script, tbody img").count()) === 0,
+    "Legacy strain registry candidate text must not be injected as executable markup."
+  );
+  await staticPage.close();
 
   assert((await page.locator("title").textContent()) === "Mouse Colony LIMS - Photo Review Workbench", "Browser title should make Photo Review Workbench the first workflow.");
   assert((await page.locator("#inboxView.active h1").textContent()) === "Photo Review Workbench", "Initial active view should be the Photo Review Workbench.");
