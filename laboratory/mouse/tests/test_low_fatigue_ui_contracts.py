@@ -380,6 +380,19 @@ def seed_colony_state_records(tmp_path: Path) -> None:
                     "2026-05-09T11:08:00Z",
                     "2026-05-09T11:08:00Z",
                 ),
+                (
+                    "MT999",
+                    "MT999",
+                    "C57BL/6J",
+                    "female",
+                    "2026-03-01",
+                    "2026-03-01",
+                    snapshot_id,
+                    "dead",
+                    photo_id,
+                    "2026-05-09T11:08:00Z",
+                    "2026-05-09T11:08:00Z",
+                ),
             ],
         )
         conn.execute(
@@ -401,6 +414,102 @@ def seed_colony_state_records(tmp_path: Path) -> None:
                 "2026-05-09T11:09:00Z",
             ),
         )
+        conn.execute(
+            """
+            INSERT INTO source_record
+                (source_record_id, source_type, source_uri, source_label,
+                 raw_payload, checksum, imported_at, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "source_mating_colony_state",
+                "manual_review",
+                "review://mating/cage-12",
+                "Reviewed mating cage C-12",
+                json.dumps({"mating_label": "C-12 breeding pair"}, ensure_ascii=False),
+                "checksum_mating_colony_state",
+                "2026-05-09T11:10:00Z",
+                "Source-backed mating state fixture.",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO mating_registry
+                (mating_id, mating_label, strain_goal, expected_genotype,
+                 start_date, status, purpose, note, source_record_id,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "mating_colony_state",
+                "C-12 breeding pair",
+                "C57BL/6J",
+                "",
+                "2026-04-15",
+                "active",
+                "breeding",
+                "Accepted reviewed mating.",
+                "source_mating_colony_state",
+                "2026-05-09T11:11:00Z",
+                "2026-05-09T11:11:00Z",
+            ),
+        )
+        conn.executemany(
+            """
+            INSERT INTO mating_mouse
+                (mating_mouse_id, mating_id, mouse_id, role, joined_date,
+                 removed_date, note, source_record_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "mating_mouse_colony_state_female",
+                    "mating_colony_state",
+                    "MT401",
+                    "female",
+                    "2026-04-15",
+                    None,
+                    "Active dam.",
+                    "source_mating_colony_state",
+                    "2026-05-09T11:11:00Z",
+                ),
+                (
+                    "mating_mouse_colony_state_male",
+                    "mating_colony_state",
+                    "MT402",
+                    "male",
+                    "2026-04-15",
+                    None,
+                    "Active sire.",
+                    "source_mating_colony_state",
+                    "2026-05-09T11:11:00Z",
+                ),
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO litter_registry
+                (litter_id, litter_label, mating_id, birth_date, number_born,
+                 number_alive, number_weaned, weaning_date, status, note,
+                 source_record_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "litter_colony_state",
+                "F1",
+                "mating_colony_state",
+                "2026-05-01",
+                6,
+                5,
+                None,
+                "",
+                "born",
+                "Accepted active litter.",
+                "source_mating_colony_state",
+                "2026-05-09T11:12:00Z",
+                "2026-05-09T11:12:00Z",
+            ),
+        )
 
 
 def test_colony_state_uses_only_db_backed_current_records(tmp_path: Path) -> None:
@@ -418,8 +527,8 @@ def test_colony_state_uses_only_db_backed_current_records(tmp_path: Path) -> Non
         assert payload["summary"] == {
             "active_mice": 2,
             "active_card_snapshots": 1,
-            "active_matings": 0,
-            "active_litters": 0,
+            "active_matings": 1,
+            "active_litters": 1,
             "must_review": 1,
             "quick_check": 0,
         }
@@ -437,6 +546,46 @@ def test_colony_state_uses_only_db_backed_current_records(tmp_path: Path) -> Non
         }
         assert payload["strain_summary"] == [{"strain": "C57BL/6J", "active_mice": 2}]
         assert payload["status_summary"] == [{"status": "active", "mouse_count": 2}]
+        assert payload["active_matings"] == [
+            {
+                "mating_id": "mating_colony_state",
+                "mating_label": "C-12 breeding pair",
+                "strain_goal": "C57BL/6J",
+                "expected_genotype": "",
+                "start_date": "2026-04-15",
+                "status": "active",
+                "purpose": "breeding",
+                "source_record_id": "source_mating_colony_state",
+                "parent_count": 2,
+                "active_litter_count": 1,
+                "source_layer": "canonical structured state",
+                "collapsed_sections": {
+                    "parents": 2,
+                    "active_litters": 1,
+                    "source_evidence": 1,
+                },
+            }
+        ]
+        assert payload["active_litters"] == [
+            {
+                "litter_id": "litter_colony_state",
+                "litter_label": "F1",
+                "mating_id": "mating_colony_state",
+                "mating_label": "C-12 breeding pair",
+                "birth_date": "2026-05-01",
+                "number_born": 6,
+                "number_alive": 5,
+                "number_weaned": None,
+                "weaning_date": "",
+                "status": "born",
+                "source_record_id": "source_mating_colony_state",
+                "source_layer": "canonical structured state",
+                "collapsed_sections": {
+                    "pups_alive": 5,
+                    "source_evidence": 1,
+                },
+            }
+        ]
         assert payload["attention_links"] == [
             {
                 "label": "Focus Review",
@@ -472,6 +621,8 @@ def test_colony_state_empty_state_does_not_fabricate_records(tmp_path: Path) -> 
             "quick_check": 0,
         }
         assert payload["active_card_snapshots"] == []
+        assert payload["active_matings"] == []
+        assert payload["active_litters"] == []
         assert payload["strain_summary"] == []
         assert payload["status_summary"] == []
         assert payload["attention_links"] == []

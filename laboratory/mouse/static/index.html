@@ -508,7 +508,8 @@
       color: var(--muted);
       font-size: 12px;
     }
-    .focus-review-read-model {
+    .focus-review-read-model,
+    .colony-state-read-model {
       display: grid;
       gap: 10px;
       margin: 0 0 12px;
@@ -517,20 +518,25 @@
       background: #f8fbfa;
       padding: 12px;
     }
-    .focus-review-read-model h3 {
+    .focus-review-read-model h3,
+    .colony-state-read-model h2,
+    .colony-state-read-model h3 {
       margin: 0;
       font-size: 14px;
     }
-    .focus-review-read-model p {
+    .focus-review-read-model p,
+    .colony-state-read-model p {
       margin: 0;
       color: var(--muted);
       font-size: 12px;
     }
-    .focus-review-read-model[data-state="error"] {
+    .focus-review-read-model[data-state="error"],
+    .colony-state-read-model[data-state="error"] {
       border-color: var(--cue-must-line);
       background: var(--cue-must-bg);
     }
-    .focus-review-card {
+    .focus-review-card,
+    .colony-state-card {
       border-top: 1px solid var(--line);
       padding-top: 10px;
     }
@@ -2926,6 +2932,10 @@
     </section>
 
     <section class="full" data-view="records" id="records-colony">
+      <div class="colony-state-read-model" id="colonyStateReadModel" aria-live="polite">
+        <h2>Colony State</h2>
+        <p>Loading accepted colony state...</p>
+      </div>
       <h2>Candidate Records</h2>
       <p>Current mouse-level candidate state from accepted source-backed note lines.</p>
       <table>
@@ -3838,6 +3848,24 @@
       }
     }
 
+    async function loadColonyStateReadModel() {
+      try {
+        return await api("/api/ui/colony-state");
+      } catch (error) {
+        return {
+          source_layer: "export or view",
+          load_error: true,
+          error_message: apiErrorMessage(error),
+          page_question: "What is active now?",
+          active_card_snapshots: [],
+          empty_state: {
+            message: "Colony State unavailable. Use Candidate Records while the read model reloads.",
+            fabricated_records: false
+          }
+        };
+      }
+    }
+
     function renderFocusReviewReadModel(model) {
       const panel = document.getElementById("focusReviewReadModel");
       if (!panel) return;
@@ -3903,6 +3931,110 @@
           </div>
         `;
       }).join("")}`;
+    }
+
+    function renderColonyStateReadModel(model) {
+      const panel = document.getElementById("colonyStateReadModel");
+      if (!panel) return;
+      const cards = Array.isArray(model?.active_card_snapshots) ? model.active_card_snapshots : [];
+      const matings = Array.isArray(model?.active_matings) ? model.active_matings : [];
+      const litters = Array.isArray(model?.active_litters) ? model.active_litters : [];
+      const summaryData = model?.summary || {};
+      const emptyState = model?.empty_state || {};
+      const fabricatedRecords = emptyState.fabricated_records === true;
+      const requiredSummaryKeys = ["active_mice", "active_card_snapshots", "active_matings", "active_litters", "must_review", "quick_check"];
+      const hasSummaryCounts = requiredSummaryKeys.every((key) => Number.isFinite(summaryData[key]));
+      const counts = model?.load_error || !hasSummaryCounts
+        ? ["Counts unavailable"]
+        : [
+            `Active mice ${Number(summaryData.active_mice || 0)}`,
+            `Active cards ${Number(summaryData.active_card_snapshots || 0)}`,
+            `Active matings ${Number(summaryData.active_matings || 0)}`,
+            `Active litters ${Number(summaryData.active_litters || 0)}`,
+            `Must review ${Number(summaryData.must_review || 0)}`,
+            `Quick check ${Number(summaryData.quick_check || 0)}`
+          ];
+      const summary = `
+        <div class="section-kicker">
+          <div>
+            <h2>Colony State</h2>
+            <p>${escapeHtml(model?.page_question || "What is active now?")}</p>
+          </div>
+          <span class="chip">${escapeHtml(model?.source_layer || "export or view")}</span>
+        </div>
+        <div class="review-queue-summary">
+          ${counts.map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+          <span class="chip">Fabricated records: ${fabricatedRecords ? "yes" : "no"}</span>
+        </div>
+      `;
+      if (model?.load_error) {
+        panel.dataset.state = "error";
+        panel.dataset.fabricatedRecords = "false";
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Colony State unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        return;
+      }
+      if (!cards.length && !matings.length && !litters.length) {
+        panel.dataset.state = "empty";
+        panel.dataset.fabricatedRecords = String(fabricatedRecords);
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "No accepted active colony records are available yet.")}</p>`;
+        return;
+      }
+      const attentionLinks = Array.isArray(model?.attention_links) ? model.attention_links : [];
+      panel.dataset.state = "loaded";
+      panel.dataset.fabricatedRecords = String(fabricatedRecords);
+      panel.innerHTML = `${summary}${attentionLinks.slice(0, 2).map((link) => `
+        <div class="review-meta">
+          <button class="open-focus-review" type="button" data-view-target="review">Open ${escapeHtml(link.label || "Focus Review")}</button>
+          <span class="chip">Must review ${escapeHtml(String(link.must_review || 0))}</span>
+          <span class="chip">Quick check ${escapeHtml(String(link.quick_check || 0))}</span>
+        </div>
+      `).join("")}${cards.slice(0, 4).map((card) => {
+        const sourcePhoto = card.source_photo || {};
+        const collapsed = card.collapsed_sections || {};
+        const cardLabel = [card.card_id_raw, card.card_type].filter(Boolean).join(" / ") || card.card_snapshot_id || "Accepted card";
+        return `
+          <div class="colony-state-card">
+            <h3>${escapeHtml(sourcePhoto.filename || cardLabel)}</h3>
+            <p>${escapeHtml(`${card.mouse_count || 0} active mice / ${card.matched_strain_text || card.raw_strain_text || "strain pending"}`)}</p>
+            <div class="review-meta">
+              <span class="chip">${escapeHtml(cardLabel)}</span>
+              <span class="chip">Mouse rows ${escapeHtml(String(collapsed.mice || card.mouse_count || 0))}</span>
+              <span class="chip">Note lines ${escapeHtml(String(collapsed.note_lines || 0))}</span>
+              <span class="chip">Source evidence ${escapeHtml(String(collapsed.source_evidence || 0))}</span>
+              ${collapsed.review_blockers ? `<span class="chip warn">Review blockers ${escapeHtml(String(collapsed.review_blockers))}</span>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("")}${matings.slice(0, 4).map((mating) => {
+        const collapsed = mating.collapsed_sections || {};
+        return `
+          <div class="colony-state-card">
+            <h3>${escapeHtml(mating.mating_label || mating.mating_id || "Active mating")}</h3>
+            <p>${escapeHtml(`${mating.strain_goal || "strain pending"} / started ${mating.start_date || "date pending"}`)}</p>
+            <div class="review-meta">
+              <span class="chip">Parents ${escapeHtml(String(collapsed.parents ?? mating.parent_count ?? 0))}</span>
+              <span class="chip">Active litters ${escapeHtml(String(collapsed.active_litters ?? mating.active_litter_count ?? 0))}</span>
+              <span class="chip">Source evidence ${escapeHtml(String(collapsed.source_evidence || 0))}</span>
+            </div>
+          </div>
+        `;
+      }).join("")}${litters.slice(0, 4).map((litter) => {
+        const collapsed = litter.collapsed_sections || {};
+        return `
+          <div class="colony-state-card">
+            <h3>${escapeHtml(litter.litter_label || litter.litter_id || "Active litter")}</h3>
+            <p>${escapeHtml(`${litter.mating_label || "mating pending"} / born ${litter.birth_date || "date pending"}`)}</p>
+            <div class="review-meta">
+              <span class="chip">Alive pups ${escapeHtml(String(collapsed.pups_alive ?? litter.number_alive ?? litter.number_born ?? 0))}</span>
+              <span class="chip">Status ${escapeHtml(litter.status || "unknown")}</span>
+              <span class="chip">Source evidence ${escapeHtml(String(collapsed.source_evidence || 0))}</span>
+            </div>
+          </div>
+        `;
+      }).join("")}`;
+      panel.querySelectorAll(".open-focus-review").forEach((button) => {
+        button.addEventListener("click", () => setActiveView("review"));
+      });
     }
 
     function reviewStatusLabel(value) {
@@ -5597,7 +5729,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -5613,6 +5745,7 @@
         api("/api/photos"),
         api("/api/review-items"),
         loadFocusReviewReadModel(),
+        loadColonyStateReadModel(),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
         api("/api/note-items"),
         api("/api/card-snapshots"),
@@ -5632,6 +5765,7 @@
 
       renderShellStatus({ health, photoWorkbench, photos, reviews, mice, evidenceComparison, preview });
       renderFocusReviewReadModel(focusReview);
+      renderColonyStateReadModel(colonyState);
       const aiStatus = health.ai_draft || {};
       currentAiStatus = aiStatus;
       document.getElementById("aiDraftMessage").textContent = aiStatus.available
