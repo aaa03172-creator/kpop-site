@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import shutil
+import uuid
 from pathlib import Path
 
 import pytest
@@ -39,8 +40,8 @@ def test_detect_card_bbox_prefers_colored_card_component() -> None:
 
 def test_roi_preview_is_cache_artifact_and_preserves_raw_photo(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
-    photo_id = "roi_tdd_photo"
-    photo_dir = ROOT / "data" / "photos" / "test_roi_preview"
+    photo_id = f"roi_tdd_photo_{uuid.uuid4().hex}"
+    photo_dir = ROOT / "data" / "photos" / "test_roi_preview" / photo_id
     roi_dir = ROOT / "data" / "roi" / photo_id
     raw_bytes = blue_card_bytes()
     db.DB_PATH = tmp_path / "mouse_lims.sqlite"

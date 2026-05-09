@@ -327,7 +327,26 @@ def test_log_workbook_export_preserves_manifest_provenance(tmp_path: Path) -> No
 
 def test_export_log_api_exposes_structured_provenance(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
+    old_artifact_root = app_main.ARTIFACT_ROOT
     db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    artifact_root = tmp_path / "mousedb_artifacts"
+    manifest_path = artifact_root / "export_manifests" / "animal_sheet.json"
+    report_path = artifact_root / "validation_reports" / "animal_sheet_report.json"
+    manifest_path.parent.mkdir(parents=True)
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(
+        json.dumps({"artifact_type": "validation_report", "report_id": "validation_report_export_animal_sheet_xlsx_ApoM"}),
+        encoding="utf-8",
+    )
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "artifact_type": "export_manifest",
+                "validation_report_path": str(report_path),
+            }
+        ),
+        encoding="utf-8",
+    )
     try:
         db.init_db()
 
@@ -338,22 +357,26 @@ def test_export_log_api_exposes_structured_provenance(tmp_path: Path) -> None:
             2,
             0,
             "generated",
-            manifest_artifact_path="mousedb_artifacts/export_manifests/animal_sheet.json",
+            manifest_artifact_path=str(manifest_path),
             validation_report_id="validation_report_export_animal_sheet_xlsx_ApoM",
             state_watermark="2026-05-09T12:05:00Z",
         )
+        app_main.ARTIFACT_ROOT = artifact_root
 
         [row] = app_main.list_export_log()
 
-        assert row["export_manifest_path"] == "mousedb_artifacts/export_manifests/animal_sheet.json"
+        assert row["export_manifest_path"] == str(manifest_path)
         assert row["validation_report_id"] == "validation_report_export_animal_sheet_xlsx_ApoM"
+        assert row["validation_report_path"] == str(report_path)
         assert row["state_watermark"] == "2026-05-09T12:05:00Z"
         assert row["provenance"] == {
-            "export_manifest_path": "mousedb_artifacts/export_manifests/animal_sheet.json",
+            "export_manifest_path": str(manifest_path),
             "validation_report_id": "validation_report_export_animal_sheet_xlsx_ApoM",
+            "validation_report_path": str(report_path),
             "state_watermark": "2026-05-09T12:05:00Z",
         }
     finally:
+        app_main.ARTIFACT_ROOT = old_artifact_root
         db.DB_PATH = old_db_path
 
 

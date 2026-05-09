@@ -4020,11 +4020,33 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
             mouse_ids.append(mouse_id)
 
             event_id = f"event_apply_{candidate_id}_{note['note_item_id']}".replace(" ", "_")
+            photo_evidence = conn.execute(
+                """
+                SELECT photo_evidence_id, source_photo_id
+                FROM photo_evidence_item
+                WHERE note_item_id = ?
+                  AND status IN ('accepted', 'linked')
+                ORDER BY confidence DESC, created_at DESC, photo_evidence_id
+                LIMIT 1
+                """,
+                (note["note_item_id"],),
+            ).fetchone()
             existing_event = conn.execute(
                 "SELECT event_id FROM mouse_event WHERE event_id = ?",
                 (event_id,),
             ).fetchone()
             if existing_event is None:
+                event_details = {
+                    "review_id": candidate["review_id"],
+                    "parse_id": candidate["parse_id"],
+                    "legacy_row_id": candidate["legacy_row_id"],
+                    "note_item_id": note["note_item_id"],
+                    "raw_line_text": note["raw_line_text"],
+                    "boundary": "canonical structured state",
+                }
+                if photo_evidence is not None:
+                    event_details["photo_evidence_id"] = photo_evidence["photo_evidence_id"]
+                    event_details["source_photo_id"] = photo_evidence["source_photo_id"]
                 conn.execute(
                     """
                     INSERT INTO mouse_event
@@ -4039,21 +4061,28 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
                         applied_at[:10],
                         "canonical_candidate",
                         candidate_id,
-                        json.dumps(
-                            {
-                                "review_id": candidate["review_id"],
-                                "parse_id": candidate["parse_id"],
-                                "legacy_row_id": candidate["legacy_row_id"],
-                                "note_item_id": note["note_item_id"],
-                                "raw_line_text": note["raw_line_text"],
-                                "boundary": "canonical structured state",
-                            },
-                            ensure_ascii=False,
-                        ),
+                        json.dumps(event_details, ensure_ascii=False),
                         applied_at,
                     ),
                 )
                 created_events += 1
+            if photo_evidence is not None:
+                conn.execute(
+                    """
+                    UPDATE photo_evidence_item
+                    SET linked_mouse_id = ?,
+                        linked_event_id = ?,
+                        status = 'linked',
+                        updated_at = ?
+                    WHERE photo_evidence_id = ?
+                    """,
+                    (
+                        mouse_id,
+                        event_id,
+                        applied_at,
+                        photo_evidence["photo_evidence_id"],
+                    ),
+                )
 
         before_status = candidate["status"]
         conn.execute(
@@ -9930,6 +9959,7 @@ def parse_export_log_provenance(note: str) -> dict[str, str]:
     provenance = {
         "export_manifest_path": "",
         "validation_report_id": "",
+        "validation_report_path": "",
         "state_watermark": "",
     }
     note_text = str(note or "")
@@ -9943,6 +9973,26 @@ def parse_export_log_provenance(note: str) -> dict[str, str]:
         if match:
             provenance[key] = match.group(1).strip()
     return provenance
+
+
+def validation_report_path_from_manifest(manifest_path: str) -> str:
+    if not manifest_path:
+        return ""
+    try:
+        artifact_path = resolve_artifact_preview_path(manifest_path)
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except (HTTPException, OSError, json.JSONDecodeError):
+        return ""
+    if artifact.get("artifact_type") != "export_manifest":
+        return ""
+    validation_report_path = str(artifact.get("validation_report_path") or "")
+    if not validation_report_path:
+        return ""
+    try:
+        resolve_artifact_preview_path(validation_report_path)
+    except HTTPException:
+        return ""
+    return validation_report_path
 
 
 def resolve_artifact_preview_path(path: str) -> Path:
@@ -10002,6 +10052,9 @@ def list_export_log() -> list[dict[str, Any]]:
     for row in rows:
         item = dict(row)
         provenance = parse_export_log_provenance(item.get("note", ""))
+        provenance["validation_report_path"] = validation_report_path_from_manifest(
+            provenance.get("export_manifest_path", "")
+        )
         item.update(provenance)
         item["provenance"] = provenance
         export_rows.append(item)
