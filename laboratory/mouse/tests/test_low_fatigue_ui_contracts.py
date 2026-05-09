@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -518,7 +519,7 @@ def test_colony_state_uses_only_db_backed_current_records(tmp_path: Path) -> Non
         seed_colony_state_records(tmp_path)
         client = TestClient(app)
 
-        response = client.get("/api/ui/colony-state")
+        response = client.get("/api/ui/colony-state?as_of=2026-05-09")
 
         assert response.status_code == 200
         payload = response.json()
@@ -584,6 +585,15 @@ def test_colony_state_uses_only_db_backed_current_records(tmp_path: Path) -> Non
                     "pups_alive": 5,
                     "source_evidence": 1,
                 },
+                "action_hint": {
+                    "mode": "upcoming",
+                    "label": "Separation review upcoming",
+                    "priority": "low",
+                    "age_days": 8,
+                    "threshold_days": 30,
+                    "automation": "manual_review_only",
+                    "suggested_actions": ["watch_litter", "review_at_threshold"],
+                },
             }
         ]
         assert payload["attention_links"] == [
@@ -607,7 +617,7 @@ def test_colony_state_empty_state_does_not_fabricate_records(tmp_path: Path) -> 
         db.init_db()
         client = TestClient(app)
 
-        response = client.get("/api/ui/colony-state")
+        response = client.get(f"/api/ui/colony-state?as_of={date.today().isoformat()}")
 
         assert response.status_code == 200
         payload = response.json()
@@ -628,6 +638,212 @@ def test_colony_state_empty_state_does_not_fabricate_records(tmp_path: Path) -> 
         assert payload["attention_links"] == []
         assert payload["empty_state"] == {
             "message": "No accepted active colony records are available yet.",
+            "fabricated_records": False,
+        }
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_colony_state_litter_action_hints_are_read_only_and_threshold_backed(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        seed_colony_state_records(tmp_path)
+        observed_date = date(2026, 5, 9)
+        due_birth_date = (observed_date - timedelta(days=35)).isoformat()
+        overdue_birth_date = (observed_date - timedelta(days=50)).isoformat()
+        high_overdue_birth_date = (observed_date - timedelta(days=65)).isoformat()
+        with db.connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO litter_registry
+                    (litter_id, litter_label, mating_id, birth_date, number_born,
+                     number_alive, number_weaned, weaning_date, status, note,
+                     source_record_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "litter_due_review",
+                        "F2",
+                        "mating_colony_state",
+                        due_birth_date,
+                        7,
+                        7,
+                        None,
+                        "",
+                        "born",
+                        "Due for separation review.",
+                        "source_mating_colony_state",
+                        "2026-05-09T11:13:00Z",
+                        "2026-05-09T11:13:00Z",
+                    ),
+                    (
+                        "litter_overdue_review",
+                        "F3",
+                        "mating_colony_state",
+                        overdue_birth_date,
+                        4,
+                        4,
+                        None,
+                        "",
+                        "born",
+                        "Overdue for separation review.",
+                        "source_mating_colony_state",
+                        "2026-05-09T11:14:00Z",
+                        "2026-05-09T11:14:00Z",
+                    ),
+                    (
+                        "litter_high_overdue_review",
+                        "F4",
+                        "mating_colony_state",
+                        high_overdue_birth_date,
+                        3,
+                        3,
+                        None,
+                        "",
+                        "born",
+                        "High-overdue separation review.",
+                        "source_mating_colony_state",
+                        "2026-05-09T11:15:00Z",
+                        "2026-05-09T11:15:00Z",
+                    ),
+                ],
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/colony-state?as_of=2026-05-09")
+
+        assert response.status_code == 200
+        payload = response.json()
+        hints = {item["litter_id"]: item["action_hint"] for item in payload["active_litters"]}
+        assert hints["litter_colony_state"] == {
+            "mode": "upcoming",
+            "label": "Separation review upcoming",
+            "priority": "low",
+            "age_days": (observed_date - date.fromisoformat("2026-05-01")).days,
+            "threshold_days": 30,
+            "automation": "manual_review_only",
+            "suggested_actions": ["watch_litter", "review_at_threshold"],
+        }
+        assert hints["litter_due_review"]["mode"] == "review_due"
+        assert hints["litter_due_review"]["priority"] == "medium"
+        assert hints["litter_due_review"]["threshold_days"] == 30
+        assert hints["litter_overdue_review"]["mode"] == "overdue_review"
+        assert hints["litter_overdue_review"]["priority"] == "medium"
+        assert hints["litter_high_overdue_review"]["mode"] == "urgent_review"
+        assert hints["litter_high_overdue_review"]["priority"] == "high"
+        assert all(hint["automation"] == "manual_review_only" for hint in hints.values())
+        with db.connection() as conn:
+            statuses = {
+                row["litter_id"]: row["status"]
+                for row in conn.execute(
+                    "SELECT litter_id, status FROM litter_registry WHERE litter_id LIKE 'litter_%review' OR litter_id = 'litter_colony_state'"
+                ).fetchall()
+            }
+            event_count = conn.execute("SELECT COUNT(*) FROM mouse_event").fetchone()[0]
+        assert statuses["litter_due_review"] == "born"
+        assert statuses["litter_overdue_review"] == "born"
+        assert statuses["litter_high_overdue_review"] == "born"
+        assert event_count == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_colony_schedule_derives_tasks_from_accepted_litter_and_rules(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        seed_colony_state_records(tmp_path)
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE litter_registry SET status = ? WHERE litter_id = ?",
+                ("pre_weaning", "litter_colony_state"),
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/colony-schedule?as_of=2026-05-09")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_layer"] == "export or view"
+        assert payload["page_question"] == "What needs doing next?"
+        assert payload["rule_set"] == {
+            "rule_set_id": "breeding_rule_default_20260509",
+            "display_name": "Default breeding operation review rules",
+            "source_layer": "parsed or intermediate result",
+        }
+        assert payload["summary"] == {
+            "due_now": 0,
+            "due_soon": 1,
+            "later": 0,
+            "blocked_by_review": 1,
+            "completed": 0,
+        }
+        [group] = payload["task_groups"]
+        assert group["group"] == "due_soon"
+        [task] = group["tasks"]
+        assert task == {
+            "task_id": "schedule_litter_separation_litter_colony_state",
+            "task_type": "litter_separation",
+            "label": "Separate/wean litter F1",
+            "status": "blocked_by_review",
+            "recorded_date": "2026-05-01",
+            "due_date": "2026-05-31",
+            "days_until_due": 22,
+            "source_layer": "export or view",
+            "source_entity": {
+                "entity_type": "litter",
+                "entity_id": "litter_colony_state",
+                "label": "F1",
+            },
+            "source_evidence": {
+                "source_record_id": "source_mating_colony_state",
+                "mating_id": "mating_colony_state",
+                "mating_label": "C-12 breeding pair",
+            },
+            "due_date_rule": {
+                "rule_set_id": "breeding_rule_default_20260509",
+                "rule_key": "litter_separation_due_after_days",
+                "value_days": 30,
+            },
+            "attention_link": {
+                "label": "Open Focus Review",
+                "target_path": "/api/ui/focus-review",
+                "must_review": 1,
+                "quick_check": 0,
+            },
+        }
+        assert payload["calendar_mirror"] == {
+            "status": "not_configured",
+            "canonical_source": "MouseDB internal schedule",
+            "note": "External calendar sync can mirror accepted schedule tasks later; it is not canonical.",
+        }
+        assert payload["empty_state"]["fabricated_records"] is False
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_colony_schedule_empty_state_does_not_fabricate_tasks(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        client = TestClient(app)
+
+        response = client.get("/api/ui/colony-schedule?as_of=2026-05-09")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_layer"] == "export or view"
+        assert payload["summary"] == {
+            "due_now": 0,
+            "due_soon": 0,
+            "later": 0,
+            "blocked_by_review": 0,
+            "completed": 0,
+        }
+        assert payload["task_groups"] == []
+        assert payload["empty_state"] == {
+            "message": "No accepted schedule tasks are available yet.",
             "fabricated_records": False,
         }
     finally:

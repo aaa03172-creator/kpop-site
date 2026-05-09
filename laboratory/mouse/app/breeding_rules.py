@@ -13,6 +13,7 @@ DEFAULT_BREEDING_RULE_SET: dict[str, Any] = {
         "litter_separation_due_after_days": 30,
         "litter_separation_overdue_after_days": 45,
         "litter_separation_high_overdue_after_days": 60,
+        "schedule_due_soon_window_days": 30,
         "separation_batch_max_dob_span_days": 14,
     },
     "strain_specific_assumptions": [

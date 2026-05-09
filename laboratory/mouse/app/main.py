@@ -13,7 +13,7 @@ import os
 import math
 import sqlite3
 import threading
-from datetime import date
+from datetime import date, timedelta
 from urllib.parse import quote
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 import httpx
 
 from .db import ROOT, connection, init_db
+from .breeding_rules import DEFAULT_BREEDING_RULE_SET
 from .labeling_rules import interpret_crossed_out_status, match_samples_to_mice
 from .matching import MatchCandidate, match_candidate
 from .storage import new_id, save_legacy_workbook, save_upload, utc_now
@@ -533,6 +534,83 @@ def colony_state_empty_state() -> dict[str, Any]:
         "message": "No accepted active colony records are available yet.",
         "fabricated_records": False,
     }
+
+
+def colony_schedule_empty_state() -> dict[str, Any]:
+    return {
+        "message": "No accepted schedule tasks are available yet.",
+        "fabricated_records": False,
+    }
+
+
+def colony_litter_action_hint(
+    birth_date: str,
+    rule_set: dict[str, Any],
+    *,
+    observed_date: date | None = None,
+) -> dict[str, Any]:
+    parsed_birth_date = _safe_iso_date(birth_date)
+    thresholds = rule_set.get("thresholds", {})
+    due_days = int(thresholds.get("litter_separation_due_after_days", 30))
+    overdue_days = int(thresholds.get("litter_separation_overdue_after_days", 45))
+    high_overdue_days = int(thresholds.get("litter_separation_high_overdue_after_days", 60))
+    if parsed_birth_date is None:
+        return {
+            "mode": "date_review_needed",
+            "label": "Review litter date",
+            "priority": "medium",
+            "age_days": None,
+            "threshold_days": due_days,
+            "automation": "manual_review_only",
+            "suggested_actions": ["review_source_date", "open_focus_review"],
+        }
+    age_days = ((observed_date or date.today()) - parsed_birth_date).days
+    if age_days >= high_overdue_days:
+        return {
+            "mode": "urgent_review",
+            "label": "Separation review urgently overdue",
+            "priority": "high",
+            "age_days": age_days,
+            "threshold_days": high_overdue_days,
+            "automation": "manual_review_only",
+            "suggested_actions": ["open_focus_review", "review_litter", "record_weaning_if_done"],
+        }
+    if age_days >= overdue_days:
+        return {
+            "mode": "overdue_review",
+            "label": "Separation review overdue",
+            "priority": "medium",
+            "age_days": age_days,
+            "threshold_days": overdue_days,
+            "automation": "manual_review_only",
+            "suggested_actions": ["open_focus_review", "review_litter"],
+        }
+    if age_days >= due_days:
+        return {
+            "mode": "review_due",
+            "label": "Separation review due",
+            "priority": "medium",
+            "age_days": age_days,
+            "threshold_days": due_days,
+            "automation": "manual_review_only",
+            "suggested_actions": ["review_litter", "record_weaning_if_done"],
+        }
+    return {
+        "mode": "upcoming",
+        "label": "Separation review upcoming",
+        "priority": "low",
+        "age_days": age_days,
+        "threshold_days": due_days,
+        "automation": "manual_review_only",
+        "suggested_actions": ["watch_litter", "review_at_threshold"],
+    }
+
+
+def _safe_iso_date(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def ai_draft_status() -> dict[str, Any]:
@@ -7444,7 +7522,12 @@ def ui_focus_review() -> dict[str, Any]:
 
 
 @app.get("/api/ui/colony-state")
-def ui_colony_state() -> dict[str, Any]:
+def ui_colony_state(as_of: str = "") -> dict[str, Any]:
+    try:
+        as_of_date = date.fromisoformat(as_of) if as_of else date.today()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="as_of must be an ISO date.")
+
     actionable_reviews = [
         item for item in list_review_items()
         if item.get("status") == "open" and item.get("attention_level") in {"must_review", "quick_check"}
@@ -7531,7 +7614,7 @@ def ui_colony_state() -> dict[str, Any]:
             SELECT m.mating_id, m.mating_label, m.strain_goal, m.expected_genotype,
                    m.start_date, m.status, m.purpose, m.source_record_id,
                    COUNT(DISTINCT CASE WHEN mm.removed_date IS NULL THEN mm.mouse_id END) AS parent_count,
-                   COUNT(DISTINCT CASE WHEN l.status IN ('active', 'born') THEN l.litter_id END) AS active_litter_count
+                   COUNT(DISTINCT CASE WHEN l.status IN ('active', 'born', 'pre_weaning', 'weaning_pending') THEN l.litter_id END) AS active_litter_count
             FROM mating_registry m
             LEFT JOIN mating_mouse mm ON mm.mating_id = m.mating_id
             LEFT JOIN litter_registry l ON l.mating_id = m.mating_id
@@ -7548,7 +7631,7 @@ def ui_colony_state() -> dict[str, Any]:
                    l.weaning_date, l.status, l.source_record_id
             FROM litter_registry l
             JOIN mating_registry m ON m.mating_id = l.mating_id
-            WHERE l.status IN ('active', 'born')
+            WHERE l.status IN ('active', 'born', 'pre_weaning', 'weaning_pending')
             ORDER BY l.birth_date DESC, l.litter_label COLLATE NOCASE
             """
         ).fetchall()
@@ -7626,6 +7709,11 @@ def ui_colony_state() -> dict[str, Any]:
                 "pups_alive": row["number_alive"] if row["number_alive"] is not None else row["number_born"] or 0,
                 "source_evidence": 1 if row["source_record_id"] else 0,
             },
+            "action_hint": colony_litter_action_hint(
+                row["birth_date"],
+                DEFAULT_BREEDING_RULE_SET,
+                observed_date=as_of_date,
+            ),
         }
         for row in litter_rows
     ]
@@ -7646,6 +7734,7 @@ def ui_colony_state() -> dict[str, Any]:
     return {
         "source_layer": "export or view",
         "page_question": "What is active now?",
+        "as_of": as_of_date.isoformat(),
         "summary": {
             "active_mice": active_mice,
             "active_card_snapshots": len(cards),
@@ -7661,6 +7750,131 @@ def ui_colony_state() -> dict[str, Any]:
         "status_summary": [dict(row) for row in status_rows],
         "attention_links": attention_links,
         "empty_state": colony_state_empty_state(),
+    }
+
+
+def schedule_group_for_due_date(due_date: date, as_of_date: date, due_soon_days: int) -> str:
+    days_until_due = (due_date - as_of_date).days
+    if days_until_due <= 0:
+        return "due_now"
+    if days_until_due <= due_soon_days:
+        return "due_soon"
+    return "later"
+
+
+@app.get("/api/ui/colony-schedule")
+def ui_colony_schedule(as_of: str = "") -> dict[str, Any]:
+    try:
+        as_of_date = date.fromisoformat(as_of) if as_of else date.today()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="as_of must be an ISO date.")
+
+    rule_set = DEFAULT_BREEDING_RULE_SET
+    threshold_days = int(rule_set.get("thresholds", {}).get("litter_separation_due_after_days", 30))
+    due_soon_days = int(rule_set.get("thresholds", {}).get("schedule_due_soon_window_days", 30))
+    with connection() as conn:
+        attention_counts = open_review_attention_counts(conn)
+        litter_rows = conn.execute(
+            """
+            SELECT l.litter_id, l.litter_label, l.mating_id, m.mating_label,
+                   l.birth_date, l.number_born, l.number_alive, l.number_weaned,
+                   l.weaning_date, l.status, l.source_record_id
+            FROM litter_registry l
+            JOIN mating_registry m ON m.mating_id = l.mating_id
+            WHERE l.status IN ('active', 'born', 'pre_weaning', 'weaning_pending')
+              AND COALESCE(l.birth_date, '') <> ''
+              AND COALESCE(l.weaning_date, '') = ''
+            ORDER BY l.birth_date ASC, l.litter_label COLLATE NOCASE
+            """
+        ).fetchall()
+        completed = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM litter_registry
+            WHERE status = 'weaned'
+               OR COALESCE(weaning_date, '') <> ''
+            """
+        ).fetchone()[0]
+
+    must_review = int(attention_counts.get("must_review", 0))
+    quick_check = int(attention_counts.get("quick_check", 0))
+    tasks: list[dict[str, Any]] = []
+    for row in litter_rows:
+        try:
+            birth_date = date.fromisoformat(str(row["birth_date"]))
+        except (TypeError, ValueError):
+            continue
+        due_date = birth_date + timedelta(days=threshold_days)
+        group = schedule_group_for_due_date(due_date, as_of_date, due_soon_days)
+        days_until_due = (due_date - as_of_date).days
+        status = "blocked_by_review" if must_review else group
+        tasks.append(
+            {
+                "task_id": f"schedule_litter_separation_{row['litter_id']}",
+                "task_type": "litter_separation",
+                "label": f"Separate/wean litter {row['litter_label'] or row['litter_id']}",
+                "status": status,
+                "recorded_date": row["birth_date"],
+                "due_date": due_date.isoformat(),
+                "days_until_due": days_until_due,
+                "source_layer": "export or view",
+                "source_entity": {
+                    "entity_type": "litter",
+                    "entity_id": row["litter_id"],
+                    "label": row["litter_label"],
+                },
+                "source_evidence": {
+                    "source_record_id": row["source_record_id"] or "",
+                    "mating_id": row["mating_id"],
+                    "mating_label": row["mating_label"],
+                },
+                "due_date_rule": {
+                    "rule_set_id": rule_set["rule_set_id"],
+                    "rule_key": "litter_separation_due_after_days",
+                    "value_days": threshold_days,
+                },
+                "attention_link": {
+                    "label": "Open Focus Review",
+                    "target_path": "/api/ui/focus-review",
+                    "must_review": must_review,
+                    "quick_check": quick_check,
+                } if must_review or quick_check else {},
+            }
+        )
+
+    grouped_tasks: dict[str, list[dict[str, Any]]] = {"due_now": [], "due_soon": [], "later": []}
+    for task in tasks:
+        due_date_value = date.fromisoformat(str(task["due_date"]))
+        grouped_tasks[schedule_group_for_due_date(due_date_value, as_of_date, due_soon_days)].append(task)
+    task_groups = [
+        {"group": group, "tasks": grouped_tasks[group]}
+        for group in ["due_now", "due_soon", "later"]
+        if grouped_tasks[group]
+    ]
+
+    return {
+        "source_layer": "export or view",
+        "page_question": "What needs doing next?",
+        "as_of": as_of_date.isoformat(),
+        "rule_set": {
+            "rule_set_id": rule_set["rule_set_id"],
+            "display_name": rule_set["display_name"],
+            "source_layer": "parsed or intermediate result",
+        },
+        "summary": {
+            "due_now": len(grouped_tasks["due_now"]),
+            "due_soon": len(grouped_tasks["due_soon"]),
+            "later": len(grouped_tasks["later"]),
+            "blocked_by_review": sum(1 for task in tasks if task["status"] == "blocked_by_review"),
+            "completed": completed,
+        },
+        "task_groups": task_groups,
+        "calendar_mirror": {
+            "status": "not_configured",
+            "canonical_source": "MouseDB internal schedule",
+            "note": "External calendar sync can mirror accepted schedule tasks later; it is not canonical.",
+        },
+        "empty_state": colony_schedule_empty_state(),
     }
 
 
