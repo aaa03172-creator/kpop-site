@@ -648,9 +648,10 @@ def test_colony_state_litter_action_hints_are_read_only_and_threshold_backed(tmp
     old_db_path = db.DB_PATH
     try:
         seed_colony_state_records(tmp_path)
-        due_birth_date = (date.today() - timedelta(days=35)).isoformat()
-        overdue_birth_date = (date.today() - timedelta(days=50)).isoformat()
-        high_overdue_birth_date = (date.today() - timedelta(days=65)).isoformat()
+        observed_date = date(2026, 5, 9)
+        due_birth_date = (observed_date - timedelta(days=35)).isoformat()
+        overdue_birth_date = (observed_date - timedelta(days=50)).isoformat()
+        high_overdue_birth_date = (observed_date - timedelta(days=65)).isoformat()
         with db.connection() as conn:
             conn.executemany(
                 """
@@ -710,7 +711,7 @@ def test_colony_state_litter_action_hints_are_read_only_and_threshold_backed(tmp
             )
         client = TestClient(app)
 
-        response = client.get("/api/ui/colony-state")
+        response = client.get("/api/ui/colony-state?as_of=2026-05-09")
 
         assert response.status_code == 200
         payload = response.json()
@@ -719,7 +720,7 @@ def test_colony_state_litter_action_hints_are_read_only_and_threshold_backed(tmp
             "mode": "upcoming",
             "label": "Separation review upcoming",
             "priority": "low",
-            "age_days": (date.today() - date.fromisoformat("2026-05-01")).days,
+            "age_days": (observed_date - date.fromisoformat("2026-05-01")).days,
             "threshold_days": 30,
             "automation": "manual_review_only",
             "suggested_actions": ["watch_litter", "review_at_threshold"],
