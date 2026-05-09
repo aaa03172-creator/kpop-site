@@ -509,7 +509,8 @@
       font-size: 12px;
     }
     .focus-review-read-model,
-    .colony-state-read-model {
+    .colony-state-read-model,
+    .colony-schedule-read-model {
       display: grid;
       gap: 10px;
       margin: 0 0 12px;
@@ -520,23 +521,28 @@
     }
     .focus-review-read-model h3,
     .colony-state-read-model h2,
-    .colony-state-read-model h3 {
+    .colony-state-read-model h3,
+    .colony-schedule-read-model h2,
+    .colony-schedule-read-model h3 {
       margin: 0;
       font-size: 14px;
     }
     .focus-review-read-model p,
-    .colony-state-read-model p {
+    .colony-state-read-model p,
+    .colony-schedule-read-model p {
       margin: 0;
       color: var(--muted);
       font-size: 12px;
     }
     .focus-review-read-model[data-state="error"],
-    .colony-state-read-model[data-state="error"] {
+    .colony-state-read-model[data-state="error"],
+    .colony-schedule-read-model[data-state="error"] {
       border-color: var(--cue-must-line);
       background: var(--cue-must-bg);
     }
     .focus-review-card,
-    .colony-state-card {
+    .colony-state-card,
+    .colony-schedule-card {
       border-top: 1px solid var(--line);
       padding-top: 10px;
     }
@@ -2936,6 +2942,10 @@
         <h2>Colony State</h2>
         <p>Loading accepted colony state...</p>
       </div>
+      <div class="colony-schedule-read-model" id="colonyScheduleReadModel" aria-live="polite">
+        <h2>Colony Schedule</h2>
+        <p>Loading accepted schedule tasks...</p>
+      </div>
       <h2>Candidate Records</h2>
       <p>Current mouse-level candidate state from accepted source-backed note lines.</p>
       <table>
@@ -3866,6 +3876,29 @@
       }
     }
 
+    async function loadColonyScheduleReadModel() {
+      try {
+        return await api("/api/ui/colony-schedule");
+      } catch (error) {
+        return {
+          source_layer: "export or view",
+          load_error: true,
+          error_message: apiErrorMessage(error),
+          page_question: "What needs doing next?",
+          task_groups: [],
+          calendar_mirror: {
+            status: "not_configured",
+            canonical_source: "MouseDB internal schedule",
+            note: "External calendar sync can mirror accepted schedule tasks later; it is not canonical."
+          },
+          empty_state: {
+            message: "Colony Schedule unavailable. Use accepted records while the read model reloads.",
+            fabricated_records: false
+          }
+        };
+      }
+    }
+
     function renderFocusReviewReadModel(model) {
       const panel = document.getElementById("focusReviewReadModel");
       if (!panel) return;
@@ -4032,6 +4065,79 @@
           </div>
         `;
       }).join("")}`;
+      panel.querySelectorAll(".open-focus-review").forEach((button) => {
+        button.addEventListener("click", () => setActiveView("review"));
+      });
+    }
+
+    function renderColonyScheduleReadModel(model) {
+      const panel = document.getElementById("colonyScheduleReadModel");
+      if (!panel) return;
+      const groups = Array.isArray(model?.task_groups) ? model.task_groups : [];
+      const summaryData = model?.summary || {};
+      const emptyState = model?.empty_state || {};
+      const mirror = model?.calendar_mirror || {};
+      const fabricatedRecords = emptyState.fabricated_records === true;
+      const requiredSummaryKeys = ["due_now", "due_soon", "later", "blocked_by_review", "completed"];
+      const hasSummaryCounts = requiredSummaryKeys.every((key) => Number.isFinite(summaryData[key]));
+      const counts = model?.load_error || !hasSummaryCounts
+        ? ["Counts unavailable"]
+        : [
+            `Due now ${Number(summaryData.due_now || 0)}`,
+            `Due soon ${Number(summaryData.due_soon || 0)}`,
+            `Later ${Number(summaryData.later || 0)}`,
+            `Blocked ${Number(summaryData.blocked_by_review || 0)}`,
+            `Completed ${Number(summaryData.completed || 0)}`
+          ];
+      const summary = `
+        <div class="section-kicker">
+          <div>
+            <h2>Colony Schedule</h2>
+            <p>${escapeHtml(model?.page_question || "What needs doing next?")}</p>
+          </div>
+          <span class="chip">${escapeHtml(model?.source_layer || "export or view")}</span>
+        </div>
+        <div class="review-queue-summary">
+          ${counts.map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+          <span class="chip">Fabricated records: ${fabricatedRecords ? "yes" : "no"}</span>
+          <span class="chip">Google Calendar mirror: ${escapeHtml(mirror.status || "not_configured")}</span>
+        </div>
+      `;
+      if (model?.load_error) {
+        panel.dataset.state = "error";
+        panel.dataset.fabricatedRecords = "false";
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Colony Schedule unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        return;
+      }
+      if (!groups.length) {
+        panel.dataset.state = "empty";
+        panel.dataset.fabricatedRecords = String(fabricatedRecords);
+        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "No accepted schedule tasks are available yet.")}</p>`;
+        return;
+      }
+      panel.dataset.state = "loaded";
+      panel.dataset.fabricatedRecords = String(fabricatedRecords);
+      panel.innerHTML = `${summary}${groups.map((group) => `
+        <div class="colony-schedule-card">
+          <h3>${escapeHtml(String(group.group || "schedule").replaceAll("_", " "))}</h3>
+          ${(Array.isArray(group.tasks) ? group.tasks : []).slice(0, 4).map((task) => {
+            const rule = task.due_date_rule || {};
+            const evidence = task.source_evidence || {};
+            const attention = task.attention_link || {};
+            return `
+              <div class="review-meta">
+                <span class="chip">${escapeHtml(task.label || task.task_type || "Schedule task")}</span>
+                <span class="chip">Due ${escapeHtml(task.due_date || "--")}</span>
+                <span class="chip">Recorded ${escapeHtml(task.recorded_date || "--")}</span>
+                <span class="chip">${escapeHtml(task.status || "pending")}</span>
+                <span class="chip">Rule ${escapeHtml(rule.rule_key || "--")} ${escapeHtml(String(rule.value_days || ""))}</span>
+                <span class="chip">Evidence ${escapeHtml(evidence.source_record_id || "--")}</span>
+                ${attention.label ? `<button class="open-focus-review" type="button" data-view-target="review">${escapeHtml(attention.label)}</button>` : ""}
+              </div>
+            `;
+          }).join("")}
+        </div>
+      `).join("")}`;
       panel.querySelectorAll(".open-focus-review").forEach((button) => {
         button.addEventListener("click", () => setActiveView("review"));
       });
@@ -5729,7 +5835,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, colonySchedule, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -5746,6 +5852,7 @@
         api("/api/review-items"),
         loadFocusReviewReadModel(),
         loadColonyStateReadModel(),
+        loadColonyScheduleReadModel(),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
         api("/api/note-items"),
         api("/api/card-snapshots"),
@@ -5766,6 +5873,7 @@
       renderShellStatus({ health, photoWorkbench, photos, reviews, mice, evidenceComparison, preview });
       renderFocusReviewReadModel(focusReview);
       renderColonyStateReadModel(colonyState);
+      renderColonyScheduleReadModel(colonySchedule);
       const aiStatus = health.ai_draft || {};
       currentAiStatus = aiStatus;
       document.getElementById("aiDraftMessage").textContent = aiStatus.available

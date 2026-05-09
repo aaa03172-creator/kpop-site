@@ -142,6 +142,20 @@ async function main() {
       staticHtml.includes("active_card_snapshots"),
     "Colony State UI should consume the read-only read model and render honest unavailable or empty states without fabricated records."
   );
+  assert(
+    staticHtml.includes("/api/ui/colony-schedule") &&
+      staticHtml.includes("renderColonyScheduleReadModel") &&
+      staticHtml.includes("Colony Schedule unavailable") &&
+      staticHtml.includes("calendar_mirror"),
+    "Colony Schedule UI should consume the read-only read model and keep calendar sync as a non-canonical mirror."
+  );
+  assert(
+    html.includes("review-evidence-strip") &&
+      html.includes("review-evidence-item") &&
+      html.includes("drawer-next-button") &&
+      html.includes("Evidence stays in view"),
+    "Review Queue should include compact evidence guidance and a stable drawer next-item control."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);
@@ -279,6 +293,43 @@ async function main() {
         attention_links: [{ label: "Focus Review", target_path: "/api/ui/focus-review", must_review: 1, quick_check: 0 }],
         empty_state: { message: "", fabricated_records: false }
       },
+      "/api/ui/colony-schedule": {
+        source_layer: "export or view",
+        page_question: "What needs doing next?",
+        as_of: "2026-05-09",
+        rule_set: {
+          rule_set_id: "breeding_rule_default_20260509",
+          display_name: "Default breeding operation review rules",
+          source_layer: "parsed or intermediate result"
+        },
+        summary: { due_now: 0, due_soon: 1, later: 0, blocked_by_review: 1, completed: 0 },
+        task_groups: [
+          {
+            group: "due_soon",
+            tasks: [
+              {
+                task_id: "schedule_litter_separation_static",
+                task_type: "litter_separation",
+                label: "Separate/wean litter F1",
+                status: "blocked_by_review",
+                recorded_date: "2026-05-01",
+                due_date: "2026-05-31",
+                days_until_due: 22,
+                source_entity: { entity_type: "litter", entity_id: "litter_static", label: "F1" },
+                source_evidence: { source_record_id: "source_static", mating_id: "mating_static", mating_label: "C-12 breeding pair" },
+                due_date_rule: { rule_set_id: "breeding_rule_default_20260509", rule_key: "litter_separation_due_after_days", value_days: 30 },
+                attention_link: { label: "Open Focus Review", target_path: "/api/ui/focus-review", must_review: 1, quick_check: 0 }
+              }
+            ]
+          }
+        ],
+        calendar_mirror: {
+          status: "not_configured",
+          canonical_source: "MouseDB internal schedule",
+          note: "External calendar sync can mirror accepted schedule tasks later; it is not canonical."
+        },
+        empty_state: { message: "", fabricated_records: false }
+      },
       "/api/mice": [],
       "/api/note-items": [],
       "/api/card-snapshots": [],
@@ -354,6 +405,14 @@ async function main() {
   assert(
     (await staticPage.locator("#colonyStateReadModel").filter({ hasText: "Open Focus Review" }).filter({ hasText: "Must review 1" }).count()) === 1,
     "Static Colony State should summarize unresolved blockers with a Focus Review link instead of duplicating review details."
+  );
+  assert(
+    (await staticPage.locator("#colonyScheduleReadModel").filter({ hasText: "Due soon 1" }).filter({ hasText: "Separate/wean litter F1" }).count()) === 1,
+    "Static app startup should render the Colony Schedule read model from /api/ui/colony-schedule."
+  );
+  assert(
+    (await staticPage.locator("#colonyScheduleReadModel").filter({ hasText: "Open Focus Review" }).filter({ hasText: "Google Calendar mirror: not_configured" }).count()) === 1,
+    "Static Colony Schedule should show blocked review links and non-canonical calendar mirror status."
   );
   const attentionCue = await staticPage.evaluate(() => {
     const item = { review_id: "review_dom_contract", attention_level: "quick_check", status: "open" };
