@@ -3920,25 +3920,6 @@
           error_message: apiErrorMessage(error),
           page_question: "How did this mouse get here?",
           mouse: null,
-          events: [],
-          empty_state: {
-            message: "Mouse Timeline unavailable. Use the event table while the read model reloads.",
-            fabricated_records: false
-          }
-        };
-      }
-    }
-
-    async function loadMouseTimelineReadModel() {
-      try {
-        return await api("/api/ui/mouse-timeline");
-      } catch (error) {
-        return {
-          source_layer: "export or view",
-          load_error: true,
-          error_message: apiErrorMessage(error),
-          page_question: "How did this mouse get here?",
-          mouse: null,
           summary: { accepted_events: 0, source_records: 0, must_review: 0, quick_check: 0 },
           lineage: { father: null, mother: null, litter: null },
           events: [],
@@ -5954,7 +5935,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, colonySchedule, mouseTimeline, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, colonySchedule, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -5972,7 +5953,6 @@
         loadFocusReviewReadModel(),
         loadColonyStateReadModel(),
         loadColonyScheduleReadModel(),
-        loadMouseTimelineReadModel(),
         api(`/api/mice?query=${encodeURIComponent(activeSearchQuery)}`),
         api("/api/note-items"),
         api("/api/card-snapshots"),
@@ -5994,7 +5974,8 @@
       renderFocusReviewReadModel(focusReview);
       renderColonyStateReadModel(colonyState);
       renderColonyScheduleReadModel(colonySchedule);
-      renderMouseTimelineReadModel(mouseTimeline);
+      const selectedTimelineMouse = firstMouse(mice);
+      renderMouseTimelineReadModel(await loadMouseTimelineReadModel(selectedTimelineMouse?.mouse_id || ""));
       const aiStatus = health.ai_draft || {};
       currentAiStatus = aiStatus;
       document.getElementById("aiDraftMessage").textContent = aiStatus.available
