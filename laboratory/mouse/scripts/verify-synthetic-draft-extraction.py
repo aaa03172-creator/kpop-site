@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 
 from app.main import normalize_ai_draft_payload  # noqa: E402
 from scripts.generate_synthetic_cage_card_fixtures import generate  # noqa: E402
-from scripts.local_ocr_provider import tesseract_provider_status  # noqa: E402
+from scripts.local_ocr_provider import extract_text_with_tesseract, tesseract_provider_status  # noqa: E402
 
 
 SOURCE_POLICY = (
@@ -180,6 +180,43 @@ def verify_generated_drafts(generated: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def probe_local_ocr(generated: dict[str, Any], ocr_provider: dict[str, object]) -> dict[str, Any]:
+    if not ocr_provider["available"]:
+        return {
+            "provider": "tesseract_cli",
+            "status": "skipped",
+            "case_count": 0,
+            "external_inference_used": False,
+            "skip_reason": str(ocr_provider["skip_reason"]),
+        }
+
+    manifest_path = Path(generated["manifest"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    image_dir = manifest_path.parent
+    results = []
+    for case in manifest.get("cases", []):
+        photo_filename = str(case.get("photo_filename") or "")
+        ocr_result = extract_text_with_tesseract(image_dir / photo_filename)
+        results.append(
+            {
+                "case_id": str(case.get("case_id") or ""),
+                "photo_filename": photo_filename,
+                "status": ocr_result["status"],
+                "text_length": len(str(ocr_result.get("text") or "")),
+                "external_inference_used": bool(ocr_result["external_inference_used"]),
+            }
+        )
+    failed = len([result for result in results if result["status"] == "failed"])
+    return {
+        "provider": "tesseract_cli",
+        "status": "failed" if failed else "ok",
+        "case_count": len(results),
+        "failed": failed,
+        "external_inference_used": False,
+        "results": results,
+    }
+
+
 def verify(output_dir: Path) -> dict[str, Any]:
     generated = generate(output_dir)
     verification = verify_generated_drafts(generated)
@@ -189,6 +226,7 @@ def verify(output_dir: Path) -> dict[str, Any]:
         "canonical": False,
         "source_policy": SOURCE_POLICY,
         "ocr_provider": ocr_provider,
+        "local_ocr_probe": probe_local_ocr(generated, ocr_provider),
         "extraction_mode": "local_ocr" if ocr_provider["available"] else "fixture_payload_surrogate",
         "generated": generated,
         "verification": {key: value for key, value in verification.items() if key != "results"},

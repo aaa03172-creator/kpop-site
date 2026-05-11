@@ -17,12 +17,14 @@ This workstation does not currently expose a local OCR engine:
 - `pytesseract` is not installed;
 - `cv2` is not installed.
 
-Because of that, the first implementation uses the synthetic fixture's local
-raw payload as an OCR surrogate. This is still useful because it exercises the
-draft extraction, normalization, reviewability, confidence, and payload boundary
-contracts without sending images or records to external services. A later
-adapter can replace the surrogate with a real local OCR provider behind the same
-script contract.
+Because of that, the current implementation uses the synthetic fixture's local
+raw payload as an OCR surrogate for draft verification. This is still useful
+because it exercises the draft extraction, normalization, reviewability,
+confidence, and payload boundary contracts without sending images or records to
+external services. The local Tesseract adapter contract is present behind the
+same script boundary: when `tesseract` is available on PATH, the harness can
+probe generated JPEGs locally; when unavailable, it reports a skipped local OCR
+probe.
 
 ## Data Boundaries
 
@@ -43,6 +45,7 @@ script contract.
 5. Verify:
    - no external inference is used;
    - local OCR provider availability is reported explicitly;
+   - local OCR probe status is reported explicitly;
    - source photo IDs and filenames are preserved;
    - every draft remains non-canonical;
    - low-confidence and ambiguous cases remain reviewable;
@@ -68,7 +71,8 @@ python scripts/verify-synthetic-draft-extraction.py `
 - The script reports five generated synthetic cases.
 - All five draft extraction cases pass.
 - The report has `source_policy` stating local-only, no external inference.
-- The report has `ocr_provider` status. If Tesseract is unavailable, the harness
-  reports `extraction_mode: fixture_payload_surrogate` and keeps the run local.
+- The report has `ocr_provider` and `local_ocr_probe` status. If Tesseract is
+  unavailable, the harness reports `extraction_mode: fixture_payload_surrogate`,
+  reports `local_ocr_probe.status: skipped`, and keeps the run local.
 - The harness can run with a disposable temp directory and clean it up.
 - Existing real-photo E2E and synthetic photo E2E gates still pass.

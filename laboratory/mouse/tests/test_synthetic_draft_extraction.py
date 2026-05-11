@@ -44,10 +44,15 @@ def test_synthetic_draft_extraction_harness_reports_reviewable_local_drafts(tmp_
     assert summary["verification"]["trace_only_cases"] >= 1
     assert summary["ocr_provider"]["provider"] == "tesseract_cli"
     assert summary["ocr_provider"]["external_inference_used"] is False
+    assert summary["local_ocr_probe"]["provider"] == "tesseract_cli"
+    assert summary["local_ocr_probe"]["external_inference_used"] is False
     assert summary["extraction_mode"] in {"fixture_payload_surrogate", "local_ocr"}
     if not summary["ocr_provider"]["available"]:
         assert summary["extraction_mode"] == "fixture_payload_surrogate"
         assert "skip_reason" in summary["ocr_provider"]
+        assert summary["local_ocr_probe"]["status"] == "skipped"
+        assert summary["local_ocr_probe"]["case_count"] == 0
+        assert "skip_reason" in summary["local_ocr_probe"]
     assert {result["case_id"] for result in summary["results"]} == {
         "synthetic_clear_card",
         "synthetic_low_confidence_blurry_card",
