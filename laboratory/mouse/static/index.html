@@ -618,6 +618,13 @@
       border-color: var(--cue-must-line);
       background: var(--cue-must-bg);
     }
+    .table-empty-row td {
+      background: #fff;
+      padding: 10px 6px;
+    }
+    .table-empty-row .state-message {
+      margin: 0;
+    }
     .focus-review-card,
     .colony-state-card,
     .colony-schedule-card,
@@ -3644,6 +3651,16 @@
       }[ch]))}</td>`).join("")}</tr>`;
     }
 
+    function emptyTableRow(title, detail = "", colspan = 1) {
+      return `
+        <tr class="table-empty-row">
+          <td colspan="${escapeHtml(String(colspan))}">
+            ${stateMessageHtml("empty", title, detail)}
+          </td>
+        </tr>
+      `;
+    }
+
     function artifactPreviewButton(path, label) {
       if (!path) return `<span class="muted">--</span>`;
       return `<button type="button" class="artifact-preview-button" data-artifact-path="${escapeHtml(path)}">${escapeHtml(label)}</button>`;
@@ -6334,7 +6351,7 @@
           [item.source_photo_ids && `photo ${item.source_photo_ids}`, item.card_snapshot_ids && `snapshot ${item.card_snapshot_ids}`, item.raw_note_lines && `raw ${item.raw_note_lines}`].filter(Boolean).join(" / ") || "--",
           item.uncertainty || "--"
         ])
-      ).join("") || row(["No separation preview rows yet", "", "", "", "", "", "", "", "", "", ""]);
+      ).join("") || emptyTableRow("No separation preview rows yet", "Accepted source-backed separated cage rows will appear here before workbook export.", 11);
       document.getElementById("animalSheetRows").innerHTML = (preview.animal_sheet_rows || []).map((item) =>
         row([
           item.cage_no || "--",
@@ -6350,7 +6367,7 @@
           [item.source_photo_ids && `photo ${item.source_photo_ids}`, item.card_snapshot_ids && `snapshot ${item.card_snapshot_ids}`, item.raw_note_lines && `raw ${item.raw_note_lines}`].filter(Boolean).join(" / ") || "--",
           item.uncertainty || "--"
         ])
-      ).join("") || row(["No animal sheet preview rows yet", "", "", "", "", "", "", "", "", "", "", ""]);
+      ).join("") || emptyTableRow("No animal sheet preview rows yet", "Accepted source-backed animal rows will appear here before workbook export.", 12);
       document.getElementById("exportBlockerRows").innerHTML = readinessItems.map((item) => `
         <tr>
           <td>${escapeHtml(item.issue || "Review blocker")}</td>
@@ -6360,7 +6377,7 @@
           <td>${escapeHtml(item.review_reason || item.display_id || item.parse_id || "--")}</td>
           <td>${exportBlockerReviewButton(item)}</td>
         </tr>
-      `).join("") || row(["No Focus Review blockers", "", "", "", "", ""]);
+      `).join("") || emptyTableRow("No Focus Review blockers", "Final export blockers and readiness warnings will appear here when review can change exported values.", 6);
       document.querySelectorAll(".open-export-blocker-review").forEach((button) => {
         button.addEventListener("click", async () => {
           reviewStatusFilter = "all";
@@ -6385,7 +6402,7 @@
           <td>${escapeHtml(item.exported_at)}</td>
           <td>${escapeHtml(item.query || "--")}</td>
         </tr>
-      `).join("") || row(["No exports generated yet", "", "", "", "", "", "", "", "", "", ""]);
+      `).join("") || emptyTableRow("No exports generated yet", "Generated export files and validation artifacts will appear after a ready export is downloaded.", 11);
       document.querySelectorAll("#exportLogRows .artifact-preview-button").forEach((button) => {
         button.addEventListener("click", () => showArtifactPreview(button.dataset.artifactPath || ""));
       });
@@ -6562,7 +6579,7 @@
           <td>${escapeHtml(batch.derived_status || batch.status || "--")}</td>
           <td><button class="preview-upload-batch-release" type="button" data-batch-id="${escapeHtml(batch.upload_batch_id)}">Preview release</button></td>
         </tr>`
-      ).join("") || row(["No upload batches yet", "", "", "", "", "", ""]);
+      ).join("") || emptyTableRow("No upload batches yet", "Upload cage-card source photos to create a raw source batch before review or canonical mapping.", 7);
       document.getElementById("workbenchPhotoCards").innerHTML = latestPhotos.slice(0, 8).map((photo) => `
         <button class="photo-worklist-card select-photo-review ${photo.photo_id === selectedTranscriptionPhotoId ? "active" : ""}" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">
           <strong>${escapeHtml(photo.original_filename)}</strong>
@@ -6580,7 +6597,7 @@
           <td>${escapeHtml(photo.uploaded_at)}</td>
           <td><button class="select-photo-review" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">Use</button></td>
         </tr>
-      `).join("") || row(["No photos yet", "", "", "", "", ""]);
+      `).join("") || emptyTableRow("No photos yet", "Uploaded source photos remain raw evidence and will appear here before review.", 6);
       document.getElementById("transcriptionPhotoId").innerHTML = latestPhotos.map((photo) =>
         `<option value="${escapeHtml(photo.photo_id)}">${escapeHtml(photo.original_filename)} (${escapeHtml(photo.status)})</option>`
       ).join("") || '<option value="">No photos uploaded</option>';
@@ -6665,7 +6682,7 @@
           </div>
         </article>
       `;
-      }).join("") || '<p class="muted">No review items match the current filters.</p>';
+      }).join("") || stateMessageHtml("empty", "No review items match the current filters.", "Change the review filters or upload source photos to create reviewable evidence.");
       renderReviewDetail(selectedReview);
       attachReviewAuditHandler();
       attachReviewNavigationHandlers();
@@ -6710,7 +6727,7 @@
       });
       document.getElementById("sourceRows").innerHTML = sourceRecords.map((source) =>
         row([source.source_type, source.source_label || "--", source.source_uri || "--", source.imported_at, source.note || "--"])
-      ).join("") || row(["No source evidence yet", "", "", "", ""]);
+      ).join("") || emptyTableRow("No source evidence yet", "Raw photos, manual entries, and imported workbook rows will appear here as traceable evidence.", 5);
       document.getElementById("canonicalCandidateRows").innerHTML = canonicalCandidates.map((candidate) => `
         <tr>
           <td>${escapeHtml(candidate.candidate_id)}</td>
@@ -6730,7 +6747,7 @@
                 : `<button class="audit-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Audit</button>`
           }</td>
         </tr>
-      `).join("") || row(["No canonical candidate drafts yet", "", "", "", "", "", "", ""]);
+      `).join("") || emptyTableRow("No canonical candidate drafts yet", "Reviewed source-backed note lines can prepare candidates here before canonical apply.", 8);
       document.querySelectorAll(".preview-canonical-candidate").forEach((button) => {
         button.addEventListener("click", async () => {
           const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply-preview`);

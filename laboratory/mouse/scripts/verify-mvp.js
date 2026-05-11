@@ -137,9 +137,19 @@ async function main() {
       staticHtml.includes("Focus Review unavailable") &&
       staticHtml.includes("fabricated_records") &&
       staticHtml.includes("function stateMessageHtml(kind, title, detail = \"\")") &&
+      staticHtml.includes("function emptyTableRow(title, detail = \"\", colspan = 1)") &&
       staticHtml.includes('class="state-message"') &&
       staticHtml.includes('data-state-kind="loading"'),
     "Focus Review UI should consume the read-only read model and render honest loading, empty, or error states without fabricated records."
+  );
+  assert(
+    staticHtml.includes("No upload batches yet") &&
+      staticHtml.includes("No photos yet") &&
+      staticHtml.includes("No canonical candidate drafts yet") &&
+      staticHtml.includes("No separation preview rows yet") &&
+      staticHtml.includes("No exports generated yet") &&
+      staticHtml.includes('class="table-empty-row"'),
+    "Table-only empty states should use consistent non-fabricated state-message rows for photo, review, candidate, and export surfaces."
   );
   assert(
     staticHtml.includes("/api/ui/colony-state") &&
