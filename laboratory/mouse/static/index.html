@@ -662,6 +662,7 @@
     .review-card-kind {
       display: inline-flex;
       align-items: center;
+      gap: 6px;
       width: fit-content;
       margin-bottom: 5px;
       border: 1px solid var(--line);
@@ -673,6 +674,24 @@
       font-weight: 900;
       text-transform: uppercase;
       letter-spacing: 0.04em;
+    }
+    .review-card-symbol {
+      display: inline-grid;
+      place-items: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: currentColor;
+      color: #fff;
+      font-size: 11px;
+      line-height: 1;
+    }
+    .review-card-consequence {
+      margin-top: 7px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
     }
     .review-card-kind.warn {
       background: var(--cue-must-bg);
@@ -5900,16 +5919,16 @@
 
     function reviewVisual(item) {
       if (item.attention_level === "must_review") {
-        return { label: "Focus review", tone: "warn" };
+        return { label: "Focus review", tone: "warn", symbol: "!", consequence: "Blocks export until reviewed." };
       }
       if (item.attention_level === "quick_check") {
-        return { label: "Needs quick confirmation", tone: "source" };
+        return { label: "Needs quick confirmation", tone: "source", symbol: "?", consequence: "Check source evidence before accepting." };
       }
       if (item.attention_level === "trace_only") {
-        return { label: "Trace only", tone: "record" };
+        return { label: "Trace only", tone: "record", symbol: "i", consequence: "Kept visible for traceability." };
       }
       if (item.attention_level === "hidden_default") {
-        return { label: "Hidden default", tone: "record" };
+        return { label: "Hidden default", tone: "record", symbol: "i", consequence: "Hidden by default; source remains traceable." };
       }
       const combined = [
         item.issue,
@@ -5920,15 +5939,15 @@
         item.suggested_value
       ].map((value) => text(value).toLowerCase()).join(" ");
       if (combined.includes("legacy") || combined.includes("excel") || combined.includes("workbook") || combined.includes("comparison")) {
-        return { label: "Workbook mismatch", tone: "record" };
+        return { label: "Workbook mismatch", tone: "record", symbol: "i", consequence: "Compare workbook view against source evidence." };
       }
       if (combined.includes("duplicate") || combined.includes("mouse") || combined.includes("biological") || combined.includes("canonical")) {
-        return { label: "Mouse record risk", tone: "record" };
+        return { label: "Mouse record risk", tone: "warn", symbol: "!", consequence: "Review before changing mouse state." };
       }
       if (combined.includes("photo") || combined.includes("ocr") || combined.includes("transcription") || combined.includes("note") || combined.includes("source")) {
-        return { label: "Photo evidence", tone: "source" };
+        return { label: "Photo evidence", tone: "source", symbol: "?", consequence: "Inspect the source photo or note line." };
       }
-      return { label: "Needs review", tone: "warn" };
+      return { label: "Needs review", tone: "warn", symbol: "!", consequence: "Review before applying changes." };
     }
 
     function renderVisualizations({ assignedStrains, strains, reviews, mice, mouseEvents, cages, matings, litters, genotypingDashboard, preview }) {
@@ -6533,9 +6552,10 @@
         return `
         <article class="review-card ${escapeHtml(attentionClass)} ${item.review_id === selectedReviewId ? "selected-card" : ""}" data-review-id="${escapeHtml(item.review_id)}" data-attention-level="${escapeHtml(item.attention_level || "quick_check")}">
           <div class="review-card-content">
-            <span class="review-card-kind ${escapeHtml(visual.tone)}">${escapeHtml(visual.label)}</span>
+            <span class="review-card-kind ${escapeHtml(visual.tone)}"><span class="review-card-symbol" aria-hidden="true">${escapeHtml(visual.symbol || "!")}</span>${escapeHtml(visual.label)}</span>
             <h3>${escapeHtml(item.issue)}</h3>
             <p>${escapeHtml(item.review_reason || item.parse_id || "--")}</p>
+            <div class="review-card-consequence">${escapeHtml(visual.consequence || "Review before applying changes.")}</div>
             <div class="review-meta">
               <span class="chip">${escapeHtml(item.severity)}</span>
               <span class="chip">${escapeHtml(item.assigned_role || "Colony Reviewer")}</span>
