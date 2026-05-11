@@ -556,6 +556,22 @@ def mouse_timeline_empty_state() -> dict[str, Any]:
     }
 
 
+def mouse_event_evidence_refs(row: Any) -> dict[str, str]:
+    details: dict[str, Any] = {}
+    try:
+        loaded = json.loads(row["details"] or "{}")
+        if isinstance(loaded, dict):
+            details = loaded
+    except (TypeError, json.JSONDecodeError):
+        details = {}
+    return {
+        "source_record_id": str(row["source_record_id"] or ""),
+        "source_photo_id": str(details.get("source_photo_id") or ""),
+        "source_note_item_id": str(details.get("source_note_item_id") or ""),
+        "photo_evidence_id": str(details.get("photo_evidence_id") or ""),
+    }
+
+
 def mouse_pedigree_empty_state() -> dict[str, Any]:
     return {
         "message": "Choose a mouse to view accepted pedigree relationships.",
@@ -8461,6 +8477,7 @@ def ui_mouse_timeline(mouse_id: str = "") -> dict[str, Any]:
     events = []
     for row in event_rows:
         source = source_rows.get(row["source_record_id"] or "", {})
+        evidence_refs = mouse_event_evidence_refs(row)
         events.append(
             {
                 "event_id": row["event_id"],
@@ -8477,6 +8494,7 @@ def ui_mouse_timeline(mouse_id: str = "") -> dict[str, Any]:
                     "source_label": source.get("source_label", ""),
                     "source_type": source.get("source_type", ""),
                 },
+                "evidence_refs": evidence_refs,
             }
         )
 

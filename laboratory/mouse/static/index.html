@@ -4316,6 +4316,7 @@
       panel.innerHTML = `${summary}${events.slice(0, 5).map((event) => {
         const related = event.related_entity || {};
         const evidence = event.source_evidence || {};
+        const refs = event.evidence_refs || {};
         return `
           <div class="mouse-timeline-card">
             <h3>${escapeHtml(event.label || event.event_type || "Accepted event")}</h3>
@@ -4324,6 +4325,9 @@
               <span class="chip">Event ${escapeHtml(event.event_id || "--")}</span>
               <span class="chip">Related ${escapeHtml(related.entity_type || "--")} ${escapeHtml(related.entity_id || "")}</span>
               <span class="chip">Evidence ${escapeHtml(evidence.source_record_id || "--")}</span>
+              <span class="chip">Photo ${escapeHtml(refs.source_photo_id || "--")}</span>
+              <span class="chip">Note ${escapeHtml(refs.source_note_item_id || "--")}</span>
+              <span class="chip">Evidence item ${escapeHtml(refs.photo_evidence_id || "--")}</span>
               <span class="chip">${escapeHtml(evidence.source_label || evidence.source_type || "source pending")}</span>
             </div>
           </div>

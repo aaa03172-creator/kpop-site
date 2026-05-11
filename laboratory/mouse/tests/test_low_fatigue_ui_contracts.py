@@ -875,7 +875,14 @@ def test_mouse_timeline_shows_accepted_events_without_review_details(tmp_path: P
                         "litter",
                         "litter_colony_state",
                         "source_mating_colony_state",
-                        json.dumps({"source_note_item_id": "note_birth"}, ensure_ascii=False),
+                        json.dumps(
+                            {
+                                "source_photo_id": "photo_birth",
+                                "source_note_item_id": "note_birth",
+                                "photo_evidence_id": "pe_birth",
+                            },
+                            ensure_ascii=False,
+                        ),
                         "local_user",
                         "2026-05-09T11:16:00Z",
                     ),
@@ -941,6 +948,12 @@ def test_mouse_timeline_shows_accepted_events_without_review_details(tmp_path: P
                     "source_label": "Reviewed mating cage C-12",
                     "source_type": "manual_review",
                 },
+                "evidence_refs": {
+                    "source_record_id": "source_mating_colony_state",
+                    "source_photo_id": "photo_birth",
+                    "source_note_item_id": "note_birth",
+                    "photo_evidence_id": "pe_birth",
+                },
             },
             {
                 "event_id": "event_mt401_weaned",
@@ -956,6 +969,12 @@ def test_mouse_timeline_shows_accepted_events_without_review_details(tmp_path: P
                     "source_record_id": "source_mating_colony_state",
                     "source_label": "Reviewed mating cage C-12",
                     "source_type": "manual_review",
+                },
+                "evidence_refs": {
+                    "source_record_id": "source_mating_colony_state",
+                    "source_photo_id": "",
+                    "source_note_item_id": "",
+                    "photo_evidence_id": "",
                 },
             },
         ]
