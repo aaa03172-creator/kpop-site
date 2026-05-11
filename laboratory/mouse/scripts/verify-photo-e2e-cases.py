@@ -312,37 +312,75 @@ def build_summary(
     }
 
 
+def build_missing_fixture_summary(
+    *,
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    missing_tables: list[str],
+    require_fixtures: bool = False,
+) -> dict[str, Any]:
+    case_count = len(manifest.get("cases", []))
+    summary = {
+        "manifest": str(manifest_path.resolve()),
+        "case_count": case_count,
+        "passed": 0,
+        "failed": case_count if require_fixtures else 0,
+        "skipped": 0 if require_fixtures else case_count,
+        "missing_tables": missing_tables,
+        "skip_reason": "" if require_fixtures else (
+            "Local photo E2E fixture database is unavailable. "
+            f"Missing table(s): {', '.join(missing_tables)}."
+        ),
+        "failure_reason": (
+            "Local photo E2E fixtures are required for this accuracy gate. "
+            f"Missing table(s): {', '.join(missing_tables)}."
+        ) if require_fixtures else "",
+        "status": "failed" if require_fixtures else "skipped",
+        "boundary": manifest.get("boundary", "review item / test fixture"),
+        "source_policy": manifest.get("source_policy", ""),
+    }
+    return summary
+
+
+def missing_fixture_exit_code(summary: dict[str, Any]) -> int:
+    return 1 if summary.get("status") == "failed" else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Verify real-photo cage-card extraction regression cases."
     )
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     parser.add_argument("--manifest", default=str(MANIFEST_PATH), help="Validation manifest path.")
+    parser.add_argument(
+        "--require-fixtures",
+        action="store_true",
+        help="Fail instead of skipping when the local photo E2E fixture database is unavailable.",
+    )
     args = parser.parse_args()
 
     manifest = load_manifest(Path(args.manifest))
     missing_tables = missing_fixture_tables()
     if missing_tables:
-        summary = {
-            "manifest": str(Path(args.manifest).resolve()),
-            "case_count": len(manifest.get("cases", [])),
-            "passed": 0,
-            "failed": 0,
-            "skipped": len(manifest.get("cases", [])),
-            "skip_reason": (
-                "Local photo E2E fixture database is unavailable. "
-                f"Missing table(s): {', '.join(missing_tables)}."
-            ),
-            "boundary": manifest.get("boundary", "review item / test fixture"),
-        }
+        summary = build_missing_fixture_summary(
+            manifest=manifest,
+            manifest_path=Path(args.manifest),
+            missing_tables=missing_tables,
+            require_fixtures=args.require_fixtures,
+        )
         if args.json:
             print(json.dumps(summary, indent=2, ensure_ascii=False))
+        elif args.require_fixtures:
+            print(
+                "Photo E2E validation failed: local fixture database is required "
+                f"(missing table(s): {', '.join(missing_tables)})."
+            )
         else:
             print(
                 "Photo E2E validation skipped: local fixture database is unavailable "
                 f"(missing table(s): {', '.join(missing_tables)})."
             )
-        return 0
+        return missing_fixture_exit_code(summary)
     results, fail_count = verify(manifest)
     summary = build_summary(
         manifest=manifest,
