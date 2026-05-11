@@ -239,10 +239,17 @@ def seed_litter_offspring_state(conn) -> None:
     conn.execute(
         """
         INSERT INTO mating_registry
-            (mating_id, mating_label, strain_goal, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+            (mating_id, mating_label, strain_goal, start_date, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        ("mating_event_evidence", "Mating evidence", "ApoM Tg/Tg", "2026-05-09T00:00:00Z", "2026-05-09T00:00:00Z"),
+        (
+            "mating_event_evidence",
+            "Mating evidence",
+            "ApoM Tg/Tg",
+            "2026-04-01",
+            "2026-05-09T00:00:00Z",
+            "2026-05-09T00:00:00Z",
+        ),
     )
     conn.execute(
         """
@@ -286,6 +293,24 @@ def seed_litter_offspring_state(conn) -> None:
     )
 
 
+def assert_single_biological_review_item(conn, *, issue_contains: str) -> None:
+    row = conn.execute(
+        """
+        SELECT review.issue, review.review_reason, review.status, parse.source_name,
+               parse.status AS parse_status, parse.needs_review
+        FROM review_queue review
+        JOIN parse_result parse ON parse.parse_id = review.parse_id
+        """
+    ).fetchone()
+    assert row is not None
+    assert issue_contains.lower() in row["issue"].lower()
+    assert "canonical" in row["review_reason"].lower()
+    assert row["status"] == "open"
+    assert row["source_name"] == "biological_transition_review"
+    assert row["parse_status"] == "review"
+    assert row["needs_review"] == 1
+
+
 def test_high_risk_mouse_event_requires_evidence_before_canonical_commit(tmp_path) -> None:
     old_db_path = db.DB_PATH
     db.DB_PATH = tmp_path / "mouse_lims.sqlite"
@@ -310,6 +335,150 @@ def test_high_risk_mouse_event_requires_evidence_before_canonical_commit(tmp_pat
             row = conn.execute("SELECT COUNT(*) AS count FROM mouse_event").fetchone()
 
         assert row["count"] == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_litter_creation_routes_birth_before_mating_to_review_before_canonical_write(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_litter_offspring_state(conn)
+
+        with pytest.raises(HTTPException) as exc_info:
+            create_litter(
+                LitterCreate(
+                    litter_label="L-before-mating",
+                    mating_id="mating_event_evidence",
+                    birth_date="2026-03-20",
+                    number_born=2,
+                )
+            )
+
+        assert exc_info.value.status_code == 409
+        assert "review" in str(exc_info.value.detail).lower()
+        with db.connection() as conn:
+            litter_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM litter_registry WHERE litter_label = ?",
+                ("L-before-mating",),
+            ).fetchone()["count"]
+            event_count = conn.execute("SELECT COUNT(*) AS count FROM mouse_event").fetchone()["count"]
+            source_count = conn.execute("SELECT COUNT(*) AS count FROM source_record").fetchone()["count"]
+            assert_single_biological_review_item(conn, issue_contains="birth date before mating")
+
+        assert litter_count == 0
+        assert event_count == 0
+        assert source_count == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_litter_creation_routes_alive_count_above_born_count_to_review_before_canonical_write(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_litter_offspring_state(conn)
+
+        with pytest.raises(HTTPException) as exc_info:
+            create_litter(
+                LitterCreate(
+                    litter_label="L-count-review",
+                    mating_id="mating_event_evidence",
+                    birth_date="2026-05-09",
+                    number_born=2,
+                    number_alive=3,
+                )
+            )
+
+        assert exc_info.value.status_code == 409
+        with db.connection() as conn:
+            litter_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM litter_registry WHERE litter_label = ?",
+                ("L-count-review",),
+            ).fetchone()["count"]
+            event_count = conn.execute("SELECT COUNT(*) AS count FROM mouse_event").fetchone()["count"]
+            source_count = conn.execute("SELECT COUNT(*) AS count FROM source_record").fetchone()["count"]
+            assert_single_biological_review_item(conn, issue_contains="alive count exceeds born count")
+
+        assert litter_count == 0
+        assert event_count == 0
+        assert source_count == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_offspring_creation_routes_count_above_born_count_to_review_before_canonical_write(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_litter_offspring_state(conn)
+
+        with pytest.raises(HTTPException) as exc_info:
+            create_litter_offspring(
+                "litter_event_evidence",
+                LitterOffspringCreate(count=3, display_prefix="EV-L1"),
+            )
+
+        assert exc_info.value.status_code == 409
+        with db.connection() as conn:
+            offspring_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM mouse_master WHERE litter_id = ?",
+                ("litter_event_evidence",),
+            ).fetchone()["count"]
+            litter = conn.execute(
+                "SELECT number_alive, status FROM litter_registry WHERE litter_id = ?",
+                ("litter_event_evidence",),
+            ).fetchone()
+            event_count = conn.execute("SELECT COUNT(*) AS count FROM mouse_event").fetchone()["count"]
+            source_count = conn.execute("SELECT COUNT(*) AS count FROM source_record").fetchone()["count"]
+            assert_single_biological_review_item(conn, issue_contains="offspring count exceeds born count")
+
+        assert offspring_count == 0
+        assert dict(litter) == {"number_alive": None, "status": "born"}
+        assert event_count == 0
+        assert source_count == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_weaning_routes_date_before_birth_to_review_before_canonical_write(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_litter_wean_state(conn)
+
+        with pytest.raises(HTTPException) as exc_info:
+            wean_litter(
+                "litter_event_evidence",
+                LitterWeanCreate(weaning_date="2026-04-19", number_weaned=1),
+            )
+
+        assert exc_info.value.status_code == 409
+        with db.connection() as conn:
+            litter = conn.execute(
+                "SELECT status, number_weaned, weaning_date FROM litter_registry WHERE litter_id = ?",
+                ("litter_event_evidence",),
+            ).fetchone()
+            mouse = conn.execute(
+                "SELECT status, next_action FROM mouse_master WHERE mouse_id = ?",
+                ("mouse_event_evidence",),
+            ).fetchone()
+            event_count = conn.execute("SELECT COUNT(*) AS count FROM mouse_event").fetchone()["count"]
+            source_count = conn.execute("SELECT COUNT(*) AS count FROM source_record").fetchone()["count"]
+            assert_single_biological_review_item(conn, issue_contains="weaning date before birth date")
+
+        assert dict(litter) == {"status": "pre_weaning", "number_weaned": None, "weaning_date": ""}
+        assert dict(mouse) == {"status": "weaning_pending", "next_action": "weaning_due"}
+        assert event_count == 0
+        assert source_count == 0
     finally:
         db.DB_PATH = old_db_path
 
