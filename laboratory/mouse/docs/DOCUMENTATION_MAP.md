@@ -20,6 +20,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | CLI usage, setup, tests, and runtime summary | `README.md` |
 | UI/workflow design direction | `design.md` |
 | Developer-only UI reference safety | `docs/ui_references.md` |
+| UI/UX implementation tracking | `docs/ui_ux_implementation_tracker_2026-05-11.md` |
 | Current state and mismatch summary | `docs/superpowers/specs/2026-05-09-current-state-design-implementation-review.md` |
 | MVP acceptance status | `mvp_acceptance_matrix_ko.md` |
 | First end-to-end implementation sequence | `mvp_vertical_slice_plan.md` |
@@ -43,6 +44,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | `design.md` | design guidance / non-canonical product documentation | UI and workflow direction for evidence-first review, correction, and exports. |
 | `docs/ui_references.md` | design guidance / non-canonical reference policy | Developer-only UI reference research rules, including Lazyweb fake-data-only usage and local MCP/token safety. |
 | `docs/ui_interaction_visual_feedback_direction_2026-05-11_ko.md` | design guidance / non-canonical product documentation | Interaction, visual feedback, progress, icon/chip, and state-cue guidance for reducing text-heavy UI without weakening evidence-first boundaries. |
+| `docs/ui_ux_implementation_tracker_2026-05-11.md` | design guidance / non-canonical project tracking documentation | Tracks merged UI/UX implementation slices, verification evidence, remaining gaps, and recommended next slices. |
 | `mouse_strain_colony_system_design_ko.md` | design guidance / non-canonical project document | Broader strain registry and colony tracking design. |
 | `reference_adoption_notes.md` | design guidance / non-canonical reference adoption note | External references filtered for this project. |
 | `mouse_open_source_research_adoption_ko.md` | design guidance / non-canonical reference adoption note | Open-source mouse colony research adoption notes. |

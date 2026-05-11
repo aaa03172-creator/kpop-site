@@ -349,6 +349,7 @@ evidence-first constraints.
 | --- | --- |
 | `design.md` | Main UI/workflow direction and product tone. |
 | `docs/ui_references.md` | Developer-only UI reference policy and Lazyweb safety rules. |
+| `docs/ui_ux_implementation_tracker_2026-05-11.md` | Merged UI/UX slices, verification evidence, remaining gaps, and recommended next implementation slices. |
 | `docs/superpowers/specs/2026-05-09-low-fatigue-colony-ui-design.md` | Low-fatigue screen responsibilities, state cues, and visual QA checklist. |
 | `ui_image_usage_improvement_plan_ko.md` | Rules for reducing decorative image noise. |
 | `review_burden_reduction_plan_ko.md` | Focus Review, Quick Check, and Trace Only workload split. |
