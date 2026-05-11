@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import importlib.util
+from contextlib import closing
 import json
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 from PIL import Image
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "generate_synthetic_cage_card_fixtures.py"
+VERIFY_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "verify-synthetic-photo-e2e.py"
+PACKAGE_PATH = Path(__file__).resolve().parents[1] / "package.json"
 
 
 def load_generator_module():
@@ -71,7 +76,7 @@ def test_generate_synthetic_cage_card_fixtures_creates_images_manifest_and_db(tm
             "rendering": "local_jpeg_photo_simulation",
         }
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         photo_count = conn.execute("SELECT COUNT(*) FROM photo_log").fetchone()[0]
         parse_count = conn.execute("SELECT COUNT(*) FROM parse_result").fetchone()[0]
         note_count = conn.execute("SELECT COUNT(*) FROM card_note_item_log").fetchone()[0]
@@ -89,3 +94,53 @@ def test_generate_synthetic_cage_card_fixtures_creates_images_manifest_and_db(tm
     assert review_count >= 4
     assert raw_source_kinds == {"synthetic_cage_card_photo"}
     assert source_layers == {"raw source"}
+
+
+def test_verify_synthetic_photo_e2e_script_runs_generated_jpeg_cases(tmp_path: Path) -> None:
+    output_dir = tmp_path / "synthetic_photo_e2e_run"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(VERIFY_SCRIPT_PATH),
+            "--output-dir",
+            str(output_dir),
+            "--json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    summary = json.loads(completed.stdout)
+    assert summary["boundary"] == "review item / test fixture"
+    assert summary["canonical"] is False
+    assert summary["generated"]["image_count"] == 5
+    assert summary["verification"]["passed"] == 5
+    assert summary["verification"]["failed"] == 0
+    assert summary["verification"]["confidence_calibration"]["coverage"]["missing_tags"] == []
+    assert (output_dir / "synthetic_photo_e2e_validation_cases.json").exists()
+    assert (output_dir / "synthetic_photo_e2e.sqlite").exists()
+
+
+def test_verify_synthetic_photo_e2e_default_run_cleans_disposable_output() -> None:
+    completed = subprocess.run(
+        [sys.executable, str(VERIFY_SCRIPT_PATH), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    summary = json.loads(completed.stdout)
+    generated_dir = Path(summary["generated"]["manifest"]).parent
+    assert summary["verification"]["passed"] == 5
+    assert not generated_dir.exists()
+
+
+def test_package_exposes_synthetic_photo_e2e_script() -> None:
+    package = json.loads(PACKAGE_PATH.read_text(encoding="utf-8"))
+
+    assert package["scripts"]["test:synthetic-photo-e2e"] == (
+        "python scripts/verify-synthetic-photo-e2e.py --json"
+    )
+    assert "npm run test:synthetic-photo-e2e" in package["scripts"]["verify"]
