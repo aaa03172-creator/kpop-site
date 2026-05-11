@@ -2380,6 +2380,17 @@ def request_ai_transcription_draft(photo_id: str, payload: PhotoAiDraftCreate) -
         "photo_id": photo_id,
         "photo_filename": photo["original_filename"],
         "external_inference_used": True,
+        "external_approval": {
+            "approved_external_inference": True,
+            "approval_scope": "single_photo_ai_transcription_draft",
+            "payload_review": {
+                "full_colony_records_sent": False,
+                "excel_rows_sent": False,
+                "raw_source_photo_sent": False,
+                "derived_roi_crops_sent": image_content["mode"] == "roi_field_crops",
+                "assigned_strain_scope_sent": bool(assigned_scope),
+            },
+        },
         "payload_minimization": image_content["payload_minimization"],
         "extraction_image_mode": image_content["mode"],
         "extraction_regions": image_content.get("extraction_regions", []),
@@ -3374,6 +3385,74 @@ def list_corrections() -> list[dict[str, Any]]:
             """
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+@app.get("/api/ui/action-log")
+def ui_action_log(target_id: str = "", action_type: str = "", limit: int = 50) -> dict[str, Any]:
+    clean_target_id = target_id.strip()
+    clean_action_type = action_type.strip()
+    bounded_limit = min(max(limit, 1), 200)
+    clauses: list[str] = []
+    params: list[Any] = []
+    if clean_target_id:
+        clauses.append("target_id = ?")
+        params.append(clean_target_id)
+    if clean_action_type:
+        clauses.append("action_type = ?")
+        params.append(clean_action_type)
+    where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT action_id, action_type, target_id, before_value, after_value,
+                   performed_by, performed_role, created_at
+            FROM action_log
+            {where_clause}
+            ORDER BY created_at DESC, action_id DESC
+            LIMIT ?
+            """,
+            [*params, bounded_limit],
+        ).fetchall()
+        action_type_rows = conn.execute(
+            """
+            SELECT action_type, COUNT(*) AS count
+            FROM action_log
+            GROUP BY action_type
+            ORDER BY count DESC, action_type
+            """
+        ).fetchall()
+    actions = []
+    for row in rows:
+        before_value = row["before_value"] or ""
+        after_value = row["after_value"] or ""
+        actions.append(
+            {
+                "action_id": row["action_id"],
+                "action_type": row["action_type"],
+                "target_id": row["target_id"],
+                "before_value": before_value,
+                "after_value": after_value,
+                "before": json_object(before_value),
+                "after": json_object(after_value),
+                "performed_by": row["performed_by"],
+                "performed_role": row["performed_role"],
+                "created_at": row["created_at"],
+            }
+        )
+    return {
+        "source_layer": "export or view",
+        "filters": {
+            "target_id": clean_target_id,
+            "action_type": clean_action_type,
+            "limit": bounded_limit,
+        },
+        "summary": {
+            "returned_actions": len(actions),
+            "available_action_types": len(action_type_rows),
+        },
+        "action_types": [dict(row) for row in action_type_rows],
+        "actions": actions,
+    }
 
 
 def optional_existing_source_record_id(conn: Any, source_record_id: str | None) -> str | None:
