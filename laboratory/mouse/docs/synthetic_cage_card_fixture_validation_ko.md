@@ -22,6 +22,12 @@ python scripts/verify-photo-e2e-cases.py `
   --require-fixtures
 ```
 
+Or run the disposable one-command gate:
+
+```powershell
+npm run test:synthetic-photo-e2e
+```
+
 Expected result: five synthetic JPEG cases pass. The generated set covers clear,
 low-confidence, dense-note, cropped/blurry, ear-label ambiguity, and numeric-note
 contracts. Each manifest case includes `synthetic_source.rendering:

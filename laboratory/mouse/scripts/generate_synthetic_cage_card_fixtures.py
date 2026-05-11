@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -402,7 +403,7 @@ def generate(output_dir: Path) -> dict[str, Any]:
         db_path.unlink()
     manifest_path = output_dir / "synthetic_photo_e2e_validation_cases.json"
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         create_schema(conn)
         for index, case in enumerate(CASES, start=1):
             insert_case(conn, output_dir, case, index)
