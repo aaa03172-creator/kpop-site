@@ -187,6 +187,13 @@ async function main() {
     "Export Center final actions should expose disabled reasons, accessibility links, and empty accepted-row guidance."
   );
   assert(
+    staticHtml.includes("function exportBlockerReviewButton(item)") &&
+      staticHtml.includes("open-export-blocker-review") &&
+      staticHtml.includes("Opened export blocker review") &&
+      staticHtml.includes("selectedReviewId = button.dataset.reviewId"),
+    "Export Center blockers should link directly to the responsible Focus Review item without editing export preview data."
+  );
+  assert(
     staticHtml.includes('id="extractionProgressBar" role="progressbar"') &&
       staticHtml.includes("extractionProgressPercent") &&
       staticHtml.includes('bar.setAttribute("aria-valuenow", String(percent))') &&
@@ -517,7 +524,7 @@ async function main() {
         ready: false,
         blocked_review_items: 1,
         open_review_items: 1,
-        review_blockers: [],
+        review_blockers: [reviewItem],
         readiness_warnings: [],
         preview_row_count: 0,
         photos: 0,
@@ -611,6 +618,18 @@ async function main() {
   assert(
     (await staticPage.locator("#evidenceLedgerReadModel").filter({ hasText: "Observed MT401 R0" }).filter({ hasText: "Parsed right_circle" }).count()) === 1,
     "Static Evidence Ledger should visibly separate direct observation, OCR, and interpreted parsed value."
+  );
+  assert(
+    (await staticPage.locator("#exportBlockerList .open-export-blocker-review").filter({ hasText: "Open review" }).count()) === 1 &&
+      (await staticPage.locator("#exportBlockerRows .open-export-blocker-review").filter({ hasText: "Open review" }).count()) === 1,
+    "Static Export Center should expose direct Open review actions for source-backed blockers."
+  );
+  await staticPage.locator('button[data-view-target="exports"]').click();
+  await staticPage.locator("#exportBlockerList .open-export-blocker-review").click();
+  await staticPage.waitForFunction(() => document.querySelector("#appContent")?.dataset.activeView === "review");
+  assert(
+    (await staticPage.locator('#reviewRows .review-card.selected-card[data-review-id="review_focus_static_contract"]').count()) === 1,
+    "Export blocker Open review should navigate to Review Queue and select the responsible review item."
   );
   const attentionCue = await staticPage.evaluate(() => {
     const item = { review_id: "review_dom_contract", attention_level: "quick_check", status: "open" };
