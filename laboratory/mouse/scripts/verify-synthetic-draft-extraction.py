@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 from app.main import normalize_ai_draft_payload  # noqa: E402
 from scripts.generate_synthetic_cage_card_fixtures import generate  # noqa: E402
+from scripts.local_ocr_provider import tesseract_provider_status  # noqa: E402
 
 
 SOURCE_POLICY = (
@@ -182,10 +183,13 @@ def verify_generated_drafts(generated: dict[str, Any]) -> dict[str, Any]:
 def verify(output_dir: Path) -> dict[str, Any]:
     generated = generate(output_dir)
     verification = verify_generated_drafts(generated)
+    ocr_provider = tesseract_provider_status()
     return {
         "boundary": "review item / test fixture",
         "canonical": False,
         "source_policy": SOURCE_POLICY,
+        "ocr_provider": ocr_provider,
+        "extraction_mode": "local_ocr" if ocr_provider["available"] else "fixture_payload_surrogate",
         "generated": generated,
         "verification": {key: value for key, value in verification.items() if key != "results"},
         "results": verification["results"],
