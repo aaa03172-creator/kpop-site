@@ -249,6 +249,69 @@ def verify(manifest: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
     return results, fail_count
 
 
+def confidence_calibration_summary(manifest: dict[str, Any], results: list[dict[str, Any]]) -> dict[str, Any]:
+    confidences = [
+        float(result["confidence"])
+        for result in results
+        if result.get("confidence") is not None
+    ]
+    cases_by_id = {
+        case.get("case_id"): case
+        for case in manifest.get("cases", [])
+        if case.get("case_id")
+    }
+    guard_cases = [
+        result["case_id"]
+        for result in results
+        if "max_confidence" in cases_by_id.get(result.get("case_id"), {}).get("expected_parse", {})
+    ]
+    if not confidences:
+        return {
+            "case_count": 0,
+            "min_confidence": None,
+            "max_confidence": None,
+            "average_confidence": None,
+            "bands": {
+                "0_20_must_review": 0,
+                "21_59_review": 0,
+                "60_100_clearer": 0,
+            },
+            "low_confidence_guard_cases": guard_cases,
+        }
+    return {
+        "case_count": len(confidences),
+        "min_confidence": min(confidences),
+        "max_confidence": max(confidences),
+        "average_confidence": round(sum(confidences) / len(confidences), 2),
+        "bands": {
+            "0_20_must_review": len([value for value in confidences if value <= 20]),
+            "21_59_review": len([value for value in confidences if 20 < value < 60]),
+            "60_100_clearer": len([value for value in confidences if value >= 60]),
+        },
+        "low_confidence_guard_cases": guard_cases,
+    }
+
+
+def build_summary(
+    *,
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    results: list[dict[str, Any]],
+    fail_count: int,
+) -> dict[str, Any]:
+    return {
+        "manifest": str(manifest_path.resolve()),
+        "case_count": len(results),
+        "passed": len([result for result in results if result["status"] == "PASS"]),
+        "failed": fail_count,
+        "skipped": 0,
+        "boundary": manifest.get("boundary", "review item / test fixture"),
+        "source_policy": manifest.get("source_policy", ""),
+        "confidence_calibration": confidence_calibration_summary(manifest, results),
+        "results": results,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Verify real-photo cage-card extraction regression cases."
@@ -281,14 +344,12 @@ def main() -> int:
             )
         return 0
     results, fail_count = verify(manifest)
-    summary = {
-        "manifest": str(Path(args.manifest).resolve()),
-        "case_count": len(results),
-        "passed": len([result for result in results if result["status"] == "PASS"]),
-        "failed": fail_count,
-        "skipped": 0,
-        "results": results,
-    }
+    summary = build_summary(
+        manifest=manifest,
+        manifest_path=Path(args.manifest),
+        results=results,
+        fail_count=fail_count,
+    )
     if args.json:
         print(json.dumps(summary, indent=2, ensure_ascii=False))
     else:
