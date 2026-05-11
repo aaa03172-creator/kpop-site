@@ -175,6 +175,14 @@ async function main() {
       staticHtml.includes('src="${cropImageUrl}&t=${Date.now()}"'),
     "ROI crop image URLs should be escaped before insertion into innerHTML attributes."
   );
+  assert(
+    staticHtml.includes("function setFinalExportActionState(preview)") &&
+      staticHtml.includes("exportDisabledReason") &&
+      staticHtml.includes("button.disabled = !ready") &&
+      staticHtml.includes('button.setAttribute("aria-describedby", "exportDisabledReason")') &&
+      staticHtml.includes("accepted source-backed export row(s) are ready"),
+    "Export Center final actions should expose disabled reasons, accessibility links, and empty accepted-row guidance."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);
