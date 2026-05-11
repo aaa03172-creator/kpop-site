@@ -2156,6 +2156,15 @@ def ai_draft_schema() -> dict[str, Any]:
     }
 
 
+def is_unlabeled_numeric_note_line(raw_line: Any) -> bool:
+    line = str(raw_line or "").strip()
+    if not re.search(r"\d", line):
+        return False
+    if not re.fullmatch(r"[\d\s,./\\-]+", line):
+        return False
+    return not bool(re.search(r"\d{2,4}[./-]\d{1,2}[./-]\d{1,2}", line))
+
+
 def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
     draft = value if isinstance(value, dict) else {}
     notes = draft.get("notes") if isinstance(draft.get("notes"), list) else []
@@ -2169,10 +2178,13 @@ def normalize_ai_draft_payload(value: Any) -> dict[str, Any]:
         strike = str(note.get("strike") or "unclear")
         if strike not in {"none", "single", "double", "unclear"}:
             strike = "unclear"
+        meaning = str(note.get("meaning") or "")
+        if is_unlabeled_numeric_note_line(raw):
+            meaning = "unlabeled_numeric_note"
         normalized_notes.append(
             {
                 "raw": raw,
-                "meaning": str(note.get("meaning") or ""),
+                "meaning": meaning,
                 "strike": strike,
                 "confidence": bounded_float(note.get("confidence")),
             }
