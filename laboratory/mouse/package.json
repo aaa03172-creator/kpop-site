@@ -13,9 +13,10 @@
     "test:local": "python scripts/verify-local-app.py",
     "test:photo-e2e": "python scripts/verify-photo-e2e-cases.py",
     "test:synthetic-photo-e2e": "python scripts/verify-synthetic-photo-e2e.py --json",
+    "test:synthetic-draft-extraction": "python scripts/verify-synthetic-draft-extraction.py --json",
     "test:python": "python -m pytest tests",
     "test:cage-card-skill-gym": "python evals/cage_card_skill_gym/run_baseline.py --probes evals/cage_card_skill_gym/probes",
-    "verify": "npm test && npm run test:acceptance && npm run test:local && npm run test:photo-e2e && npm run test:synthetic-photo-e2e && npm run test:cage-card-skill-gym && npm run test:python"
+    "verify": "npm test && npm run test:acceptance && npm run test:local && npm run test:photo-e2e && npm run test:synthetic-photo-e2e && npm run test:synthetic-draft-extraction && npm run test:cage-card-skill-gym && npm run test:python"
   },
   "keywords": [],
   "author": "",
