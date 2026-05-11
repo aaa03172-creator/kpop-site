@@ -210,6 +210,24 @@ def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
         {
             "upload_batch_id": "TEXT",
             "raw_source_kind": "TEXT NOT NULL DEFAULT 'cage_card_photo'",
+            "source_layer": "TEXT NOT NULL DEFAULT 'raw source'",
+        },
+    )
+    ensure_columns(
+        conn,
+        "parse_result",
+        {
+            "source_layer": "TEXT NOT NULL DEFAULT 'parsed or intermediate result'",
+        },
+    )
+    ensure_columns(
+        conn,
+        "photo_evidence_item",
+        {
+            "raw_extracted_value": "TEXT NOT NULL DEFAULT ''",
+            "normalized_value": "TEXT NOT NULL DEFAULT ''",
+            "confidence_source": "TEXT NOT NULL DEFAULT ''",
+            "evidence_reference_json": "TEXT NOT NULL DEFAULT '{}'",
         },
     )
     ensure_columns(
@@ -307,6 +325,18 @@ def ensure_schema_compatibility(conn: sqlite3.Connection) -> None:
             "assigned_role": "TEXT NOT NULL DEFAULT 'Colony Reviewer'",
             "assigned_to": "TEXT NOT NULL DEFAULT ''",
             "priority": "TEXT NOT NULL DEFAULT 'medium'",
+            "source_layer": "TEXT NOT NULL DEFAULT 'review item'",
+            "evidence_reference_json": "TEXT NOT NULL DEFAULT '{}'",
+            "review_trigger_json": "TEXT NOT NULL DEFAULT '{}'",
+        },
+    )
+    ensure_columns(
+        conn,
+        "correction_log",
+        {
+            "source_layer": "TEXT NOT NULL DEFAULT 'review item'",
+            "evidence_reference_json": "TEXT NOT NULL DEFAULT '{}'",
+            "correction_context_json": "TEXT NOT NULL DEFAULT '{}'",
         },
     )
     ensure_columns(
@@ -419,6 +449,7 @@ def init_db() -> None:
                 uploaded_at TEXT NOT NULL,
                 status TEXT NOT NULL,
                 raw_source_kind TEXT NOT NULL DEFAULT 'cage_card_photo',
+                source_layer TEXT NOT NULL DEFAULT 'raw source',
                 FOREIGN KEY (upload_batch_id) REFERENCES upload_batch(upload_batch_id)
             );
 
@@ -431,6 +462,7 @@ def init_db() -> None:
                 status TEXT NOT NULL,
                 confidence REAL NOT NULL DEFAULT 0,
                 needs_review INTEGER NOT NULL DEFAULT 1,
+                source_layer TEXT NOT NULL DEFAULT 'parsed or intermediate result',
                 FOREIGN KEY (photo_id) REFERENCES photo_log(photo_id)
             );
 
@@ -445,6 +477,9 @@ def init_db() -> None:
                 assigned_role TEXT NOT NULL DEFAULT 'Colony Reviewer',
                 assigned_to TEXT NOT NULL DEFAULT '',
                 priority TEXT NOT NULL DEFAULT 'medium',
+                source_layer TEXT NOT NULL DEFAULT 'review item',
+                evidence_reference_json TEXT NOT NULL DEFAULT '{}',
+                review_trigger_json TEXT NOT NULL DEFAULT '{}',
                 status TEXT NOT NULL DEFAULT 'open',
                 created_at TEXT NOT NULL,
                 resolved_at TEXT,
@@ -549,6 +584,9 @@ def init_db() -> None:
                 reason TEXT NOT NULL DEFAULT '',
                 source_record_id TEXT,
                 review_id TEXT,
+                source_layer TEXT NOT NULL DEFAULT 'review item',
+                evidence_reference_json TEXT NOT NULL DEFAULT '{}',
+                correction_context_json TEXT NOT NULL DEFAULT '{}',
                 corrected_at TEXT NOT NULL,
                 FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
                 FOREIGN KEY (review_id) REFERENCES review_queue(review_id)
@@ -666,7 +704,11 @@ def init_db() -> None:
                 observed_raw_text TEXT NOT NULL DEFAULT '',
                 ocr_text TEXT NOT NULL DEFAULT '',
                 parsed_value TEXT NOT NULL DEFAULT '',
+                raw_extracted_value TEXT NOT NULL DEFAULT '',
+                normalized_value TEXT NOT NULL DEFAULT '',
                 confidence REAL NOT NULL DEFAULT 0,
+                confidence_source TEXT NOT NULL DEFAULT '',
+                evidence_reference_json TEXT NOT NULL DEFAULT '{}',
                 interpretation TEXT NOT NULL DEFAULT '',
                 needs_review INTEGER NOT NULL DEFAULT 1,
                 review_reason TEXT NOT NULL DEFAULT '',

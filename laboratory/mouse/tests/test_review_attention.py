@@ -112,6 +112,112 @@ def test_correction_empty_source_record_does_not_create_orphan_source(tmp_path: 
         db.DB_PATH = old_db_path
 
 
+def test_correction_preserves_before_after_with_evidence_context(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        with db.connection() as conn:
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(correction_log)").fetchall()
+            }
+            assert "source_layer" in columns
+            assert "evidence_reference_json" in columns
+            assert "correction_context_json" in columns
+            conn.execute(
+                """
+                INSERT INTO source_record
+                    (source_record_id, source_type, source_uri, source_label,
+                     raw_payload, imported_at, checksum, note)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "source_correction_context",
+                    "photo",
+                    "data/photos/test/correction-context.jpg",
+                    "correction-context.jpg",
+                    "{}",
+                    "2026-05-09T00:00:00Z",
+                    "checksum",
+                    "",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_correction_context",
+                    None,
+                    "manual_photo_transcription",
+                    "{}",
+                    "2026-05-09T00:00:00Z",
+                    "review",
+                    60,
+                    1,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_correction_context",
+                    "parse_correction_context",
+                    "Medium",
+                    "Correction review",
+                    "unknown",
+                    "female",
+                    "Reviewer corrected the parsed value.",
+                    "open",
+                    "2026-05-09T00:00:01Z",
+                ),
+            )
+
+        result = create_correction(
+            CorrectionCreate(
+                entity_type="mouse",
+                entity_id="MT401",
+                field_name="sex",
+                before_value="unknown",
+                after_value="female",
+                reason="Reviewed source photo and corrected parsed sex.",
+                source_record_id="source_correction_context",
+                review_id="review_correction_context",
+            )
+        )
+
+        with db.connection() as conn:
+            correction = conn.execute(
+                """
+                SELECT source_layer, before_value, after_value,
+                       evidence_reference_json, correction_context_json
+                FROM correction_log
+                WHERE correction_id = ?
+                """,
+                (result["correction_id"],),
+            ).fetchone()
+
+        evidence_reference = json.loads(correction["evidence_reference_json"])
+        correction_context = json.loads(correction["correction_context_json"])
+        assert correction["source_layer"] == "review item"
+        assert correction["before_value"] == "unknown"
+        assert correction["after_value"] == "female"
+        assert evidence_reference["source_record_id"] == "source_correction_context"
+        assert evidence_reference["review_id"] == "review_correction_context"
+        assert correction_context["before_value"] == "unknown"
+        assert correction_context["after_value"] == "female"
+        assert correction_context["field_name"] == "sex"
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_correction_rejects_missing_source_record_without_partial_write(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:

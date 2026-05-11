@@ -12,6 +12,7 @@ Start with `docs/DOCUMENTATION_MAP.md` when deciding which project document to t
 - `final_mouse_colony_prd.md` is the primary adopted product reference.
 - `README.md` is the setup, command, and verification entry point.
 - Design, review, and implementation planning notes are supporting context unless explicitly adopted by the PRD.
+- `docs/mouse_db_assistant_integration_review_2026-05-11.md` records how to keep assistant/API/MCP readiness as a design habit while deferring adapter implementation.
 - `docs/ui_references.md` records developer-only UI reference research rules, including Lazyweb safety guidance for fake-data-only design research.
 - When documentation and implementation differ, check committed tests and call out the mismatch before changing behavior.
 
@@ -128,6 +129,14 @@ Litter weaning updates generated offspring from `weaning_pending` to `alive` and
 MouseDB JSON output is an integration contract. Future PaperPipe or Research Assistant integration should call MouseDB as an independent tool through CLI, API, or MCP wrappers.
 
 State-changing operations that update current mouse state also write event history in the same database transaction. Important records include traceability fields such as `source_type`, `source_ref`, `confidence`, and `reviewed_status`.
+
+Treat assistant/API/MCP readiness as a small design habit during ordinary work:
+
+- keep public IDs and JSON fields stable unless a change is intentional and documented;
+- include source/evidence refs and review/export blockers in read models where practical;
+- keep summaries non-canonical and point them back to MouseDB-owned records;
+- classify new automation-facing operations as read-only, additive/review-producing, or operator-confirmed;
+- defer actual MCP/API adapter work until the photo -> review -> accepted state -> Excel export flow is stable.
 
 ## Local Workbook Exports
 
