@@ -36,6 +36,72 @@ Goals:
   only after the reviewed apply path succeeds.
 - Excel preview/export is an export/view, not a source of truth.
 
+## Brand, Color, And Visual Identity
+
+MouseDB should feel like a calm lab workbench for evidence review, not a
+playful animal app, marketing dashboard, or broad analytics suite. The brand
+signal should come from precision, traceability, low-fatigue review, and safe
+export gating.
+
+Brand traits:
+
+- quiet and clinical;
+- evidence-first and audit-friendly;
+- dense enough for repeated lab work;
+- warm enough to reduce review fatigue;
+- careful about uncertainty, inferred biology, and canonical writes.
+
+Avoid:
+
+- mascot-led or cute animal branding that competes with real cage-card photos;
+- decorative gradients, oversized hero graphics, or glossy dashboard effects;
+- making clean metrics look more authoritative than unresolved evidence;
+- using green checkmarks where the state is only parsed, selected, or verified
+  but not yet accepted.
+
+### Color Roles
+
+Use a neutral workbench base with restrained semantic accents.
+
+| Role | Use | Notes |
+| --- | --- | --- |
+| Canvas | Main working surface | White or near-white; keep dense data readable. |
+| Soft panel | Grouped review/export/evidence sections | Subtle contrast only; avoid nested-card depth. |
+| Hairline | Dividers, tables, input borders | Prefer 1px borders over shadows. |
+| Focus accent | Current selection, keyboard focus, active navigation | Use narrowly; do not imply success. |
+| Red / danger | Must Review blockers, unsafe canonical apply, blocked final export | Pair with text and warning icon. |
+| Amber / warning | Quick Check, stale export, low confidence, pending attention | Actionable but not alarming. |
+| Green / success | Accepted, export-ready, completed canonical-safe action | Use only after the relevant reviewed path succeeds. |
+| Teal / verified | Verified field, linked evidence, user-corrected value | Keep distinct from canonical accepted state. |
+| Gray / neutral | Raw source, trace-only, disabled, processing | Avoid making Trace Only look like workload. |
+
+Suggested implementation tokens:
+
+| Token | Role |
+| --- | --- |
+| `--canvas` | Primary work surface. |
+| `--panel` | Section and inspector surfaces. |
+| `--panel-soft` | Quiet grouped content background. |
+| `--line` | Hairline divider and table border. |
+| `--text` | Primary operational text. |
+| `--muted` | Secondary explanatory text. |
+| `--accent` | Focus and selected state. |
+| `--accent-soft` | Selected-row or active-nav background. |
+| `--danger` | Must Review and blocking states. |
+| `--warning` | Quick Check, stale, low-confidence states. |
+| `--success` | Accepted and export-ready states. |
+| `--verified` | Verified or linked evidence states. |
+
+Visual asset rules:
+
+- real source photos always outrank illustration, icon, and chart content;
+- section-level illustrations are acceptable for orientation and empty states;
+- repeated table rows should use text, chips, icons, and compact source links,
+  not decorative image assets;
+- generated bitmap illustrations must never represent real colony evidence;
+- source-photo overlays should help inspect handwriting and must not distort
+  evidence color or obscure note lines.
+
 ## Common Status Cues
 
 Use chips, icons, labels, progress steps, selected-row accents, evidence badges,
@@ -96,6 +162,23 @@ Blocked actions:
 - disabled external parse assist should explain approval or local-only mode;
 - disabled review resolve should show missing resolution note or required value.
 
+## Pattern Decision Matrix
+
+Use this matrix when deciding how much UI feedback a state deserves.
+
+| Situation | Preferred pattern | Avoid |
+| --- | --- | --- |
+| User selects a photo, row, review item, evidence item, or export row | Selected-row accent, stable detail drawer title, source/evidence context | Green success state or automatic scrolling that hides the source item |
+| A field is parsed but not reviewed | Neutral `Parsed` chip, raw-vs-normalized display, confidence | Accepted styling or replacing raw text |
+| A short user confirmation is needed | Amber `Quick Check` chip, inline bounded selector, concise reason | Modal unless the consequence is high-risk |
+| Canonical write or final export is blocked | Red/amber blocker chip, disabled action reason, direct Focus Review link | Silent disabled button |
+| A high-risk correction may change mouse identity, status, genotype, mating, litter, or death state | Before/after preview plus explicit confirmation step | Single-click apply or vague `Approve` button |
+| Long-running upload, parse, AI draft, or export generation | Progress bar or stepper with current stage and partial success | Spinner with no detail |
+| Known-shape content is loading | Skeleton matching final dimensions | Layout jump or empty white panel |
+| Optional explanation is useful but not required | Tooltip, disclosure, or drawer | Permanent paragraph repeated on every row |
+| User action succeeds but does not create canonical state | Short `Saved`, `Verified`, or `Draft updated` status | `Accepted` or green check without qualifying text |
+| User action creates accepted canonical state | `Accepted` chip, action log/evidence link, updated counts | Hiding the before/after trail |
+
 ## Progress Guidance
 
 Use progress at three levels:
@@ -145,12 +228,110 @@ Excel export:
 - show stale/export-blocked state with source blockers;
 - never style Excel as the canonical editing surface.
 
+## Screen Acceptance Criteria
+
+Use these checks when reviewing UI implementation.
+
+Photo Review passes when:
+
+- source photo or selected photo preview is visually primary;
+- upload and parse progress show current stage and partial failures;
+- raw values, normalized suggestions, confidence, and review state are visible
+  together where decisions happen;
+- external AI/OCR state is labeled as local-only, approval-needed, approved, or
+  failed.
+
+Focus Review passes when:
+
+- every blocking item shows source evidence, issue, suggested value, and likely
+  consequence;
+- selected row state is distinct from verified or accepted state;
+- resolving an item updates visible counts and leaves unresolved sibling items
+  discoverable;
+- high-risk corrections show before/after and require a deliberate apply step.
+
+Evidence Ledger passes when:
+
+- source photo, OCR text, note line, Excel row, review decision, accepted event,
+  and export manifest are visually distinguishable;
+- imported Excel rows are labeled as import/export views;
+- evidence type is scannable before reading the full detail;
+- source photos remain the strongest visual evidence for photo-derived values.
+
+Mouse Detail and Colony State pass when:
+
+- accepted values are shown with source/evidence links;
+- accepted-state pages do not contain detailed review decision controls;
+- anomaly badges link to Focus Review instead of duplicating blocker detail;
+- raw OCR and parser diagnostics are collapsed by default.
+
+Excel Export passes when:
+
+- readiness is shown before download actions;
+- disabled final export actions explain why they are disabled;
+- blocked rows link to the responsible review surface;
+- preview grids look like export/views, not canonical editing tables;
+- stale export state is visible before the user downloads.
+
 ## Accessibility And Safety
 
 - Do not rely on color alone.
 - Icon-only controls need accessible names and tooltips.
 - Status changes should be screen-reader discoverable where practical.
 - Avoid animations that obscure source evidence or delay repeated review work.
+
+## Microcopy Rules
+
+Use lab workflow language and describe consequence precisely. Prefer short,
+actionable text over generic system language.
+
+| Avoid | Prefer |
+| --- | --- |
+| `Approve` | `Save verified correction` |
+| `Auto Fix` | `Apply suggested correction` |
+| `Ignore` | `Dismiss with reason` |
+| `Editable export` | `Preview only` |
+| `Error` | `Needs review because...` |
+| `Done` | `Saved draft`, `Verified`, or `Accepted` |
+| `Artifact` | `Source photo`, `Evidence`, `Export file`, or `Validation report` |
+| `Low risk` | `Needs quick confirmation` |
+| `No problem` | `No Focus Review blockers` |
+| `Ready` | `Export ready` or `Ready for review`, depending on consequence |
+
+Rules:
+
+- state what changed, what remains blocked, and where to act next;
+- never imply inferred biological state is certain before review;
+- mention `source photo`, `note line`, `mouse ID`, `mating`, `litter`,
+  `genotype`, `review`, and `Excel export` in user-facing places where those
+  terms match the lab workflow;
+- avoid internal IDs unless the user opens diagnostics;
+- use `Accepted` only when canonical state changed through the reviewed path.
+
+## Implementation Slice Roadmap
+
+Apply this guidance in small, reviewable slices.
+
+1. Export action feedback: disabled final export buttons explain blockers or
+   missing accepted export rows before the user clicks.
+2. Review Queue selection feedback: selected item, detail drawer, next/previous
+   controls, and resolve status update without implying acceptance.
+3. Photo Review progress: batch/photo stepper for upload, quality, parse, review,
+   candidate, accepted/held, and export readiness.
+4. Export row state chips: `New`, `Update`, `No change`, `Blocked`, `Preview
+   Only`, and stale export indicators in workbook previews.
+5. Evidence type badges: source photo, OCR text, note line, Excel row, accepted
+   event, and export manifest badges across Evidence Ledger and detail drawers.
+6. Keyboard and focus pass: visible focus, icon labels, tooltip coverage, and
+   reduced-motion checks for dense review workflows.
+
+Each slice should include:
+
+- the UI states changed;
+- the data boundary shown by each new visual cue;
+- the verification command or browser check used;
+- screenshots only as generated verification artifacts unless explicitly
+  adopted as documentation.
 
 ## References And Tools
 
