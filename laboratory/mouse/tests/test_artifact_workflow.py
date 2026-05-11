@@ -206,6 +206,83 @@ def test_export_validation_report_uses_uncompacted_preview_trace() -> None:
     assert "+3" not in report["checks"][1]["evidence_refs"]
 
 
+def test_export_validation_report_warns_on_partially_untraced_rows() -> None:
+    preview = {
+        "blocked_review_items": 0,
+        "latest_data_change_at": "2026-05-09T11:40:00Z",
+        "review_blockers": [],
+        "preview_rows": [
+            {
+                "mouse_id": "mouse_traced",
+                "source_photo_id": "photo_traced",
+                "source_note_item_id": "note_traced",
+            },
+            {
+                "mouse_id": "mouse_untraced",
+                "source_photo_id": "",
+                "source_note_item_id": "",
+            },
+        ],
+        "separation_rows": [
+            {
+                "source_photo_ids": "photo_traced",
+                "source_note_item_ids": "note_traced",
+            }
+        ],
+        "animal_sheet_rows": [],
+    }
+
+    report = app_main.build_export_validation_report(
+        preview,
+        export_type="separation_xlsx",
+        query="",
+        filename="separation.xlsx",
+        created_at="2026-05-09T12:10:00Z",
+    )
+
+    missing_trace_check = next(
+        check for check in report["checks"] if check["check_key"] == "missing_source_trace"
+    )
+    assert missing_trace_check["status"] == "warning"
+    assert missing_trace_check["target_refs"] == ["mouse_untraced"]
+    assert missing_trace_check["evidence_refs"] == ["photo_traced", "note_traced"]
+
+
+def test_export_validation_report_does_not_treat_source_record_as_note_item() -> None:
+    preview = {
+        "blocked_review_items": 0,
+        "latest_data_change_at": "2026-05-09T11:40:00Z",
+        "review_blockers": [],
+        "animal_sheet_rows": [
+            {
+                "mouse_id": "4p",
+                "source": "source_litter_manual",
+                "source_record_id": "source_litter_manual",
+                "source_note_item_ids": "",
+                "source_photo_ids": "",
+            }
+        ],
+        "preview_rows": [],
+        "separation_rows": [],
+    }
+
+    report = app_main.build_export_validation_report(
+        preview,
+        export_type="animal_sheet_xlsx",
+        query="",
+        filename="animal.xlsx",
+        created_at="2026-05-09T12:10:00Z",
+    )
+
+    assert report["source_refs"]["note_item_ids"] == []
+    assert report["source_refs"]["source_record_ids"] == ["source_litter_manual"]
+    missing_trace_check = next(
+        check for check in report["checks"] if check["check_key"] == "missing_source_trace"
+    )
+    assert missing_trace_check["status"] == "pass"
+    assert missing_trace_check["evidence_refs"] == ["source_litter_manual"]
+
+
 def test_export_validation_report_endpoint_uses_current_preview(
     tmp_path: Path,
     monkeypatch,
@@ -255,6 +332,7 @@ def test_persist_export_manifest_links_validation_report_and_sources(
             "source_refs": {
                 "photo_ids": ["photo_030"],
                 "note_item_ids": ["note_030"],
+                "source_record_ids": ["source_030"],
                 "review_ids": [],
                 "mouse_ids": ["mouse_030"],
             },
@@ -287,6 +365,7 @@ def test_persist_export_manifest_links_validation_report_and_sources(
     assert manifest["state_watermark"] == "2026-05-09T11:45:00Z"
     assert manifest["source_refs"]["photo_ids"] == ["photo_030"]
     assert manifest["source_refs"]["note_item_ids"] == ["note_030"]
+    assert manifest["source_refs"]["source_record_ids"] == ["source_030"]
 
 
 def test_log_workbook_export_preserves_manifest_provenance(tmp_path: Path) -> None:
@@ -507,9 +586,12 @@ def test_export_preview_reports_export_view_consistency_checks(tmp_path: Path) -
         assert preview["export_consistency"] == {
             "source_layer": "export or view",
             "source_state_layer": "canonical structured state",
+            "preview_row_count": 1,
+            "separation_row_count": 1,
+            "animal_sheet_row_count": 0,
             "preview_rows_have_trace": True,
             "separation_rows_have_trace": True,
-            "animal_sheet_rows_have_trace": True,
+            "animal_sheet_rows_have_trace": "not_applicable",
             "excel_export_is_view": True,
         }
     finally:
