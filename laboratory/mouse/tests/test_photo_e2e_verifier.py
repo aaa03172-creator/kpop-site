@@ -73,3 +73,26 @@ def test_photo_e2e_summary_reports_confidence_calibration_bands() -> None:
         },
         "low_confidence_guard_cases": ["low_confidence_card_blocks_export"],
     }
+
+
+def test_missing_fixture_summary_can_be_required_as_failed_gate() -> None:
+    verifier = load_verifier_module()
+    manifest = {
+        "boundary": "review item / test fixture",
+        "source_policy": "Use only local photo fixtures.",
+        "cases": [{"case_id": "clear_card"}, {"case_id": "low_confidence_card"}],
+    }
+
+    summary = verifier.build_missing_fixture_summary(
+        manifest=manifest,
+        manifest_path=Path("config/photo_e2e_validation_cases.json"),
+        missing_tables=["card_note_item_log", "photo_log"],
+        require_fixtures=True,
+    )
+
+    assert summary["status"] == "failed"
+    assert summary["failed"] == 2
+    assert summary["skipped"] == 0
+    assert summary["missing_tables"] == ["card_note_item_log", "photo_log"]
+    assert "required" in summary["failure_reason"]
+    assert verifier.missing_fixture_exit_code(summary) == 1
