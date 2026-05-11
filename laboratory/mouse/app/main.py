@@ -5394,6 +5394,200 @@ def validated_optional_event_evidence_refs(conn: Any, payload: Any) -> dict[str,
     return {key: value for key, value in refs.items() if value}
 
 
+def _biological_review_blocker(issue: str, reason: str, current_value: dict[str, Any], suggested_value: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "issue": issue,
+        "reason": reason,
+        "current_value": current_value,
+        "suggested_value": suggested_value or {"next_step": "manual_review_required"},
+    }
+
+
+def _canonical_review_reason(blocker: dict[str, Any]) -> str:
+    return (
+        f"{blocker['reason']} This biologically unlikely value was routed to review before canonical state, "
+        "source record, or event writes. Confirm the source photo, note line, or lab context before applying."
+    )
+
+
+def create_biological_transition_review_item(
+    conn: Any,
+    *,
+    action_type: str,
+    target_id: str,
+    raw_payload: str,
+    blocker: dict[str, Any],
+) -> str:
+    now = utc_now()
+    parse_id = new_id("parse")
+    review_id = new_id("review")
+    conn.execute(
+        """
+        INSERT INTO parse_result
+            (parse_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            parse_id,
+            "biological_transition_review",
+            json.dumps(
+                {
+                    "action_type": action_type,
+                    "target_id": target_id,
+                    "raw_payload": json_object(raw_payload),
+                    "blocker": blocker,
+                    "source_layer": "parsed or intermediate result",
+                },
+                ensure_ascii=False,
+            ),
+            now,
+            "review",
+            0,
+            1,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO review_queue
+            (review_id, parse_id, severity, issue, current_value, suggested_value,
+             review_reason, priority, evidence_reference_json, review_trigger_json,
+             status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            review_id,
+            parse_id,
+            "High",
+            blocker["issue"],
+            json.dumps(blocker["current_value"], ensure_ascii=False),
+            json.dumps(blocker["suggested_value"], ensure_ascii=False),
+            _canonical_review_reason(blocker),
+            "high",
+            json.dumps({"target_id": target_id, "action_type": action_type}, ensure_ascii=False),
+            json.dumps(
+                {
+                    "condition": "biologically_unlikely",
+                    "action_type": action_type,
+                    "canonical_write_blocked": True,
+                },
+                ensure_ascii=False,
+            ),
+            "open",
+            now,
+        ),
+    )
+    return review_id
+
+
+def block_biological_transition_review(
+    conn: Any,
+    *,
+    action_type: str,
+    target_id: str,
+    raw_payload: str,
+    blocker: dict[str, Any] | None,
+) -> None:
+    if blocker is None:
+        return
+    create_biological_transition_review_item(
+        conn,
+        action_type=action_type,
+        target_id=target_id,
+        raw_payload=raw_payload,
+        blocker=blocker,
+    )
+    conn.commit()
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "review_required": True,
+            "condition": "biologically_unlikely",
+            "issue": blocker["issue"],
+            "reason": blocker["reason"],
+        },
+    )
+
+
+def litter_creation_biological_blocker(mating: Any, payload: LitterCreate, birth_date: str) -> dict[str, Any] | None:
+    mating_start = str(mating["start_date"] or "") if "start_date" in mating.keys() else ""
+    mating_start_date = _safe_iso_date(mating_start)
+    birth = _safe_iso_date(birth_date)
+    if mating_start_date and birth and birth < mating_start_date:
+        return _biological_review_blocker(
+            "Litter birth date before mating start",
+            "Litter birth date is earlier than the linked mating start date.",
+            {
+                "mating_id": mating["mating_id"],
+                "mating_start_date": mating_start,
+                "birth_date": birth_date,
+            },
+        )
+    if payload.number_born is not None and payload.number_alive is not None and payload.number_alive > payload.number_born:
+        return _biological_review_blocker(
+            "Litter alive count exceeds born count",
+            "Number alive is greater than number born.",
+            {
+                "mating_id": payload.mating_id,
+                "number_born": payload.number_born,
+                "number_alive": payload.number_alive,
+            },
+        )
+    if payload.number_weaned is not None and payload.number_alive is not None and payload.number_weaned > payload.number_alive:
+        return _biological_review_blocker(
+            "Litter weaned count exceeds alive count",
+            "Number weaned is greater than number alive.",
+            {
+                "mating_id": payload.mating_id,
+                "number_alive": payload.number_alive,
+                "number_weaned": payload.number_weaned,
+            },
+        )
+    return None
+
+
+def offspring_creation_biological_blocker(litter: Any, payload: LitterOffspringCreate) -> dict[str, Any] | None:
+    number_born = litter["number_born"]
+    if number_born is not None and payload.count > int(number_born):
+        return _biological_review_blocker(
+            "Offspring count exceeds born count",
+            "Generated offspring count is greater than the litter's recorded number born.",
+            {
+                "litter_id": litter["litter_id"],
+                "number_born": number_born,
+                "offspring_count": payload.count,
+            },
+        )
+    return None
+
+
+def weaning_biological_blocker(litter: Any, payload: LitterWeanCreate, weaning_date: str, requested_count: int) -> dict[str, Any] | None:
+    birth_date = str(litter["birth_date"] or "")
+    birth = _safe_iso_date(birth_date)
+    weaning = _safe_iso_date(weaning_date)
+    if birth and weaning and weaning < birth:
+        return _biological_review_blocker(
+            "Litter weaning date before birth date",
+            "Weaning date is earlier than the litter birth date.",
+            {
+                "litter_id": litter["litter_id"],
+                "birth_date": birth_date,
+                "weaning_date": weaning_date,
+            },
+        )
+    number_alive = litter["number_alive"] if litter["number_alive"] is not None else litter["number_born"]
+    if number_alive is not None and requested_count > int(number_alive):
+        return _biological_review_blocker(
+            "Litter weaned count exceeds alive count",
+            "Requested weaned count is greater than the litter's current alive or born count.",
+            {
+                "litter_id": litter["litter_id"],
+                "number_alive": number_alive,
+                "number_weaned": requested_count,
+            },
+        )
+    return None
+
+
 @app.post("/api/mouse-events")
 def create_mouse_event(payload: MouseEventCreate) -> dict[str, Any]:
     event_id = new_id("event")
@@ -10378,7 +10572,7 @@ def create_litter(payload: LitterCreate) -> dict[str, Any]:
     raw_payload = payload.model_dump_json()
     with connection() as conn:
         mating = conn.execute(
-            "SELECT mating_id, mating_label FROM mating_registry WHERE mating_id = ?",
+            "SELECT mating_id, mating_label, start_date FROM mating_registry WHERE mating_id = ?",
             (payload.mating_id,),
         ).fetchone()
         if mating is None:
@@ -10390,6 +10584,13 @@ def create_litter(payload: LitterCreate) -> dict[str, Any]:
         if duplicate is not None:
             raise HTTPException(status_code=409, detail="Litter label already exists for this mating.")
 
+        block_biological_transition_review(
+            conn,
+            action_type="litter_created",
+            target_id=payload.mating_id,
+            raw_payload=raw_payload,
+            blocker=litter_creation_biological_blocker(mating, payload, birth_date),
+        )
         evidence_refs = validated_optional_event_evidence_refs(conn, payload)
         source_record_id = create_source_record(
             conn,
@@ -10532,6 +10733,13 @@ def create_litter_offspring(litter_id: str, payload: LitterOffspringCreate) -> d
         if duplicate is not None:
             raise HTTPException(status_code=409, detail="One or more offspring IDs already exist for this litter.")
 
+        block_biological_transition_review(
+            conn,
+            action_type="offspring_created",
+            target_id=litter_id,
+            raw_payload=raw_payload,
+            blocker=offspring_creation_biological_blocker(litter, payload),
+        )
         evidence_refs = validated_optional_event_evidence_refs(conn, payload)
         source_record_id = create_source_record(
             conn,
@@ -10698,6 +10906,13 @@ def wean_litter(litter_id: str, payload: LitterWeanCreate) -> dict[str, Any]:
         if offspring_rows and requested_count > len(offspring_rows):
             raise HTTPException(status_code=409, detail="Weaned count exceeds generated offspring records.")
 
+        block_biological_transition_review(
+            conn,
+            action_type="litter_weaned",
+            target_id=litter_id,
+            raw_payload=raw_payload,
+            blocker=weaning_biological_blocker(litter, payload, weaning_date, requested_count),
+        )
         evidence_refs = validated_optional_event_evidence_refs(conn, payload)
         source_record_id = create_source_record(
             conn,
