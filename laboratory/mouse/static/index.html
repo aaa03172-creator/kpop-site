@@ -397,12 +397,22 @@
       border-radius: 999px;
       background: #d9e7e2;
     }
+    .progress-track:focus-visible {
+      outline: 3px solid rgba(46, 125, 109, 0.24);
+      outline-offset: 3px;
+    }
     .progress-fill {
       width: 0%;
       height: 100%;
       border-radius: inherit;
       background: var(--primary);
       transition: width 180ms ease;
+    }
+    .progress-percent {
+      color: var(--primary-dark);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: right;
     }
     .progress-list {
       display: grid;
@@ -424,6 +434,27 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .progress-list .status::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+    .status.progress-uploading,
+    .status.progress-extracting {
+      background: #e8eefc;
+      color: #344a95;
+    }
+    .status.progress-stored,
+    .status.progress-saved {
+      background: #e4f3ef;
+      color: #0b554b;
+    }
+    .status.progress-queued {
+      background: #eef2f1;
+      color: var(--muted);
     }
     table {
       width: 100%;
@@ -2533,9 +2564,10 @@
       <p class="muted" id="uploadMessage"></p>
       <div class="extraction-progress" id="extractionProgress" aria-live="polite">
         <strong id="extractionProgressTitle">Preparing extraction</strong>
-        <div class="progress-track" aria-hidden="true">
+        <div class="progress-track" id="extractionProgressBar" role="progressbar" aria-label="Photo upload and extraction progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div class="progress-fill" id="extractionProgressFill"></div>
         </div>
+        <span class="progress-percent" id="extractionProgressPercent">0%</span>
         <p class="muted" id="extractionProgressDetail">Waiting for upload.</p>
         <ul class="progress-list" id="extractionProgressList"></ul>
       </div>
@@ -5225,17 +5257,32 @@
     function setExtractionProgress({ active = true, title = "", detail = "", done = 0, total = 0, items = [] } = {}) {
       const panel = document.getElementById("extractionProgress");
       const fill = document.getElementById("extractionProgressFill");
+      const bar = document.getElementById("extractionProgressBar");
+      const percentLabel = document.getElementById("extractionProgressPercent");
       panel.classList.toggle("active", active);
       document.getElementById("extractionProgressTitle").textContent = title || "Preparing extraction";
       document.getElementById("extractionProgressDetail").textContent = detail || "";
-      const percent = total ? Math.round((done / total) * 100) : 0;
-      fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      const percent = Math.max(0, Math.min(100, total ? Math.round((done / total) * 100) : 0));
+      fill.style.width = `${percent}%`;
+      bar.setAttribute("aria-valuenow", String(percent));
+      percentLabel.textContent = `${percent}%`;
       document.getElementById("extractionProgressList").innerHTML = items.map((item) => `
         <li>
-          <span class="status${item.status === "failed" ? " warn" : ""}">${escapeHtml(item.status || "pending")}</span>
+          <span class="status ${progressStatusClass(item.status)}">${escapeHtml(item.status || "pending")}</span>
           <strong title="${escapeHtml(item.name || "")}">${escapeHtml(item.name || "--")}</strong>
         </li>
       `).join("");
+    }
+
+    function progressStatusClass(status = "") {
+      const normalized = status.toLowerCase().replaceAll(" ", "-");
+      if (normalized.includes("failed")) return "warn";
+      if (normalized.includes("extracting")) return "progress-extracting";
+      if (normalized.includes("uploading")) return "progress-uploading";
+      if (normalized.includes("review-saved")) return "progress-saved";
+      if (normalized.includes("stored")) return "progress-stored";
+      if (normalized.includes("queued")) return "progress-queued";
+      return "progress-queued";
     }
 
     function applyPhotoPreviewTransform() {

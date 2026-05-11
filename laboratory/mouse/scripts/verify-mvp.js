@@ -183,6 +183,15 @@ async function main() {
       staticHtml.includes("accepted source-backed export row(s) are ready"),
     "Export Center final actions should expose disabled reasons, accessibility links, and empty accepted-row guidance."
   );
+  assert(
+    staticHtml.includes('id="extractionProgressBar" role="progressbar"') &&
+      staticHtml.includes("extractionProgressPercent") &&
+      staticHtml.includes('bar.setAttribute("aria-valuenow", String(percent))') &&
+      staticHtml.includes("function progressStatusClass(status = \"\")") &&
+      staticHtml.includes("progress-extracting") &&
+      staticHtml.includes("progress-uploading"),
+    "Upload and extraction progress should expose an accessible progressbar, visible percentage, and state-specific visual cues."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);
