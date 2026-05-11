@@ -1,4 +1,5 @@
 import argparse
+from contextlib import closing
 import json
 import sqlite3
 import sys
@@ -31,7 +32,7 @@ def missing_fixture_tables(db_path: Path | None = None) -> list[str]:
     selected_db_path = db_path or db.DB_PATH
     if not selected_db_path.exists():
         return sorted(REQUIRED_TABLES)
-    with sqlite3.connect(selected_db_path) as conn:
+    with closing(sqlite3.connect(selected_db_path)) as conn:
         rows = conn.execute(
             """
             SELECT name
@@ -172,7 +173,7 @@ def check_note_items(
 def open_review_index(db_path: Path | None = None) -> dict[str, list[dict[str, Any]]]:
     by_parse: dict[str, list[dict[str, Any]]] = {}
     if db_path is not None and db_path != db.DB_PATH:
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -235,7 +236,7 @@ def verify(manifest: dict[str, Any], db_path: Path | None = None) -> tuple[list[
     reviews_by_parse = open_review_index(db_path)
     results: list[dict[str, Any]] = []
     fail_count = 0
-    with sqlite3.connect(db_path or db.DB_PATH) as conn:
+    with closing(sqlite3.connect(db_path or db.DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         for case in manifest.get("cases", []):
             failures: list[str] = []
