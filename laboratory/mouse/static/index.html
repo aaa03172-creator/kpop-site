@@ -1867,6 +1867,10 @@
       line-height: 1.35;
       overflow-wrap: anywhere;
     }
+    .export-blocker-action {
+      justify-self: start;
+      margin-top: 4px;
+    }
     .export-detail-grid {
       display: grid;
       grid-template-columns: 1fr;
@@ -3527,7 +3531,7 @@
             <h3>Blocker table</h3>
             <div class="export-table-wrap">
               <table>
-                <thead><tr><th>Blocker</th><th>Severity</th><th>Check</th><th>Suggested</th><th>Reason</th></tr></thead>
+                <thead><tr><th>Blocker</th><th>Severity</th><th>Check</th><th>Suggested</th><th>Reason</th><th>Action</th></tr></thead>
                 <tbody id="exportBlockerRows"></tbody>
               </table>
             </div>
@@ -6249,6 +6253,7 @@
           <span>${escapeHtml([item.severity, item.assigned_role, item.priority, item.original_filename || item.source_name || item.photo_id || item.parse_id].filter(Boolean).join(" / ") || "source pending")}</span>
           ${item.review_check_targets?.length ? `<span><strong>Check</strong> ${escapeHtml(reviewCheckTargetsText(item))}</span>` : ""}
           <span>${escapeHtml(item.evidence_preview || item.review_reason || item.suggested_value || "Review source evidence before export.")}</span>
+          ${exportBlockerReviewButton(item)}
         </div>
       `).join("") || `
         <div class="export-blocker-row">
@@ -6287,15 +6292,26 @@
           item.uncertainty || "--"
         ])
       ).join("") || row(["No animal sheet preview rows yet", "", "", "", "", "", "", "", "", "", "", ""]);
-      document.getElementById("exportBlockerRows").innerHTML = readinessItems.map((item) =>
-        row([
-          item.issue,
-          item.severity,
-          reviewCheckTargetsText(item) || "--",
-          item.suggested_value || "--",
-          item.review_reason || item.display_id || item.parse_id || "--"
-        ])
-      ).join("") || row(["No Focus Review blockers", "", "", "", ""]);
+      document.getElementById("exportBlockerRows").innerHTML = readinessItems.map((item) => `
+        <tr>
+          <td>${escapeHtml(item.issue || "Review blocker")}</td>
+          <td>${escapeHtml(item.severity || "--")}</td>
+          <td>${escapeHtml(reviewCheckTargetsText(item) || "--")}</td>
+          <td>${escapeHtml(item.suggested_value || "--")}</td>
+          <td>${escapeHtml(item.review_reason || item.display_id || item.parse_id || "--")}</td>
+          <td>${exportBlockerReviewButton(item)}</td>
+        </tr>
+      `).join("") || row(["No Focus Review blockers", "", "", "", "", ""]);
+      document.querySelectorAll(".open-export-blocker-review").forEach((button) => {
+        button.addEventListener("click", async () => {
+          reviewStatusFilter = "all";
+          selectedReviewId = button.dataset.reviewId || "";
+          setActiveView("review");
+          await refresh();
+          document.getElementById("viewSubtitle").textContent =
+            `Opened export blocker review ${selectedReviewId}. Source evidence remains available in Focus Review.`;
+        });
+      });
       document.getElementById("exportLogRows").innerHTML = exportLog.map((item) => `
         <tr>
           <td>${escapeHtml(item.filename)}</td>
@@ -6314,6 +6330,11 @@
       document.querySelectorAll("#exportLogRows .artifact-preview-button").forEach((button) => {
         button.addEventListener("click", () => showArtifactPreview(button.dataset.artifactPath || ""));
       });
+    }
+
+    function exportBlockerReviewButton(item) {
+      if (!item?.review_id) return `<span class="muted">Open Focus Review</span>`;
+      return `<button class="export-blocker-action open-export-blocker-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Open review</button>`;
     }
 
     async function showArtifactPreview(path) {
