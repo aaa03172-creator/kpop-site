@@ -1765,6 +1765,23 @@
       flex-wrap: wrap;
       justify-content: flex-start;
     }
+    .export-action-buttons button:disabled {
+      cursor: not-allowed;
+    }
+    .export-disabled-reason {
+      margin: 10px 0 0;
+      padding: 9px 11px;
+      border: 1px solid rgba(180, 83, 9, 0.28);
+      border-radius: 7px;
+      background: #fff8e6;
+      color: var(--warn);
+      font-weight: 700;
+    }
+    .export-disabled-reason.ready {
+      border-color: rgba(13, 148, 136, 0.28);
+      background: #e4f3ef;
+      color: #0b554b;
+    }
     .export-readiness-grid {
       display: grid;
       grid-template-columns: minmax(320px, 0.8fr) minmax(420px, 1.2fr);
@@ -3404,6 +3421,7 @@
               <button id="exportSeparationXlsxButton" type="button">Download Separation XLSX</button>
               <button id="exportAnimalSheetXlsxButton" type="button">Download Animal Sheet XLSX</button>
             </div>
+            <p class="export-disabled-reason" id="exportDisabledReason">Checking export blockers before final downloads.</p>
           </article>
         </div>
         <div class="export-readiness-grid">
@@ -6039,6 +6057,30 @@
       document.getElementById("strainExperimentRows").innerHTML = experimentRows.map((items) => row(items)).join("") || row(["No related experiment events", "--", "--"]);
     }
 
+    function setFinalExportActionState(preview) {
+      const ready = Boolean(preview.ready);
+      const blockerCount = Number(preview.blocked_review_items || 0);
+      const genotypeBlockerCount = Number(preview.genotype_blocker_items || 0);
+      const warningCount = (preview.readiness_warnings || []).length;
+      const previewRowCount = Number(preview.preview_row_count || 0);
+      const hasExplicitBlockers = blockerCount || genotypeBlockerCount || warningCount;
+      const reasonText = ready
+        ? "Final downloads are enabled because accepted state has no blocking Focus Review items."
+        : hasExplicitBlockers
+          ? `Final downloads disabled: ${blockerCount} Focus Review blocker(s), ${genotypeBlockerCount} genotype blocker(s), and ${warningCount} readiness warning(s) must be reviewed first.`
+          : `Final downloads disabled: ${previewRowCount} accepted source-backed export row(s) are ready. Upload, review, and accept cage-card evidence before generating final files.`;
+      const reason = document.getElementById("exportDisabledReason");
+      reason.textContent = reasonText;
+      reason.classList.toggle("ready", ready);
+      reason.setAttribute("role", "status");
+      ["exportReadyMouseCsvButton", "exportSeparationXlsxButton", "exportAnimalSheetXlsxButton"].forEach((id) => {
+        const button = document.getElementById(id);
+        button.disabled = !ready;
+        button.title = reasonText;
+        button.setAttribute("aria-describedby", "exportDisabledReason");
+      });
+    }
+
     function renderExportReadiness(preview, exportLog) {
       const blockers = preview.review_blockers || [];
       const readinessWarnings = preview.readiness_warnings || [];
@@ -6071,6 +6113,7 @@
       document.getElementById("exportActionSummary").textContent = preview.ready
         ? "Final CSV and workbook downloads are ready. Generated files will be recorded in the export log."
         : `${preview.blocked_review_items || 0} Focus Review blocker(s) can still change exported values; quick checks stay reviewable without blocking export.`;
+      setFinalExportActionState(preview);
       document.getElementById("exportFilenames").textContent =
         `Last export: ${preview.latest_generated_export_at || "none"}; ` +
         `Latest data change: ${preview.latest_data_change_at || "none"}; ` +
