@@ -5,6 +5,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+from PIL import Image
+
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "generate_synthetic_cage_card_fixtures.py"
 
@@ -57,7 +59,17 @@ def test_generate_synthetic_cage_card_fixtures_creates_images_manifest_and_db(tm
     for case in manifest["cases"]:
         image_path = output_dir / case["photo_filename"]
         assert image_path.exists()
+        assert image_path.suffix.lower() == ".jpg"
         assert image_path.stat().st_size >= case["min_photo_bytes"]
+        with Image.open(image_path) as image:
+            assert image.format == "JPEG"
+            assert image.size[0] >= 1000
+            assert image.size[1] >= 700
+        assert case["synthetic_source"] == {
+            "boundary": "raw source / test fixture",
+            "canonical": False,
+            "rendering": "local_jpeg_photo_simulation",
+        }
 
     with sqlite3.connect(db_path) as conn:
         photo_count = conn.execute("SELECT COUNT(*) FROM photo_log").fetchone()[0]
