@@ -12,9 +12,11 @@ from app.main import (
     PhotoManualTranscriptionCreate,
     apply_canonical_candidate,
     canonical_candidate_apply_preview,
+    canonical_candidate_audit_view,
     create_photo_manual_transcription,
     import_sample_fixture,
     review_item_audit_view,
+    void_canonical_candidate,
 )
 
 
@@ -924,6 +926,112 @@ def test_canonical_candidate_apply_links_note_evidence_to_created_event(tmp_path
         }
         assert evidence["linked_event_id"] == event["event_id"]
         assert evidence["status"] == "linked"
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_canonical_candidate_void_blocks_when_applied_mouse_row_is_missing(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("parse_missing_mouse_void", "manual_photo_transcription", "{}", "2026-05-09T00:00:01Z", "review", 88, 1),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, status, created_at, resolved_at, resolution_note)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_missing_mouse_void",
+                    "parse_missing_mouse_void",
+                    "Medium",
+                    "Resolved canonical candidate",
+                    "{}",
+                    "{}",
+                    "Reviewer accepted candidate.",
+                    "resolved",
+                    "2026-05-09T00:00:02Z",
+                    "2026-05-09T00:00:03Z",
+                    "Accepted.",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO canonical_candidate
+                    (candidate_id, review_id, parse_id, proposed_mouse_display_id,
+                     proposed_strain, proposed_dob, proposed_count, candidate_payload,
+                     status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "candidate_missing_mouse_void",
+                    "review_missing_mouse_void",
+                    "parse_missing_mouse_void",
+                    "MISSING-318",
+                    "ApoM Tg/Tg",
+                    "2026-04-01",
+                    "1",
+                    json.dumps({"display_id": "MISSING-318"}),
+                    "applied",
+                    "2026-05-09T00:00:04Z",
+                    "2026-05-09T00:00:04Z",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO mouse_event
+                    (event_id, mouse_id, event_type, event_date, related_entity_type,
+                     related_entity_id, details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "event_missing_mouse_void",
+                    "mouse_missing_318",
+                    "canonical_candidate_applied",
+                    "2026-05-09",
+                    "canonical_candidate",
+                    "candidate_missing_mouse_void",
+                    "{}",
+                    "2026-05-09T00:00:05Z",
+                ),
+            )
+
+            audit = canonical_candidate_audit_view(conn, "candidate_missing_mouse_void")
+
+        assert audit["applied_mouse_ids"] == ["mouse_missing_318"]
+        assert audit["mice"] == []
+        assert audit["missing_mouse_ids"] == ["mouse_missing_318"]
+        assert audit["can_void"] is False
+        assert "Applied mouse records are missing: mouse_missing_318." in audit["blockers"]
+
+        with pytest.raises(HTTPException) as exc_info:
+            void_canonical_candidate("candidate_missing_mouse_void")
+
+        assert exc_info.value.status_code == 409
+        detail = exc_info.value.detail
+        assert detail["missing_mouse_ids"] == ["mouse_missing_318"]
+        with db.connection() as conn:
+            status = conn.execute(
+                "SELECT status FROM canonical_candidate WHERE candidate_id = ?",
+                ("candidate_missing_mouse_void",),
+            ).fetchone()["status"]
+            voided_events = conn.execute(
+                "SELECT COUNT(*) AS count FROM mouse_event WHERE event_type = 'canonical_candidate_voided'",
+            ).fetchone()["count"]
+
+        assert status == "applied"
+        assert voided_events == 0
     finally:
         db.DB_PATH = old_db_path
 
