@@ -115,9 +115,19 @@ async function main() {
   assert(
     html.includes("--accent-linear: #5e6ad2") &&
       staticHtml.includes("--accent-linear: #5e6ad2") &&
+      html.includes("--focus-ring: rgba(94, 106, 210, 0.28)") &&
+      staticHtml.includes("--focus-ring: rgba(94, 106, 210, 0.28)") &&
+      staticHtml.includes("--selected-bg: var(--accent-soft)") &&
+      staticHtml.includes("--disabled-bg: #f3f4f6") &&
+      staticHtml.includes("--ready-bg: #f0faf6") &&
+      staticHtml.includes("--blocked-bg: #fff8f7") &&
+      staticHtml.includes("--processing-bg: #e8eefc") &&
+      staticHtml.includes("border-color: var(--selected-line)") &&
+      staticHtml.includes("background: var(--ready-bg)") &&
+      staticHtml.includes("background: var(--blocked-bg)") &&
       html.includes("DESIGN.md-inspired") &&
       staticHtml.includes("DESIGN.md-inspired"),
-    "Local UI should expose Airtable/Linear-inspired design tokens without copying brand surfaces."
+    "Local UI should expose Airtable/Linear-inspired semantic design tokens without copying brand surfaces."
   );
   assert(
     staticHtml.includes("attention-must-review") &&

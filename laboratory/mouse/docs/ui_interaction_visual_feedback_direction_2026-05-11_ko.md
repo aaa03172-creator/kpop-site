@@ -91,6 +91,16 @@ Suggested implementation tokens:
 | `--warning` | Quick Check, stale, low-confidence states. |
 | `--success` | Accepted and export-ready states. |
 | `--verified` | Verified or linked evidence states. |
+| `--processing-bg`, `--processing-ink` | Upload, parse, or extraction in progress. |
+| `--success-bg`, `--success-line`, `--success` | Completed or accepted-safe states after the relevant reviewed path. |
+| `--warning-bg`, `--warning-line`, `--warning` | Quick Check, low-confidence, or stale states. |
+| `--danger-bg`, `--danger-line`, `--danger` | Must Review, unsafe apply, or blocked final export. |
+| `--neutral-bg`, `--neutral-line` | Raw source, trace-only, empty, disabled, or quiet state containers. |
+| `--disabled-bg`, `--disabled-line`, `--disabled-ink` | Disabled controls with visible explanation nearby. |
+| `--selected-bg`, `--selected-line` | Current selection without implying success. |
+| `--ready-bg`, `--ready-line`, `--ready-ink` | Export-ready or action-ready surfaces. |
+| `--blocked-bg`, `--blocked-line`, `--blocked-ink` | Blocked final export or unresolved high-risk review surfaces. |
+| `--focus-ring` | Keyboard focus and progressbar focus outline. |
 
 Visual asset rules:
 

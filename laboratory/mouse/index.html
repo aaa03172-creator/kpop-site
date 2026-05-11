@@ -21,6 +21,7 @@
       --line: var(--hairline);
       --line-soft: #e7ebef;
       --ink: var(--ink-strong);
+      --text: var(--ink-strong);
       --muted: #41454d;
       --quiet: #6f747c;
       --primary: #181d26;
@@ -31,6 +32,34 @@
       --tertiary-bg: #ffdcc5;
       --error: #ba1a1a;
       --error-bg: #ffdad6;
+      --accent: var(--accent-linear);
+      --accent-soft: var(--accent-linear-soft);
+      --focus-ring: rgba(94, 106, 210, 0.28);
+      --selected-bg: var(--accent-soft);
+      --selected-line: rgba(94, 106, 210, 0.52);
+      --warning: #8a5a00;
+      --warning-bg: #fff8e6;
+      --warning-line: #f2d28d;
+      --danger: #9b2f3e;
+      --danger-bg: #fff1f2;
+      --danger-line: #f0a0ad;
+      --success: #0b554b;
+      --success-bg: #e4f3ef;
+      --success-line: rgba(15, 107, 95, 0.38);
+      --verified: #0f6b5f;
+      --processing-bg: #e8eefc;
+      --processing-ink: #344a95;
+      --neutral-bg: #f3f4f6;
+      --neutral-line: #d1d5db;
+      --disabled-bg: #f3f4f6;
+      --disabled-line: #d1d5db;
+      --disabled-ink: var(--quiet);
+      --ready-bg: #f0faf6;
+      --ready-line: var(--success-line);
+      --ready-ink: var(--success);
+      --blocked-bg: #fff8f7;
+      --blocked-line: rgba(155, 47, 62, 0.34);
+      --blocked-ink: var(--danger);
       --shadow: 0 12px 30px rgba(11, 28, 48, 0.08);
       --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
@@ -63,6 +92,9 @@
 
     button:disabled {
       cursor: not-allowed;
+      border-color: var(--disabled-line);
+      background: var(--disabled-bg);
+      color: var(--disabled-ink);
       opacity: 0.52;
     }
 
