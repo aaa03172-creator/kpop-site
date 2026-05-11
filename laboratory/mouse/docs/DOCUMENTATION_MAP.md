@@ -54,6 +54,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | File | Layer | Use |
 | --- | --- | --- |
 | `mvp_vertical_slice_plan.md` | implementation planning / non-canonical project note | First source photo to review to canonical candidate to export slice. |
+| `docs/cage_card_photo_pipeline_implementation_baseline_ko.md` | implementation baseline / non-canonical project documentation | Recommended implementation baseline for cage-card photo processing boundaries, review gates, canonical apply, and export provenance. |
 | `mvp_acceptance_matrix_ko.md` | implementation verification / non-canonical project note | MVP acceptance status matrix. |
 | `roi_card_extraction_plan_ko.md` | implementation planning / non-canonical project note | ROI-based cage-card extraction planning. |
 | `pvm_photo_evidence_ledger_adoption_ko.md` | implementation planning / non-canonical project note | Photo Evidence Ledger adoption review. |
@@ -67,6 +68,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | File | Layer | Use |
 | --- | --- | --- |
 | `mousedb_cli_first_review_ko.md` | design review / non-canonical project note | CLI-first MouseDB boundary and integration review. |
+| `docs/mouse_db_assistant_integration_review_2026-05-11.md` | review item / non-canonical project documentation | MouseDB-specific adaptation of external assistant/API/MCP integration proposals, preserving MouseDB as the colony truth owner. |
 | `mousedb_open_design_artifact_workflow_review_ko.md` | implementation planning / non-canonical project note | Artifact lifecycle, preview-before-commit, validation report, and export provenance review. |
 | `open_source_acceleration_candidates_ko.md` | design guidance / non-canonical technical reference note | Possible implementation accelerators. |
 | `open_source_acceleration_doublecheck_ko.md` | design guidance / non-canonical technical reference note | License, fit, and MVP-risk double-check for accelerators. |
