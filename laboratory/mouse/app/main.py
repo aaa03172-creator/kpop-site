@@ -269,12 +269,18 @@ class LitterWeanCreate(BaseModel):
     weaning_date: str = ""
     number_weaned: int | None = Field(default=None, ge=0)
     note: str = ""
+    source_photo_id: str = ""
+    source_note_item_id: str = ""
+    photo_evidence_id: str = ""
 
 
 class MouseCageMove(BaseModel):
     cage_id: str = Field(min_length=1)
     note: str = ""
     moved_at: str = ""
+    source_photo_id: str = ""
+    source_note_item_id: str = ""
+    photo_evidence_id: str = ""
 
 
 @app.get("/")
@@ -4266,6 +4272,14 @@ def split_export_ref_values(value: Any) -> list[str]:
     return unique_nonempty(str(value or "").replace(";", ",").split(","))
 
 
+def export_row_trace_refs(row: dict[str, Any]) -> dict[str, list[str]]:
+    return {
+        "photo_ids": split_export_ref_values(row.get("source_photo_ids") or row.get("source_photo_id")),
+        "note_item_ids": split_export_ref_values(row.get("source_note_item_ids") or row.get("source_note_item_id")),
+        "source_record_ids": split_export_ref_values(row.get("source_record_ids") or row.get("source_record_id")),
+    }
+
+
 def build_export_validation_report(
     preview: dict[str, Any],
     *,
@@ -4291,16 +4305,24 @@ def build_export_validation_report(
 
     photo_ids: list[str] = []
     note_item_ids: list[str] = []
+    source_record_ids: list[str] = []
     mouse_ids: list[str] = []
+    rows_missing_trace: list[str] = []
     for row in trace_rows:
         if not isinstance(row, dict):
             continue
-        photo_ids.extend(split_export_ref_values(row.get("source_photo_ids") or row.get("source_photo_id")))
-        note_item_ids.extend(split_export_ref_values(row.get("source_note_item_ids") or row.get("source_note_item_id") or row.get("source")))
-        mouse_ids.extend(split_export_ref_values(row.get("mouse_id")))
+        refs = export_row_trace_refs(row)
+        photo_ids.extend(refs["photo_ids"])
+        note_item_ids.extend(refs["note_item_ids"])
+        source_record_ids.extend(refs["source_record_ids"])
+        row_mouse_ids = split_export_ref_values(row.get("mouse_id"))
+        mouse_ids.extend(row_mouse_ids)
+        if not unique_nonempty(refs["photo_ids"] + refs["note_item_ids"] + refs["source_record_ids"]):
+            rows_missing_trace.extend(row_mouse_ids or split_export_ref_values(row.get("display_id")) or ["unidentified_export_row"])
     review_ids = unique_nonempty(
         [item.get("review_id") for item in review_blockers if isinstance(item, dict)]
     )
+    trace_evidence_refs = unique_nonempty(photo_ids + note_item_ids + source_record_ids)
     checks = [
         {
             "check_key": "open_focus_review_blocker",
@@ -4317,15 +4339,15 @@ def build_export_validation_report(
         },
         {
             "check_key": "missing_source_trace",
-            "status": "warning" if export_rows and not unique_nonempty(photo_ids + note_item_ids) else "pass",
-            "severity": "medium" if export_rows and not unique_nonempty(photo_ids + note_item_ids) else "low",
+            "status": "warning" if rows_missing_trace else "pass",
+            "severity": "medium" if rows_missing_trace else "low",
             "message": (
-                "Export rows are present but source photo/note trace could not be found in preview rows."
-                if export_rows and not unique_nonempty(photo_ids + note_item_ids)
-                else "Export preview includes source trace or has no rows to export."
+                f"{len(rows_missing_trace)} export row(s) are missing row-level source trace."
+                if rows_missing_trace
+                else "Export preview rows include source trace or no rows are present."
             ),
-            "target_refs": unique_nonempty(mouse_ids),
-            "evidence_refs": unique_nonempty(photo_ids + note_item_ids),
+            "target_refs": unique_nonempty(rows_missing_trace),
+            "evidence_refs": trace_evidence_refs,
             "recommended_action": "Review export trace sheet before handoff.",
         },
     ]
@@ -4347,6 +4369,7 @@ def build_export_validation_report(
             "parse_ids": [],
             "review_ids": review_ids,
             "note_item_ids": unique_nonempty(note_item_ids),
+            "source_record_ids": unique_nonempty(source_record_ids),
             "mouse_ids": unique_nonempty(mouse_ids),
         },
         "checks": checks,
@@ -5209,6 +5232,45 @@ def validate_mouse_event_evidence(conn: Any, payload: MouseEventCreate) -> None:
                 "or details.source_note_item_id."
             ),
         )
+
+
+def validated_optional_event_evidence_refs(conn: Any, payload: Any) -> dict[str, str]:
+    refs = {
+        "source_photo_id": str(getattr(payload, "source_photo_id", "") or "").strip(),
+        "source_note_item_id": str(getattr(payload, "source_note_item_id", "") or "").strip(),
+        "photo_evidence_id": str(getattr(payload, "photo_evidence_id", "") or "").strip(),
+    }
+    if refs["source_photo_id"]:
+        exists = conn.execute("SELECT 1 FROM photo_log WHERE photo_id = ?", (refs["source_photo_id"],)).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=400, detail="source_photo_id does not exist.")
+    if refs["source_note_item_id"]:
+        exists = conn.execute(
+            "SELECT 1 FROM card_note_item_log WHERE note_item_id = ?",
+            (refs["source_note_item_id"],),
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=400, detail="source_note_item_id does not exist.")
+    if refs["photo_evidence_id"]:
+        evidence = conn.execute(
+            """
+            SELECT source_photo_id, note_item_id
+            FROM photo_evidence_item
+            WHERE photo_evidence_id = ?
+            """,
+            (refs["photo_evidence_id"],),
+        ).fetchone()
+        if evidence is None:
+            raise HTTPException(status_code=400, detail="photo_evidence_id does not exist.")
+        evidence_photo_id = str(evidence["source_photo_id"] or "")
+        evidence_note_item_id = str(evidence["note_item_id"] or "")
+        if refs["source_photo_id"] and evidence_photo_id and refs["source_photo_id"] != evidence_photo_id:
+            raise HTTPException(status_code=400, detail="photo_evidence_id does not match source_photo_id.")
+        if refs["source_note_item_id"] and evidence_note_item_id and refs["source_note_item_id"] != evidence_note_item_id:
+            raise HTTPException(status_code=400, detail="photo_evidence_id does not match source_note_item_id.")
+        refs["source_photo_id"] = refs["source_photo_id"] or evidence_photo_id
+        refs["source_note_item_id"] = refs["source_note_item_id"] or evidence_note_item_id
+    return {key: value for key, value in refs.items() if value}
 
 
 @app.post("/api/mouse-events")
@@ -9743,6 +9805,7 @@ def move_mouse_to_cage(mouse_id: str, payload: MouseCageMove) -> dict[str, Any]:
         ).fetchone()
         if cage is None:
             raise HTTPException(status_code=404, detail="Cage not found.")
+        evidence_refs = validated_optional_event_evidence_refs(conn, payload)
         previous = conn.execute(
             """
             SELECT a.assignment_id, c.cage_id, c.cage_label
@@ -9765,6 +9828,9 @@ def move_mouse_to_cage(mouse_id: str, payload: MouseCageMove) -> dict[str, Any]:
                     "cage_id": payload.cage_id,
                     "cage_label": cage["cage_label"],
                     "note": payload.note,
+                    "source_photo_id": evidence_refs.get("source_photo_id", ""),
+                    "source_note_item_id": evidence_refs.get("source_note_item_id", ""),
+                    "photo_evidence_id": evidence_refs.get("photo_evidence_id", ""),
                 },
                 ensure_ascii=False,
             ),
@@ -9795,6 +9861,7 @@ def move_mouse_to_cage(mouse_id: str, payload: MouseCageMove) -> dict[str, Any]:
             "to_cage_label": cage["cage_label"],
             "note": payload.note,
         }
+        details.update(evidence_refs)
         conn.execute(
             """
             INSERT INTO mouse_event
@@ -10421,6 +10488,7 @@ def wean_litter(litter_id: str, payload: LitterWeanCreate) -> dict[str, Any]:
         if offspring_rows and requested_count > len(offspring_rows):
             raise HTTPException(status_code=409, detail="Weaned count exceeds generated offspring records.")
 
+        evidence_refs = validated_optional_event_evidence_refs(conn, payload)
         source_record_id = create_source_record(
             conn,
             source_type="manual_entry",
@@ -10475,6 +10543,7 @@ def wean_litter(litter_id: str, payload: LitterWeanCreate) -> dict[str, Any]:
                             "mating_label": litter["mating_label"],
                             "previous_status": offspring["status"],
                             "note": payload.note,
+                            **evidence_refs,
                         },
                         ensure_ascii=False,
                     ),
@@ -12479,7 +12548,9 @@ def export_uncertainty_label(row: Any) -> str:
     return f"Ear label {raw_label}: {status}{confidence_text}"
 
 
-def export_rows_have_trace(rows: list[dict[str, Any]], trace_fields: list[str]) -> bool:
+def export_rows_have_trace(rows: list[dict[str, Any]], trace_fields: list[str]) -> bool | str:
+    if not rows:
+        return "not_applicable"
     return all(any(str(row.get(field) or "").strip() for field in trace_fields) for row in rows)
 
 
@@ -12491,6 +12562,9 @@ def export_consistency_checks(
     return {
         "source_layer": "export or view",
         "source_state_layer": "canonical structured state",
+        "preview_row_count": len(preview_rows),
+        "separation_row_count": len(separation_rows),
+        "animal_sheet_row_count": len(animal_sheet_rows),
         "preview_rows_have_trace": export_rows_have_trace(
             preview_rows,
             ["source_note_item_id", "source_photo_id", "card_snapshot_id", "source_record_id"],
