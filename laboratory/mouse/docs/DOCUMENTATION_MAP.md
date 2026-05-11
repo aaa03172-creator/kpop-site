@@ -42,6 +42,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | --- | --- | --- |
 | `design.md` | design guidance / non-canonical product documentation | UI and workflow direction for evidence-first review, correction, and exports. |
 | `docs/ui_references.md` | design guidance / non-canonical reference policy | Developer-only UI reference research rules, including Lazyweb fake-data-only usage and local MCP/token safety. |
+| `docs/ui_interaction_visual_feedback_direction_2026-05-11_ko.md` | design guidance / non-canonical product documentation | Interaction, visual feedback, progress, icon/chip, and state-cue guidance for reducing text-heavy UI without weakening evidence-first boundaries. |
 | `mouse_strain_colony_system_design_ko.md` | design guidance / non-canonical project document | Broader strain registry and colony tracking design. |
 | `reference_adoption_notes.md` | design guidance / non-canonical reference adoption note | External references filtered for this project. |
 | `mouse_open_source_research_adoption_ko.md` | design guidance / non-canonical reference adoption note | Open-source mouse colony research adoption notes. |
@@ -56,6 +57,10 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | `mvp_vertical_slice_plan.md` | implementation planning / non-canonical project note | First source photo to review to canonical candidate to export slice. |
 | `docs/cage_card_photo_pipeline_implementation_baseline_ko.md` | implementation baseline / non-canonical project documentation | Recommended implementation baseline for cage-card photo processing boundaries, review gates, canonical apply, and export provenance. |
 | `docs/cage_card_photo_pipeline_implementation_audit_2026-05-11.md` | implementation audit / review item | Current implementation audit against the cage-card photo pipeline baseline, with evidence-linking gaps and next slice recommendation. |
+| `docs/cage_card_photo_upload_flow_doublecheck_audit_2026-05-11_ko.md` | implementation audit / review item | Code-level doublecheck of the current photo upload, extraction, review, correction, canonical apply, and export flow boundaries. |
+| `docs/cage_card_photo_accuracy_evaluation_test_plan_2026-05-11_ko.md` | implementation verification plan / review item | Evaluation criteria and task-slice test plan for cage-card photo parsing, correction, canonical apply safety, and Excel export provenance. |
+| `docs/cage_card_photo_accuracy_task_slices_2026-05-11_ko.md` | implementation planning / review item | Task-slice plan for closing photo accuracy and evidence-propagation gaps identified by the upload-flow audit and evaluation plan. |
+| `docs/cage_card_photo_accuracy_doublecheck_summary_2026-05-11_ko.md` | implementation verification summary / review item | Concise doublecheck summary of coverage, test priority, manual checks, residual risks, and verification results for the cage-card photo accuracy test plan. |
 | `mvp_acceptance_matrix_ko.md` | implementation verification / non-canonical project note | MVP acceptance status matrix. |
 | `roi_card_extraction_plan_ko.md` | implementation planning / non-canonical project note | ROI-based cage-card extraction planning. |
 | `pvm_photo_evidence_ledger_adoption_ko.md` | implementation planning / non-canonical project note | Photo Evidence Ledger adoption review. |

@@ -10,6 +10,7 @@ Related non-canonical reference note:
 
 - `mouse_strain_colony_system_design_ko.md` summarizes the broader Korean extension design for strain registry, mouse cards, events, source evidence, review/correction, and visualization.
 - `reference_adoption_notes.md` summarizes development, design, and external tooling references that can inform implementation without replacing the PRD.
+- `docs/ui_interaction_visual_feedback_direction_2026-05-11_ko.md` defines non-canonical interaction, visual feedback, progress, and status-cue guidance for reducing text-heavy UI while preserving evidence-first boundaries.
 
 ## Design Intent
 
@@ -314,6 +315,14 @@ The proposed visual direction is appropriate:
 - minimal rounded corners;
 - clear status badges;
 - source image thumbnails and ROI overlays.
+
+Interaction and feedback direction should follow `docs/ui_interaction_visual_feedback_direction_2026-05-11_ko.md`. In short:
+
+- communicate state with icons, chips, progress, selected-row accents, and concise labels before long explanatory text;
+- show progress for upload, parse/OCR, review, candidate preparation, canonical apply, and export readiness;
+- distinguish selected, parsed, verified, accepted, blocked, and export-ready states visually and semantically;
+- keep source photos visually primary over decorative images;
+- avoid using color alone to communicate status.
 
 ## DESIGN.md Source Adaptation
 

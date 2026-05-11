@@ -189,7 +189,16 @@ Do not mark the external proposal documents as canonical parents unless the miss
 
 ## Practical Next Steps
 
-Use this order if assistant-readiness becomes active work:
+Use assistant-readiness as a standing design habit during ordinary MouseDB work. When touching IDs, CLI JSON output, service methods, read models, review workflows, export manifests, or generated artifacts, ask:
+
+1. Does this preserve MouseDB as the owner of colony truth?
+2. Can a future assistant point back to a source photo, note item, review item, accepted record, event, or export manifest?
+3. Is the output machine-readable without forcing automation to scrape human-readable text?
+4. Are uncertain OCR values, unresolved review blockers, and export blockers visible rather than summarized away?
+5. Is any new automation-facing operation clearly read-only, additive/review-producing, or operator-confirmed?
+6. Does this avoid starting an MCP/API adapter before the underlying service and review gates are stable?
+
+Use this order if assistant-readiness later becomes active implementation work:
 
 1. Inventory current public IDs and decide which object families need durable user-facing IDs.
 2. Define draft `mousedb://` URI formats for source photos, review items, accepted records, events, and exports.

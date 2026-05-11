@@ -3305,7 +3305,8 @@ def list_corrections() -> list[dict[str, Any]]:
             """
             SELECT correction_id, entity_type, entity_id, field_name,
                    before_value, after_value, reason, source_record_id,
-                   review_id, corrected_at
+                   review_id, source_layer, evidence_reference_json,
+                   correction_context_json, corrected_at
             FROM correction_log
             ORDER BY corrected_at DESC
             """
@@ -3339,6 +3340,31 @@ def optional_existing_review_id(conn: Any, review_id: str | None) -> str | None:
     return clean_id
 
 
+def correction_evidence_reference_json(source_record_id: str | None, review_id: str | None) -> str:
+    return json.dumps(
+        {
+            "source_layer": "review item",
+            "source_record_id": source_record_id or "",
+            "review_id": review_id or "",
+        },
+        ensure_ascii=False,
+    )
+
+
+def correction_context_json(payload: CorrectionCreate) -> str:
+    return json.dumps(
+        {
+            "entity_type": payload.entity_type,
+            "entity_id": payload.entity_id,
+            "field_name": payload.field_name,
+            "before_value": payload.before_value,
+            "after_value": payload.after_value,
+            "reason": payload.reason,
+        },
+        ensure_ascii=False,
+    )
+
+
 def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -> str:
     correction_id = new_id("correction")
     source_record_id = optional_existing_source_record_id(conn, payload.source_record_id)
@@ -3348,8 +3374,9 @@ def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -
         INSERT INTO correction_log
             (correction_id, entity_type, entity_id, field_name,
              before_value, after_value, reason, source_record_id,
-             review_id, corrected_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             review_id, source_layer, evidence_reference_json,
+             correction_context_json, corrected_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             correction_id,
@@ -3361,6 +3388,9 @@ def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -
             payload.reason,
             source_record_id,
             review_id,
+            "review item",
+            correction_evidence_reference_json(source_record_id, review_id),
+            correction_context_json(payload),
             corrected_at,
         ),
     )
@@ -3426,7 +3456,8 @@ def review_item_audit_view(conn: Any, review_id: str) -> dict[str, Any]:
         """
         SELECT correction_id, entity_type, entity_id, field_name,
                before_value, after_value, reason, source_record_id,
-               review_id, corrected_at
+               review_id, source_layer, evidence_reference_json,
+               correction_context_json, corrected_at
         FROM correction_log
         WHERE review_id = ?
         ORDER BY corrected_at, correction_id
@@ -4427,7 +4458,7 @@ def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str,
         """
         SELECT note_item_id, photo_id, card_snapshot_id, line_number, raw_line_text, interpreted_status,
                parsed_mouse_display_id, parsed_ear_label_raw, parsed_ear_label_code,
-               parsed_ear_label_confidence, parsed_ear_label_review_status
+               parsed_ear_label_confidence, parsed_ear_label_review_status, needs_review
         FROM card_note_item_log
         WHERE parse_id = ?
           AND parsed_type = 'mouse_item'
@@ -4439,9 +4470,38 @@ def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str,
     ).fetchall()
     proposed_mice = []
     duplicate_risks = []
+    unresolved_note_reviews = []
+    missing_note_evidence = []
     for note in note_rows:
         display_id = str(note["parsed_mouse_display_id"])
         mouse_id = f"mouse_{display_id}_{candidate['parse_id']}".replace(" ", "_")
+        evidence = conn.execute(
+            """
+            SELECT photo_evidence_id
+            FROM photo_evidence_item
+            WHERE note_item_id = ?
+              AND evidence_kind = 'note_line'
+              AND status NOT IN ('rejected', 'superseded')
+            LIMIT 1
+            """,
+            (note["note_item_id"],),
+        ).fetchone()
+        if int(note["needs_review"] or 0) or note["parsed_ear_label_review_status"] not in {"auto_filled", "verified", "user_corrected"}:
+            unresolved_note_reviews.append(
+                {
+                    "note_item_id": note["note_item_id"],
+                    "raw_line_text": note["raw_line_text"],
+                    "review_status": note["parsed_ear_label_review_status"],
+                }
+            )
+        if evidence is None:
+            missing_note_evidence.append(
+                {
+                    "note_item_id": note["note_item_id"],
+                    "raw_line_text": note["raw_line_text"],
+                    "source_photo_id": note["photo_id"],
+                }
+            )
         existing = conn.execute(
             "SELECT mouse_id FROM mouse_master WHERE mouse_id = ?",
             (mouse_id,),
@@ -4479,6 +4539,7 @@ def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str,
                 "source_note_item_id": note["note_item_id"],
                 "source_photo_id": note["photo_id"],
                 "card_snapshot_id": note["card_snapshot_id"] or "",
+                "photo_evidence_id": evidence["photo_evidence_id"] if evidence is not None else "",
                 "raw_line_text": note["raw_line_text"],
                 "will_create_mouse": existing is None,
                 "existing_mouse_id": existing["mouse_id"] if existing is not None else "",
@@ -4494,6 +4555,10 @@ def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str,
         blockers.append("Candidate has no parsed mouse note lines to apply.")
     if duplicate_risks:
         blockers.append("Active duplicate display IDs must be resolved before applying.")
+    if unresolved_note_reviews:
+        blockers.append("All note-line review items must be resolved before applying.")
+    if missing_note_evidence:
+        blockers.append("Each canonical apply row must have note-line photo evidence.")
     return {
         "boundary": "export or view",
         "candidate_id": candidate_id,
@@ -4504,6 +4569,8 @@ def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str,
         "legacy_row_id": candidate["legacy_row_id"],
         "proposed_mice": proposed_mice,
         "duplicate_risks": duplicate_risks,
+        "unresolved_note_reviews": unresolved_note_reviews,
+        "missing_note_evidence": missing_note_evidence,
         "blocked": bool(blockers),
         "blockers": blockers,
         "summary": {
@@ -4795,10 +4862,24 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
                     "note_item_id": note["note_item_id"],
                     "raw_line_text": note["raw_line_text"],
                     "boundary": "canonical structured state",
+                    "canonical_apply_rule": {
+                        "source_layer": "canonical structured state",
+                        "requires_resolved_review": True,
+                        "requires_note_line_evidence": True,
+                        "requires_duplicate_check": True,
+                    },
+                    "source_trace": {
+                        "source_photo_id": note["photo_id"] or "",
+                        "parse_id": candidate["parse_id"],
+                        "note_item_id": note["note_item_id"],
+                        "photo_evidence_id": "",
+                    },
                 }
                 if photo_evidence is not None:
                     event_details["photo_evidence_id"] = photo_evidence["photo_evidence_id"]
                     event_details["source_photo_id"] = photo_evidence["source_photo_id"]
+                    event_details["source_trace"]["source_photo_id"] = photo_evidence["source_photo_id"]
+                    event_details["source_trace"]["photo_evidence_id"] = photo_evidence["photo_evidence_id"]
                 conn.execute(
                     """
                     INSERT INTO mouse_event
@@ -6007,6 +6088,14 @@ PHOTO_EVIDENCE_FIELD_MAP = {
 }
 
 
+PHOTO_EVIDENCE_NORMALIZED_FIELD_PAIRS = {
+    "raw_strain": "matched_strain",
+    "sex_raw": "sex_normalized",
+    "dob_raw": "dob_normalized",
+    "mating_date_raw": "mating_date_normalized",
+}
+
+
 def roi_label_for_field(record: dict[str, Any], field_name: str) -> str:
     for region in record.get("extractionRegions") or []:
         if not isinstance(region, dict):
@@ -6015,6 +6104,200 @@ def roi_label_for_field(record: dict[str, Any], field_name: str) -> str:
         if field_name in {str(field).strip() for field in target_fields}:
             return str(region.get("label") or field_name)
     return PHOTO_EVIDENCE_FIELD_MAP.get(field_name, ("", field_name))[1]
+
+
+def photo_evidence_raw_normalized_values(record: dict[str, Any], field_name: str) -> tuple[str, str]:
+    record_key = PHOTO_EVIDENCE_FIELD_MAP[field_name][0]
+    observed_value = str(record.get(record_key) or "").strip()
+    if field_name in PHOTO_EVIDENCE_NORMALIZED_FIELD_PAIRS:
+        normalized_field = PHOTO_EVIDENCE_NORMALIZED_FIELD_PAIRS[field_name]
+        normalized_key = PHOTO_EVIDENCE_FIELD_MAP[normalized_field][0]
+        return observed_value, str(record.get(normalized_key) or "").strip()
+    for raw_field, normalized_field in PHOTO_EVIDENCE_NORMALIZED_FIELD_PAIRS.items():
+        if field_name == normalized_field:
+            raw_key = PHOTO_EVIDENCE_FIELD_MAP[raw_field][0]
+            return str(record.get(raw_key) or "").strip(), observed_value
+    return observed_value, ""
+
+
+def photo_evidence_reference_json(
+    *,
+    source_photo_id: str,
+    parse_id: str,
+    card_snapshot_id: str,
+    evidence_kind: str,
+    roi_label: str,
+    note_item_id: str = "",
+) -> str:
+    reference = {
+        "source_layer": "parsed or intermediate result",
+        "source_photo_id": source_photo_id,
+        "parse_id": parse_id,
+        "card_snapshot_id": card_snapshot_id,
+        "evidence_kind": evidence_kind,
+        "roi_label": roi_label,
+    }
+    if note_item_id:
+        reference["note_item_id"] = note_item_id
+    return json.dumps(reference, ensure_ascii=False)
+
+
+def review_item_evidence_reference_json(
+    *,
+    source_photo_id: str,
+    parse_id: str,
+    card_snapshot_id: str,
+    photo_evidence_items: int,
+    linked_photo_evidence_items: int = 0,
+) -> str:
+    return json.dumps(
+        {
+            "source_layer": "review item",
+            "source_photo_id": source_photo_id,
+            "parse_id": parse_id,
+            "card_snapshot_id": card_snapshot_id,
+            "photo_evidence_items": photo_evidence_items,
+            "linked_photo_evidence_items": linked_photo_evidence_items,
+        },
+        ensure_ascii=False,
+    )
+
+
+def review_item_suggested_value(record: dict[str, Any]) -> str:
+    proposed = {
+        "proposed_normalized_values": {
+            "matched_strain": str(record.get("matchedStrain") or "").strip(),
+            "sex_normalized": str(record.get("sexNormalized") or "").strip(),
+            "dob_normalized": str(record.get("dobNormalized") or "").strip(),
+            "mating_date_normalized": str(record.get("matingDateNormalized") or "").strip(),
+        },
+        "instruction": "Compare with raw photo and predecessor Excel before accepting.",
+    }
+    return json.dumps(proposed, ensure_ascii=False)
+
+
+def invalid_iso_date(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return False
+    try:
+        date.fromisoformat(text)
+    except ValueError:
+        return True
+    return False
+
+
+def review_required_conditions(conn: Any, record: dict[str, Any], confidence: float) -> list[dict[str, Any]]:
+    conditions: list[dict[str, Any]] = []
+    uncertain_fields = set(review_uncertain_fields(record))
+    plausibility_findings = parse_payload_plausibility_findings(record)
+    notes = record.get("notes") if isinstance(record.get("notes"), list) else []
+
+    def add(condition: str, message: str, **extra: Any) -> None:
+        if any(item["condition"] == condition and item.get("new_value") == extra.get("new_value") for item in conditions):
+            return
+        payload = {"condition": condition, "message": message}
+        payload.update({key: value for key, value in extra.items() if value not in (None, "", [])})
+        conditions.append(payload)
+
+    if bounded_float(confidence) < 60:
+        add("low_ocr_confidence", "OCR confidence is below the canonical apply threshold.", confidence=bounded_float(confidence))
+
+    parsed_note_rows = []
+    for note in notes:
+        raw_line = str(note.get("raw") if isinstance(note, dict) else note).strip()
+        if not raw_line:
+            continue
+        parsed = parse_note_line(raw_line, str(record.get("type") or "unknown").lower())
+        parsed_note_rows.append((raw_line, parsed))
+        if parsed["parsed_type"] in {"unknown", "unlabeled_numeric_note"}:
+            add(
+                "uncertain_mouse_id_format",
+                "Mouse ID or note-line format is uncertain and must remain reviewable.",
+                raw_extracted_value=raw_line,
+            )
+
+    by_display_id: dict[str, set[str]] = {}
+    for raw_line, parsed in parsed_note_rows:
+        display_id = str(parsed.get("parsed_mouse_display_id") or "")
+        if display_id:
+            by_display_id.setdefault(display_id, set()).add(raw_line)
+    for display_id, raw_lines in by_display_id.items():
+        if len(raw_lines) > 1:
+            add(
+                "snapshot_value_conflict",
+                "Same cage/card snapshot contains conflicting note-line values for one mouse ID.",
+                new_value=display_id,
+                raw_extracted_value=", ".join(sorted(raw_lines)),
+            )
+        existing = conn.execute(
+            """
+            SELECT mouse_id, source_note_item_id
+            FROM mouse_master
+            WHERE display_id = ?
+              AND status IN ('active', 'mating', 'pre_weaning', 'weaning_pending')
+            LIMIT 1
+            """,
+            (display_id,),
+        ).fetchone()
+        if existing is not None:
+            add(
+                "canonical_state_conflict",
+                "Parsed value conflicts with existing canonical structured state.",
+                existing_value=existing["mouse_id"],
+                new_value=display_id,
+                evidence_reference=existing["source_note_item_id"],
+            )
+
+    if any(finding.get("severity") == "high" for finding in plausibility_findings) or invalid_iso_date(record.get("dobNormalized")):
+        add(
+            "biologically_unlikely",
+            "Date, mating, litter, genotype, or biological plausibility check requires review.",
+            proposed_normalized_value=str(record.get("dobNormalized") or ""),
+        )
+
+    raw_visible_lines = record.get("rawVisibleTextLines") if isinstance(record.get("rawVisibleTextLines"), list) else []
+    if not raw_visible_lines or any(raw_line in {"?", "-", "unknown"} for raw_line, _parsed in parsed_note_rows):
+        add("insufficient_source_evidence", "Source evidence is missing or too weak for automatic canonical use.")
+
+    normalized_pairs = [
+        ("rawStrain", "matchedStrain", "matched_strain"),
+        ("sexRaw", "sexNormalized", "sex_raw"),
+        ("dobRaw", "dobNormalized", "dob_normalized"),
+        ("matingDateRaw", "matingDateNormalized", "mating_date_normalized"),
+    ]
+    for raw_key, normalized_key, field_name in normalized_pairs:
+        raw_value = str(record.get(raw_key) or "").strip()
+        normalized_value = str(record.get(normalized_key) or "").strip()
+        if normalized_value and raw_value and raw_value != normalized_value and field_name in uncertain_fields:
+            add(
+                "unconfirmed_normalization_rule",
+                "Proposed normalized value depends on an uncertain or unconfirmed normalization rule.",
+                raw_extracted_value=raw_value,
+                proposed_normalized_value=normalized_value,
+            )
+
+    return conditions
+
+
+def review_item_trigger_json(
+    record: dict[str, Any],
+    confidence: float,
+    reason: str,
+    required_conditions: list[dict[str, Any]] | None = None,
+) -> str:
+    return json.dumps(
+        {
+            "reason": reason,
+            "confidence": bounded_float(confidence),
+            "uncertain_fields": review_uncertain_fields(record),
+            "plausibility_findings": parse_payload_plausibility_findings(record),
+            "review_required_conditions": required_conditions or [],
+        },
+        ensure_ascii=False,
+    )
 
 
 def write_photo_evidence_items(
@@ -6038,6 +6321,8 @@ def write_photo_evidence_items(
         observed_value = str(record.get(record_key) or "").strip()
         if not observed_value:
             continue
+        raw_extracted_value, normalized_value = photo_evidence_raw_normalized_values(record, field_name)
+        roi_label = roi_label_for_field(record, field_name)
         needs_review = 1 if field_name in uncertain_fields else 0
         review_reason = f"Field {field_name} was marked uncertain by the transcription draft." if needs_review else ""
         conn.execute(
@@ -6045,9 +6330,10 @@ def write_photo_evidence_items(
             INSERT OR REPLACE INTO photo_evidence_item
                 (photo_evidence_id, source_photo_id, parse_id, card_snapshot_id,
                  card_type, evidence_kind, roi_label, observed_raw_text,
-                 ocr_text, parsed_value, confidence, interpretation,
+                 ocr_text, parsed_value, raw_extracted_value, normalized_value,
+                 confidence, confidence_source, evidence_reference_json, interpretation,
                  needs_review, review_reason, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"pe_{parse_id}_{field_name}",
@@ -6056,11 +6342,21 @@ def write_photo_evidence_items(
                 card_snapshot_id or None,
                 card_type,
                 "card_field",
-                roi_label_for_field(record, field_name),
+                roi_label,
                 observed_value,
                 observed_value,
                 observed_value,
+                raw_extracted_value,
+                normalized_value,
                 bounded_float(record.get("confidence")),
+                f"{str(record.get('extractionMethod') or 'manual_photo_transcription')}:card_field",
+                photo_evidence_reference_json(
+                    source_photo_id=photo_id,
+                    parse_id=parse_id,
+                    card_snapshot_id=card_snapshot_id,
+                    evidence_kind="card_field",
+                    roi_label=roi_label,
+                ),
                 "",
                 needs_review,
                 review_reason,
@@ -6090,15 +6386,18 @@ def write_photo_evidence_items(
         ]
         parsed_value = " ".join(bit for bit in parsed_bits if bit).strip()
         needs_review = int(row["needs_review"] or 0)
+        roi_label = roi_label_for_field(record, "notes")
         conn.execute(
             """
             INSERT OR REPLACE INTO photo_evidence_item
                 (photo_evidence_id, source_photo_id, parse_id, card_snapshot_id,
                  note_item_id, card_type, evidence_kind, roi_label,
-                 observed_raw_text, ocr_text, parsed_value, confidence,
+                 observed_raw_text, ocr_text, parsed_value,
+                 raw_extracted_value, normalized_value, confidence,
+                 confidence_source, evidence_reference_json,
                  interpretation, needs_review, review_reason, status,
                  created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"pe_{row['note_item_id']}",
@@ -6108,11 +6407,22 @@ def write_photo_evidence_items(
                 row["note_item_id"],
                 row["card_type"] or card_type,
                 "note_line",
-                roi_label_for_field(record, "notes"),
+                roi_label,
                 row["raw_line_text"] or "",
                 row["raw_line_text"] or "",
                 parsed_value,
+                row["raw_line_text"] or "",
+                parsed_value,
                 bounded_float(row["confidence"]),
+                f"{str(record.get('extractionMethod') or 'manual_photo_transcription')}:note_line",
+                photo_evidence_reference_json(
+                    source_photo_id=photo_id,
+                    parse_id=parse_id,
+                    card_snapshot_id=card_snapshot_id,
+                    evidence_kind="note_line",
+                    roi_label=roi_label,
+                    note_item_id=str(row["note_item_id"] or ""),
+                ),
                 "",
                 needs_review,
                 "Note line requires review before canonical use." if needs_review else "",
@@ -7254,13 +7564,15 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             record=record,
             created_at=now,
         )
+        review_conditions = review_required_conditions(conn, record, payload.confidence)
         review_id = f"review_{parse_id}"
         conn.execute(
             """
             INSERT INTO review_queue
                 (review_id, parse_id, severity, issue, current_value, suggested_value,
-                 review_reason, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 review_reason, source_layer, evidence_reference_json,
+                 review_trigger_json, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 review_id,
@@ -7268,8 +7580,21 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                 "Medium",
                 issue,
                 payload.mouse_count or payload.raw_strain or photo["original_filename"],
-                "Compare with raw photo and predecessor Excel before accepting.",
+                review_item_suggested_value(record),
                 "Latest cage-card photo should drive updates, but the parsed transcription itself must be reviewed before canonical writes.",
+                "review item",
+                review_item_evidence_reference_json(
+                    source_photo_id=photo_id,
+                    parse_id=parse_id,
+                    card_snapshot_id=card_snapshot_id,
+                    photo_evidence_items=evidence_count,
+                ),
+                review_item_trigger_json(
+                    record,
+                    payload.confidence,
+                    "manual_transcription_review_required",
+                    required_conditions=review_conditions,
+                ),
                 "open",
                 now,
             ),
@@ -7279,6 +7604,23 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             review_id=review_id,
             parse_id=parse_id,
             created_at=now,
+        )
+        conn.execute(
+            """
+            UPDATE review_queue
+            SET evidence_reference_json = ?
+            WHERE review_id = ?
+            """,
+            (
+                review_item_evidence_reference_json(
+                    source_photo_id=photo_id,
+                    parse_id=parse_id,
+                    card_snapshot_id=card_snapshot_id,
+                    photo_evidence_items=evidence_count,
+                    linked_photo_evidence_items=linked_evidence_count,
+                ),
+                review_id,
+            ),
         )
         conn.execute("UPDATE photo_log SET status = ? WHERE photo_id = ?", ("transcribed_review_pending", photo_id))
         photo_review_rows = conn.execute(
@@ -12106,6 +12448,34 @@ def export_uncertainty_label(row: Any) -> str:
     return f"Ear label {raw_label}: {status}{confidence_text}"
 
 
+def export_rows_have_trace(rows: list[dict[str, Any]], trace_fields: list[str]) -> bool:
+    return all(any(str(row.get(field) or "").strip() for field in trace_fields) for row in rows)
+
+
+def export_consistency_checks(
+    preview_rows: list[dict[str, Any]],
+    separation_rows: list[dict[str, Any]],
+    animal_sheet_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "source_layer": "export or view",
+        "source_state_layer": "canonical structured state",
+        "preview_rows_have_trace": export_rows_have_trace(
+            preview_rows,
+            ["source_note_item_id", "source_photo_id", "card_snapshot_id", "source_record_id"],
+        ),
+        "separation_rows_have_trace": export_rows_have_trace(
+            separation_rows,
+            ["source_note_item_ids", "source_photo_ids", "card_snapshot_ids", "source_record_id"],
+        ),
+        "animal_sheet_rows_have_trace": export_rows_have_trace(
+            animal_sheet_rows,
+            ["source_note_item_ids", "source_photo_ids", "card_snapshot_ids", "source_record_id", "source"],
+        ),
+        "excel_export_is_view": True,
+    }
+
+
 def load_export_note_evidence(conn: Any, note_item_ids: list[str]) -> dict[str, dict[str, Any]]:
     note_item_ids = [note_id for note_id in dict.fromkeys(note_item_ids) if note_id]
     if not note_item_ids:
@@ -12385,6 +12755,7 @@ def export_preview() -> dict[str, Any]:
         "animal_sheet_row_count": len(animal_rows),
         "review_blockers": [dict(row) for row in review_rows],
         "readiness_warnings": genotype_blocker_rows,
+        "export_consistency": export_consistency_checks(rows, separation_rows, animal_rows),
         "generated_at": utc_now(),
     }
 

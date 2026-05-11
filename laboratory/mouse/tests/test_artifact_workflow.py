@@ -414,3 +414,103 @@ def test_artifact_preview_blocks_paths_outside_artifact_root(tmp_path: Path, mon
         app_main.get_artifact_preview(str(outside_path))
 
     assert exc_info.value.status_code == 400
+
+
+def test_export_preview_reports_export_view_consistency_checks(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_export_consistency",
+                    "export-consistency-card.jpg",
+                    "data/photos/test/export-consistency-card.jpg",
+                    "2026-05-09T00:00:00Z",
+                    "accepted",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_export_consistency",
+                    "photo_export_consistency",
+                    "manual_photo_transcription",
+                    "{}",
+                    "2026-05-09T00:00:01Z",
+                    "accepted",
+                    95,
+                    0,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, photo_id, parse_id, card_snapshot_id, card_type,
+                     line_number, raw_line_text, parsed_type, interpreted_status,
+                     parsed_mouse_display_id, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "note_export_consistency",
+                    "photo_export_consistency",
+                    "parse_export_consistency",
+                    "card_export_consistency",
+                    "Separated",
+                    1,
+                    "MT401 R'",
+                    "mouse_item",
+                    "active",
+                    "MT401",
+                    95,
+                    0,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO mouse_master
+                    (mouse_id, display_id, raw_strain_text, sex, dob_raw,
+                     source_note_item_id, current_card_snapshot_id, status,
+                     source_photo_id, last_verified_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "mouse_export_consistency",
+                    "MT401",
+                    "ApoM Tg/Tg",
+                    "female",
+                    "2026-04-01",
+                    "note_export_consistency",
+                    "card_export_consistency",
+                    "active",
+                    "photo_export_consistency",
+                    "2026-05-09T00:00:02Z",
+                    "2026-05-09T00:00:02Z",
+                    "2026-05-09T00:00:02Z",
+                ),
+            )
+
+        preview = app_main.export_preview()
+
+        assert preview["source_layer"] == "export or view"
+        assert preview["export_consistency"] == {
+            "source_layer": "export or view",
+            "source_state_layer": "canonical structured state",
+            "preview_rows_have_trace": True,
+            "separation_rows_have_trace": True,
+            "animal_sheet_rows_have_trace": True,
+            "excel_export_is_view": True,
+        }
+    finally:
+        db.DB_PATH = old_db_path
