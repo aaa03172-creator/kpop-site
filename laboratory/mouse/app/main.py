@@ -4811,6 +4811,8 @@ def canonical_candidate_audit_view(conn: Any, candidate_id: str) -> dict[str, An
             unique_mouse_ids,
         ).fetchall()
         mice = [dict(row) for row in mouse_rows]
+    found_mouse_ids = {mouse["mouse_id"] for mouse in mice}
+    missing_mouse_ids = [mouse_id for mouse_id in unique_mouse_ids if mouse_id not in found_mouse_ids]
 
     action_rows = conn.execute(
         """
@@ -4829,12 +4831,14 @@ def canonical_candidate_audit_view(conn: Any, candidate_id: str) -> dict[str, An
         payload["after_value"] = json_object(payload.get("after_value"))
         actions.append(payload)
 
-    can_void = candidate["status"] == "applied" and bool(unique_mouse_ids)
+    can_void = candidate["status"] == "applied" and bool(unique_mouse_ids) and not missing_mouse_ids
     blockers = []
     if candidate["status"] != "applied":
         blockers.append(f"Candidate status is {candidate['status']}, not applied.")
     if not unique_mouse_ids:
         blockers.append("No applied mouse records are linked to this candidate.")
+    if missing_mouse_ids:
+        blockers.append(f"Applied mouse records are missing: {', '.join(missing_mouse_ids)}.")
 
     return {
         "boundary": "export or view",
@@ -4843,6 +4847,7 @@ def canonical_candidate_audit_view(conn: Any, candidate_id: str) -> dict[str, An
             "candidate_payload": json_object(candidate["candidate_payload"]),
         },
         "applied_mouse_ids": unique_mouse_ids,
+        "missing_mouse_ids": missing_mouse_ids,
         "mice": mice,
         "events": events,
         "actions": actions,
