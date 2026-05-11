@@ -55,6 +55,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | --- | --- | --- |
 | `mvp_vertical_slice_plan.md` | implementation planning / non-canonical project note | First source photo to review to canonical candidate to export slice. |
 | `docs/cage_card_photo_pipeline_implementation_baseline_ko.md` | implementation baseline / non-canonical project documentation | Recommended implementation baseline for cage-card photo processing boundaries, review gates, canonical apply, and export provenance. |
+| `docs/cage_card_photo_pipeline_implementation_audit_2026-05-11.md` | implementation audit / review item | Current implementation audit against the cage-card photo pipeline baseline, with evidence-linking gaps and next slice recommendation. |
 | `mvp_acceptance_matrix_ko.md` | implementation verification / non-canonical project note | MVP acceptance status matrix. |
 | `roi_card_extraction_plan_ko.md` | implementation planning / non-canonical project note | ROI-based cage-card extraction planning. |
 | `pvm_photo_evidence_ledger_adoption_ko.md` | implementation planning / non-canonical project note | Photo Evidence Ledger adoption review. |
