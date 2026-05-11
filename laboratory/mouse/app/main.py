@@ -2526,6 +2526,21 @@ def stable_checksum(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def tagged_parse_payload(
+    payload: dict[str, Any],
+    *,
+    payload_kind: str,
+    source_layer: str,
+    schema_version: str = "parse_payload_v1",
+) -> dict[str, Any]:
+    return {
+        **payload,
+        "payload_kind": payload_kind,
+        "source_layer": source_layer,
+        "schema_version": schema_version,
+    }
+
+
 def create_source_record(
     conn: Any,
     *,
@@ -2588,9 +2603,10 @@ def ensure_photo_review_candidate(
     parse_id = new_id("parse")
     review_id = new_id("review")
     now = utc_now()
-    raw_payload = {
+    raw_payload = tagged_parse_payload(
+        {
         "layer": "review item",
-        "source_layer": "raw source",
+        "raw_source_layer": "raw source",
         "source_type": "cage_card_photo",
         "photo_id": photo_id,
         "source_record_id": source_record_id,
@@ -2600,7 +2616,10 @@ def ensure_photo_review_candidate(
         "external_processing": "none",
         "extraction_status": "not_attempted",
         "note": "Create a manual card transcription before accepting this latest photo into canonical state.",
-    }
+        },
+        payload_kind="photo_manual_review_placeholder",
+        source_layer="review item",
+    )
     conn.execute(
         """
         INSERT INTO parse_result
@@ -7062,6 +7081,14 @@ def create_legacy_workbook_import(
 
     imported_at = utc_now()
     raw_payload = json.dumps(parsed, ensure_ascii=False)
+    parse_raw_payload = json.dumps(
+        tagged_parse_payload(
+            parsed,
+            payload_kind="legacy_workbook_parse",
+            source_layer="parsed or intermediate result",
+        ),
+        ensure_ascii=False,
+    )
     strain_registry_candidates = parsed.get("strain_registry_candidates")
     if not isinstance(strain_registry_candidates, list):
         strain_registry_candidates = []
@@ -7087,7 +7114,7 @@ def create_legacy_workbook_import(
                     parse_id,
                     None,
                     file.filename,
-                    raw_payload,
+                    parse_raw_payload,
                     imported_at,
                     "review",
                     1,
@@ -7450,7 +7477,8 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             for note in payload.notes
             if isinstance(note, dict) and str(note.get("raw") or "").strip()
         ]
-        record = {
+        record = tagged_parse_payload(
+            {
             "id": parse_id,
             "uploaded": photo["original_filename"],
             "type": infer_card_type_from_sex(payload.card_type or "Separated", payload.sex_raw, payload.sex_normalized),
@@ -7525,7 +7553,10 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
                 for region in payload.extraction_regions
                 if isinstance(region, dict)
             ][:20],
-        }
+            },
+            payload_kind=source_name,
+            source_layer="parsed or intermediate result",
+        )
         conn.execute(
             """
             INSERT INTO parse_result
@@ -12813,6 +12844,11 @@ def import_sample_fixture() -> dict[str, Any]:
             if validation_review:
                 status = "review"
                 record = {**record, "status": status, **validation_review}
+            record = tagged_parse_payload(
+                record,
+                payload_kind="fixture_parse_import",
+                source_layer="parsed or intermediate result",
+            )
             confidence = float(record.get("confidence") or 0)
             needs_review = 1 if status in {"review", "conflict"} else 0
             conn.execute(
