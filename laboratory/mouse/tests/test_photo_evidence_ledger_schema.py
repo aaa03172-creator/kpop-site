@@ -13,6 +13,7 @@ from app.main import (
     apply_canonical_candidate,
     canonical_candidate_apply_preview,
     create_photo_manual_transcription,
+    import_sample_fixture,
     review_item_audit_view,
 )
 
@@ -259,6 +260,8 @@ def test_manual_transcription_creates_photo_evidence_items(tmp_path: Path) -> No
                 """
                 SELECT photo.source_layer AS photo_source_layer,
                        parse.source_layer AS parse_source_layer,
+                       parse.source_name AS parse_source_name,
+                       parse.raw_payload AS parse_raw_payload,
                        snapshot.source_layer AS snapshot_source_layer
                 FROM parse_result parse
                 JOIN photo_log photo ON photo.photo_id = parse.photo_id
@@ -272,8 +275,14 @@ def test_manual_transcription_creates_photo_evidence_items(tmp_path: Path) -> No
         assert dict(boundary_row) == {
             "photo_source_layer": "raw source",
             "parse_source_layer": "parsed or intermediate result",
+            "parse_source_name": "manual_photo_transcription",
+            "parse_raw_payload": boundary_row["parse_raw_payload"],
             "snapshot_source_layer": "parsed or intermediate result",
         }
+        parse_payload = json.loads(boundary_row["parse_raw_payload"])
+        assert parse_payload["payload_kind"] == "manual_photo_transcription"
+        assert parse_payload["source_layer"] == "parsed or intermediate result"
+        assert parse_payload["schema_version"] == "parse_payload_v1"
         assert any(
             item["evidence_kind"] == "card_field"
             and item["roi_label"] == "raw_strain"
@@ -299,6 +308,34 @@ def test_manual_transcription_creates_photo_evidence_items(tmp_path: Path) -> No
         )
         assert all(item["source_photo_id"] == "photo_transcription_evidence" for item in payloads)
         assert all(item["status"] in {"draft", "review_open"} for item in payloads)
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_fixture_import_tags_parse_payload_boundary(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+
+        result = import_sample_fixture()
+
+        assert result["imported_parse_results"] > 0
+        with db.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT raw_payload
+                FROM parse_result
+                WHERE source_name = 'fixtures/sample_parse_results.json'
+                ORDER BY parsed_at, parse_id
+                LIMIT 1
+                """
+            ).fetchone()
+
+        payload = json.loads(row["raw_payload"])
+        assert payload["payload_kind"] == "fixture_parse_import"
+        assert payload["source_layer"] == "parsed or intermediate result"
+        assert payload["schema_version"] == "parse_payload_v1"
     finally:
         db.DB_PATH = old_db_path
 
@@ -431,9 +468,17 @@ def test_manual_transcription_stores_confidence_source_and_evidence_reference(tm
                 """,
                 (result["parse_id"],),
             ).fetchone()
+            parse_row = conn.execute(
+                "SELECT raw_payload FROM parse_result WHERE parse_id = ?",
+                (result["parse_id"],),
+            ).fetchone()
 
+        parse_payload = json.loads(parse_row["raw_payload"])
         field_reference = json.loads(field_row["evidence_reference_json"])
         note_reference = json.loads(note_row["evidence_reference_json"])
+        assert parse_payload["payload_kind"] == "ai_photo_extraction"
+        assert parse_payload["source_layer"] == "parsed or intermediate result"
+        assert parse_payload["schema_version"] == "parse_payload_v1"
         assert field_row["confidence_source"] == "ai_photo_extraction:card_field"
         assert field_reference["source_layer"] == "parsed or intermediate result"
         assert field_reference["source_photo_id"] == "photo_confidence_reference"

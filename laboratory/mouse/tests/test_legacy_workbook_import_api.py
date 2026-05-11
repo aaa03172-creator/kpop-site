@@ -48,6 +48,17 @@ def test_legacy_workbook_import_surfaces_strain_registry_review_candidates(tmp_p
         assert created["stored_rows"] == 2
         assert created["strain_registry_candidate_count"] == 1
         assert created["created_review_items"] == 3
+        with db.connection() as conn:
+            parse_row = conn.execute(
+                "SELECT source_name, raw_payload FROM parse_result WHERE parse_id = ?",
+                (created["parse_id"],),
+            ).fetchone()
+        parse_payload = json.loads(parse_row["raw_payload"])
+        assert parse_row["source_name"] == "animal-sheet.xlsx"
+        assert parse_payload["payload_kind"] == "legacy_workbook_parse"
+        assert parse_payload["source_layer"] == "parsed or intermediate result"
+        assert parse_payload["schema_version"] == "parse_payload_v1"
+        assert parse_payload["workbook_kind"] == "legacy_animal_sheet"
 
         [legacy_import] = client.get("/api/legacy-workbook-imports").json()
         [candidate] = legacy_import["strain_registry_candidates"]
