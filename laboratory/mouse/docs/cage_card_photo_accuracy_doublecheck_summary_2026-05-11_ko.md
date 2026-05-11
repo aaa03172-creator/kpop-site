@@ -35,7 +35,19 @@ Focused tests now cover:
   evidence;
 - canonical apply event details that carry `photo_evidence_id`;
 - export preview consistency checks that assert export rows remain traceable
-  views.
+  views;
+- domain-specific movement, weaning, mating, litter, and offspring event flows
+  preserving specific photo, note-line, and photo-evidence refs;
+- timeline read models exposing event evidence traces without exposing review
+  item details;
+- action-log read models exposing before/after values as an export/view;
+- external AI draft responses recording explicit approval and payload-review
+  metadata;
+- real-photo E2E calibration output with required fixture mode, confidence
+  bands, low-confidence guard cases, and coverage tags for clear,
+  low-confidence, cropped/blurry, and dense-note examples;
+- export manifests that explicitly mark workbook visual QA as a manual
+  lab-format review boundary.
 
 ## Verification Run
 
@@ -53,12 +65,33 @@ Observed result:
 - review attention set: 31 passed;
 - `git diff --check`: passed, with only existing Windows CRLF warnings.
 
+Additional current gate:
+
+```powershell
+python scripts/verify-photo-e2e-cases.py --require-fixtures --json
+npm run verify
+```
+
+Observed current result:
+
+- real-photo E2E fixture set: 5 passed, 0 failed, 0 skipped;
+- confidence calibration bands: one `0_20_must_review` case and four
+  `60_100_clearer` cases;
+- recommended real-photo coverage tags: no missing tags for the current
+  clear, low-confidence, cropped/blurry, and dense-note categories;
+- full repository verification: 186 Python tests passed after MVP,
+  acceptance, local app, photo E2E, and skill-gym gates.
+
 ## Remaining Risks
 
-- Real-photo OCR confidence still needs ground-truth calibration.
-- Domain-specific mating, litter, offspring, movement, and weaning flows still
-  need broader evidence propagation checks.
+- Real-photo OCR confidence has an initial local five-case calibration gate;
+  more photos should still be added as the lab collects new card patterns.
+- Domain-specific movement, weaning, mating, litter, and offspring flows now
+  preserve specific evidence refs in focused tests; future domain event flows
+  should follow the same helper instead of adding one-off trace fields.
 - Biological/date thresholds must remain configurable rather than hard-coded.
-- Excel workbook visual QA still needs manual lab-format review.
-- External OCR/LLM payload minimization still needs operator approval review for
-  any new provider or payload shape.
+- Excel workbook visual QA is now explicit in export manifests, but the
+  actual lab-format review remains a manual handoff step.
+- External OCR/LLM payload minimization now records approval and payload-review
+  metadata for the current draft flow; any new provider or payload shape still
+  needs operator approval review before use.
