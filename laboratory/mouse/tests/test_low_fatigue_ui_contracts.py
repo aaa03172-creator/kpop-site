@@ -947,6 +947,21 @@ def test_mouse_timeline_shows_accepted_events_without_review_details(tmp_path: P
                     "source_record_id": "source_mating_colony_state",
                     "source_label": "Reviewed mating cage C-12",
                     "source_type": "manual_review",
+                    "event_trace": {
+                        "source_layer": "export or view",
+                        "source_photo_id": "photo_birth",
+                        "source_photo_filename": "",
+                        "source_note_item_id": "note_birth",
+                        "source_note_text": "",
+                        "source_note_line_number": None,
+                        "photo_evidence_id": "pe_birth",
+                        "evidence_kind": "",
+                        "evidence_raw_text": "",
+                        "evidence_normalized_value": "",
+                        "evidence_status": "",
+                        "needs_review": False,
+                        "trace_status": "source_detail_missing",
+                    },
                 },
                 "evidence_refs": {
                     "source_record_id": "source_mating_colony_state",
@@ -988,6 +1003,110 @@ def test_mouse_timeline_shows_accepted_events_without_review_details(tmp_path: P
         ]
         assert "review_items" not in payload
         assert payload["empty_state"]["fabricated_records"] is False
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_mouse_timeline_resolves_event_photo_note_and_evidence_trace(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        seed_colony_state_records(tmp_path)
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, photo_id, parse_id, card_type, line_number,
+                     raw_line_text, parsed_type, interpreted_status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "note_timeline_mt401",
+                    "photo_colony_state",
+                    "parse_colony_state",
+                    "Separated",
+                    1,
+                    "MT401 R'",
+                    "mouse_item",
+                    "active",
+                    0.96,
+                    0,
+                ),
+            )
+            note_id = "note_timeline_mt401"
+            note_text = "MT401 R'"
+            conn.execute(
+                """
+                INSERT INTO photo_evidence_item
+                    (photo_evidence_id, source_photo_id, parse_id, note_item_id,
+                     evidence_kind, observed_raw_text, normalized_value, confidence,
+                     needs_review, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "pe_timeline_note",
+                    "photo_colony_state",
+                    "parse_colony_state",
+                    note_id,
+                    "note_line",
+                    note_text,
+                    "MT401 R'",
+                    96,
+                    0,
+                    "linked",
+                    "2026-05-09T11:16:00Z",
+                    "2026-05-09T11:16:00Z",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO mouse_event
+                    (event_id, mouse_id, event_type, event_date, related_entity_type,
+                     related_entity_id, source_record_id, details, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "event_mt401_card_confirmed",
+                    "MT401",
+                    "card_confirmed",
+                    "2026-05-09",
+                    "card_snapshot",
+                    "card_timeline",
+                    "source_mating_colony_state",
+                    json.dumps(
+                        {
+                            "source_photo_id": "photo_colony_state",
+                            "source_note_item_id": note_id,
+                            "photo_evidence_id": "pe_timeline_note",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "local_user",
+                    "2026-05-09T11:16:00Z",
+                ),
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/mouse-timeline?mouse_id=MT401")
+
+        assert response.status_code == 200
+        payload = response.json()
+        [event] = payload["events"]
+        assert event["event_id"] == "event_mt401_card_confirmed"
+        assert event["source_evidence"]["event_trace"] == {
+            "source_layer": "export or view",
+            "source_photo_id": "photo_colony_state",
+            "source_photo_filename": "colony-state-card.jpg",
+            "source_note_item_id": note_id,
+            "source_note_text": "MT401 R'",
+            "source_note_line_number": 1,
+            "photo_evidence_id": "pe_timeline_note",
+            "evidence_kind": "note_line",
+            "evidence_raw_text": "MT401 R'",
+            "evidence_normalized_value": "MT401 R'",
+            "evidence_status": "linked",
+            "needs_review": False,
+            "trace_status": "resolved",
+        }
     finally:
         db.DB_PATH = old_db_path
 

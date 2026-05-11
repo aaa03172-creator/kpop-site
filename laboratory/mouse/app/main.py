@@ -8472,12 +8472,97 @@ def ui_mouse_timeline(mouse_id: str = "") -> dict[str, Any]:
             ).fetchall()
             source_rows = {row["source_record_id"]: dict(row) for row in rows}
 
+        event_detail_rows = [json_object(row["details"]) for row in event_rows]
+        source_photo_ids = unique_nonempty(
+            [details.get("source_photo_id") for details in event_detail_rows if isinstance(details, dict)]
+        )
+        source_note_item_ids = unique_nonempty(
+            [details.get("source_note_item_id") for details in event_detail_rows if isinstance(details, dict)]
+        )
+        photo_evidence_ids = unique_nonempty(
+            [details.get("photo_evidence_id") for details in event_detail_rows if isinstance(details, dict)]
+        )
+        source_photo_rows: dict[str, dict[str, Any]] = {}
+        if source_photo_ids:
+            placeholders = ", ".join("?" for _ in source_photo_ids)
+            rows = conn.execute(
+                f"""
+                SELECT photo_id, original_filename, stored_path, raw_source_kind
+                FROM photo_log
+                WHERE photo_id IN ({placeholders})
+                """,
+                source_photo_ids,
+            ).fetchall()
+            source_photo_rows = {row["photo_id"]: dict(row) for row in rows}
+        source_note_rows: dict[str, dict[str, Any]] = {}
+        if source_note_item_ids:
+            placeholders = ", ".join("?" for _ in source_note_item_ids)
+            rows = conn.execute(
+                f"""
+                SELECT note_item_id, photo_id, line_number, raw_line_text, parsed_type,
+                       interpreted_status
+                FROM card_note_item_log
+                WHERE note_item_id IN ({placeholders})
+                """,
+                source_note_item_ids,
+            ).fetchall()
+            source_note_rows = {row["note_item_id"]: dict(row) for row in rows}
+        photo_evidence_rows: dict[str, dict[str, Any]] = {}
+        if photo_evidence_ids:
+            placeholders = ", ".join("?" for _ in photo_evidence_ids)
+            rows = conn.execute(
+                f"""
+                SELECT photo_evidence_id, source_photo_id, note_item_id, evidence_kind,
+                       roi_label, observed_raw_text, normalized_value, confidence,
+                       needs_review, status
+                FROM photo_evidence_item
+                WHERE photo_evidence_id IN ({placeholders})
+                """,
+                photo_evidence_ids,
+            ).fetchall()
+            photo_evidence_rows = {row["photo_evidence_id"]: dict(row) for row in rows}
+
     must_review = int(attention_counts.get("must_review", 0))
     quick_check = int(attention_counts.get("quick_check", 0))
     events = []
-    for row in event_rows:
+    for row, details in zip(event_rows, event_detail_rows):
         source = source_rows.get(row["source_record_id"] or "", {})
         evidence_refs = mouse_event_evidence_refs(row)
+        source_evidence = {
+            "source_record_id": row["source_record_id"] or "",
+            "source_label": source.get("source_label", ""),
+            "source_type": source.get("source_type", ""),
+        }
+        source_photo_id = str(details.get("source_photo_id") or "") if isinstance(details, dict) else ""
+        source_note_item_id = str(details.get("source_note_item_id") or "") if isinstance(details, dict) else ""
+        photo_evidence_id = str(details.get("photo_evidence_id") or "") if isinstance(details, dict) else ""
+        source_photo = source_photo_rows.get(source_photo_id, {})
+        source_note = source_note_rows.get(source_note_item_id, {})
+        photo_evidence = photo_evidence_rows.get(photo_evidence_id, {})
+        if source_photo_id or source_note_item_id or photo_evidence_id:
+            source_evidence["event_trace"] = {
+                "source_layer": "export or view",
+                "source_photo_id": source_photo_id,
+                "source_photo_filename": source_photo.get("original_filename", ""),
+                "source_note_item_id": source_note_item_id,
+                "source_note_text": source_note.get("raw_line_text", ""),
+                "source_note_line_number": source_note.get("line_number"),
+                "photo_evidence_id": photo_evidence_id,
+                "evidence_kind": photo_evidence.get("evidence_kind", ""),
+                "evidence_raw_text": photo_evidence.get("observed_raw_text", ""),
+                "evidence_normalized_value": photo_evidence.get("normalized_value", ""),
+                "evidence_status": photo_evidence.get("status", ""),
+                "needs_review": bool(photo_evidence.get("needs_review")) if photo_evidence else False,
+                "trace_status": (
+                    "resolved"
+                    if (
+                        (not source_photo_id or bool(source_photo))
+                        and (not source_note_item_id or bool(source_note))
+                        and (not photo_evidence_id or bool(photo_evidence))
+                    )
+                    else "source_detail_missing"
+                ),
+            }
         events.append(
             {
                 "event_id": row["event_id"],
@@ -8489,11 +8574,7 @@ def ui_mouse_timeline(mouse_id: str = "") -> dict[str, Any]:
                     "entity_type": row["related_entity_type"] or "",
                     "entity_id": row["related_entity_id"] or "",
                 },
-                "source_evidence": {
-                    "source_record_id": row["source_record_id"] or "",
-                    "source_label": source.get("source_label", ""),
-                    "source_type": source.get("source_type", ""),
-                },
+                "source_evidence": source_evidence,
                 "evidence_refs": evidence_refs,
             }
         )
