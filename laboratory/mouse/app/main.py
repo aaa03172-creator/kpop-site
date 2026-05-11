@@ -241,6 +241,9 @@ class MatingCreate(BaseModel):
     status: str = "active"
     purpose: str = ""
     note: str = ""
+    source_photo_id: str = ""
+    source_note_item_id: str = ""
+    photo_evidence_id: str = ""
 
 
 class LitterCreate(BaseModel):
@@ -253,6 +256,9 @@ class LitterCreate(BaseModel):
     weaning_date: str = ""
     status: str = "born"
     note: str = ""
+    source_photo_id: str = ""
+    source_note_item_id: str = ""
+    photo_evidence_id: str = ""
 
 
 class LitterOffspringCreate(BaseModel):
@@ -263,6 +269,9 @@ class LitterOffspringCreate(BaseModel):
     cage_id: str = ""
     status: str = "weaning_pending"
     note: str = ""
+    source_photo_id: str = ""
+    source_note_item_id: str = ""
+    photo_evidence_id: str = ""
 
 
 class LitterWeanCreate(BaseModel):
@@ -10159,6 +10168,7 @@ def create_mating(payload: MatingCreate) -> dict[str, Any]:
                 raise HTTPException(status_code=404, detail=f"Mouse not found: {mouse_id}")
             parent_rows[mouse_id] = mouse
 
+        evidence_refs = validated_optional_event_evidence_refs(conn, payload)
         source_record_id = create_source_record(
             conn,
             source_type="manual_entry",
@@ -10219,6 +10229,7 @@ def create_mating(payload: MatingCreate) -> dict[str, Any]:
                             "display_id": parent_rows[mouse_id]["display_id"],
                             "strain_goal": payload.strain_goal,
                             "expected_genotype": payload.expected_genotype,
+                            **evidence_refs,
                         },
                         ensure_ascii=False,
                     ),
@@ -10288,6 +10299,7 @@ def create_litter(payload: LitterCreate) -> dict[str, Any]:
         if duplicate is not None:
             raise HTTPException(status_code=409, detail="Litter label already exists for this mating.")
 
+        evidence_refs = validated_optional_event_evidence_refs(conn, payload)
         source_record_id = create_source_record(
             conn,
             source_type="manual_entry",
@@ -10352,6 +10364,7 @@ def create_litter(payload: LitterCreate) -> dict[str, Any]:
                             "display_id": parent["display_id"],
                             "number_born": payload.number_born,
                             "number_alive": payload.number_alive,
+                            **evidence_refs,
                         },
                         ensure_ascii=False,
                     ),
@@ -10428,6 +10441,7 @@ def create_litter_offspring(litter_id: str, payload: LitterOffspringCreate) -> d
         if duplicate is not None:
             raise HTTPException(status_code=409, detail="One or more offspring IDs already exist for this litter.")
 
+        evidence_refs = validated_optional_event_evidence_refs(conn, payload)
         source_record_id = create_source_record(
             conn,
             source_type="manual_entry",
@@ -10506,6 +10520,7 @@ def create_litter_offspring(litter_id: str, payload: LitterOffspringCreate) -> d
                             "father_id": father_id,
                             "mother_id": mother_id,
                             "cage_label": cage["cage_label"] if cage else "",
+                            **evidence_refs,
                         },
                         ensure_ascii=False,
                     ),

@@ -4317,6 +4317,13 @@
         const related = event.related_entity || {};
         const evidence = event.source_evidence || {};
         const refs = event.evidence_refs || {};
+        const eventTrace = evidence.event_trace || {};
+        const traceLabels = [
+          eventTrace.source_photo_filename || eventTrace.source_photo_id,
+          eventTrace.source_note_text ? `Note ${eventTrace.source_note_line_number || "--"}: ${eventTrace.source_note_text}` : eventTrace.source_note_item_id,
+          eventTrace.evidence_raw_text || eventTrace.photo_evidence_id,
+          eventTrace.trace_status && `Trace ${eventTrace.trace_status}`
+        ].filter(Boolean);
         return `
           <div class="mouse-timeline-card">
             <h3>${escapeHtml(event.label || event.event_type || "Accepted event")}</h3>
@@ -4329,6 +4336,7 @@
               <span class="chip">Note ${escapeHtml(refs.source_note_item_id || "--")}</span>
               <span class="chip">Evidence item ${escapeHtml(refs.photo_evidence_id || "--")}</span>
               <span class="chip">${escapeHtml(evidence.source_label || evidence.source_type || "source pending")}</span>
+              ${traceLabels.slice(0, 4).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
             </div>
           </div>
         `;

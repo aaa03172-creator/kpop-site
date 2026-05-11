@@ -7,9 +7,15 @@ from fastapi import HTTPException
 
 from app import db
 from app.main import (
+    LitterCreate,
+    LitterOffspringCreate,
     LitterWeanCreate,
+    MatingCreate,
     MouseCageMove,
     MouseEventCreate,
+    create_litter,
+    create_litter_offspring,
+    create_mating,
     create_mouse_event,
     create_source_record,
     move_mouse_to_cage,
@@ -216,6 +222,70 @@ def seed_litter_wean_state(conn) -> None:
     )
 
 
+def seed_breeding_parent_state(conn) -> None:
+    seed_mouse(conn)
+    conn.execute(
+        """
+        INSERT INTO mouse_master
+            (mouse_id, display_id, raw_strain_text, status, last_verified_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        ("mouse_event_evidence_female", "EV319", "ApoM Tg/Tg", "active", "2026-05-09T00:00:00Z"),
+    )
+
+
+def seed_litter_offspring_state(conn) -> None:
+    seed_breeding_parent_state(conn)
+    conn.execute(
+        """
+        INSERT INTO mating_registry
+            (mating_id, mating_label, strain_goal, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        ("mating_event_evidence", "Mating evidence", "ApoM Tg/Tg", "2026-05-09T00:00:00Z", "2026-05-09T00:00:00Z"),
+    )
+    conn.execute(
+        """
+        INSERT INTO mating_mouse
+            (mating_mouse_id, mating_id, mouse_id, role, joined_date, created_at)
+        VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "mating_mouse_event_evidence_male",
+            "mating_event_evidence",
+            "mouse_event_evidence",
+            "male",
+            "2026-05-09",
+            "2026-05-09T00:00:00Z",
+            "mating_mouse_event_evidence_female",
+            "mating_event_evidence",
+            "mouse_event_evidence_female",
+            "female",
+            "2026-05-09",
+            "2026-05-09T00:00:00Z",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO litter_registry
+            (litter_id, litter_label, mating_id, birth_date, number_born,
+             number_alive, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "litter_event_evidence",
+            "Litter evidence",
+            "mating_event_evidence",
+            "2026-04-20",
+            2,
+            None,
+            "born",
+            "2026-05-09T00:00:00Z",
+            "2026-05-09T00:00:00Z",
+        ),
+    )
+
+
 def test_high_risk_mouse_event_requires_evidence_before_canonical_commit(tmp_path) -> None:
     old_db_path = db.DB_PATH
     db.DB_PATH = tmp_path / "mouse_lims.sqlite"
@@ -240,6 +310,242 @@ def test_high_risk_mouse_event_requires_evidence_before_canonical_commit(tmp_pat
             row = conn.execute("SELECT COUNT(*) AS count FROM mouse_event").fetchone()
 
         assert row["count"] == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_mating_preserves_specific_photo_note_evidence_refs(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_breeding_parent_state(conn)
+            seed_photo_note_evidence(conn)
+
+        result = create_mating(
+            MatingCreate(
+                mating_label="EV318 x EV319",
+                male_mouse_id="mouse_event_evidence",
+                female_mouse_id="mouse_event_evidence_female",
+                start_date="2026-05-09",
+                note="Reviewed cage-card mating note.",
+                source_photo_id="photo_domain_event",
+                source_note_item_id="note_domain_event",
+                photo_evidence_id="pe_domain_event",
+            )
+        )
+
+        with db.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT details
+                FROM mouse_event
+                WHERE event_type = 'paired'
+                  AND related_entity_id = ?
+                ORDER BY mouse_id
+                """,
+                (result["mating_id"],),
+            ).fetchall()
+
+        assert len(rows) == 2
+        for row in rows:
+            details = json.loads(row["details"])
+            assert details["source_photo_id"] == "photo_domain_event"
+            assert details["source_note_item_id"] == "note_domain_event"
+            assert details["photo_evidence_id"] == "pe_domain_event"
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_mating_rejects_invalid_evidence_ref_before_partial_write(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_breeding_parent_state(conn)
+
+        with pytest.raises(HTTPException) as exc_info:
+            create_mating(
+                MatingCreate(
+                    mating_label="EV318 x EV319",
+                    male_mouse_id="mouse_event_evidence",
+                    female_mouse_id="mouse_event_evidence_female",
+                    source_photo_id="photo_missing",
+                )
+            )
+
+        assert exc_info.value.status_code == 400
+        with db.connection() as conn:
+            mating_count = conn.execute("SELECT COUNT(*) AS count FROM mating_registry").fetchone()["count"]
+            mating_mouse_count = conn.execute("SELECT COUNT(*) AS count FROM mating_mouse").fetchone()["count"]
+            event_count = conn.execute("SELECT COUNT(*) AS count FROM mouse_event").fetchone()["count"]
+            source_count = conn.execute("SELECT COUNT(*) AS count FROM source_record").fetchone()["count"]
+
+        assert mating_count == 0
+        assert mating_mouse_count == 0
+        assert event_count == 0
+        assert source_count == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_litter_creation_preserves_specific_photo_note_evidence_refs(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_litter_offspring_state(conn)
+            seed_photo_note_evidence(conn)
+
+        result = create_litter(
+            LitterCreate(
+                litter_label="L2",
+                mating_id="mating_event_evidence",
+                birth_date="2026-05-09",
+                number_born=3,
+                note="Reviewed litter note.",
+                source_photo_id="photo_domain_event",
+                source_note_item_id="note_domain_event",
+                photo_evidence_id="pe_domain_event",
+            )
+        )
+
+        with db.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT details
+                FROM mouse_event
+                WHERE event_type = 'litter_produced'
+                  AND related_entity_id = ?
+                ORDER BY mouse_id
+                """,
+                (result["litter_id"],),
+            ).fetchall()
+
+        assert len(rows) == 2
+        for row in rows:
+            details = json.loads(row["details"])
+            assert details["source_photo_id"] == "photo_domain_event"
+            assert details["source_note_item_id"] == "note_domain_event"
+            assert details["photo_evidence_id"] == "pe_domain_event"
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_litter_creation_rejects_invalid_evidence_ref_before_partial_write(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_litter_offspring_state(conn)
+
+        with pytest.raises(HTTPException) as exc_info:
+            create_litter(
+                LitterCreate(
+                    litter_label="L2",
+                    mating_id="mating_event_evidence",
+                    source_note_item_id="note_missing",
+                )
+            )
+
+        assert exc_info.value.status_code == 400
+        with db.connection() as conn:
+            litter_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM litter_registry WHERE litter_label = ?",
+                ("L2",),
+            ).fetchone()["count"]
+            event_count = conn.execute("SELECT COUNT(*) AS count FROM mouse_event").fetchone()["count"]
+            source_count = conn.execute("SELECT COUNT(*) AS count FROM source_record").fetchone()["count"]
+
+        assert litter_count == 0
+        assert event_count == 0
+        assert source_count == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_offspring_creation_preserves_specific_photo_note_evidence_refs(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_litter_offspring_state(conn)
+            seed_photo_note_evidence(conn)
+
+        result = create_litter_offspring(
+            "litter_event_evidence",
+            LitterOffspringCreate(
+                count=2,
+                display_prefix="EV-L1",
+                source_photo_id="photo_domain_event",
+                source_note_item_id="note_domain_event",
+                photo_evidence_id="pe_domain_event",
+            ),
+        )
+
+        with db.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT details
+                FROM mouse_event
+                WHERE event_type = 'born'
+                  AND related_entity_id = ?
+                ORDER BY mouse_id
+                """,
+                ("litter_event_evidence",),
+            ).fetchall()
+
+        assert result["created_count"] == 2
+        assert len(rows) == 2
+        for row in rows:
+            details = json.loads(row["details"])
+            assert details["source_photo_id"] == "photo_domain_event"
+            assert details["source_note_item_id"] == "note_domain_event"
+            assert details["photo_evidence_id"] == "pe_domain_event"
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_offspring_creation_rejects_invalid_evidence_ref_before_partial_write(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_litter_offspring_state(conn)
+
+        with pytest.raises(HTTPException) as exc_info:
+            create_litter_offspring(
+                "litter_event_evidence",
+                LitterOffspringCreate(
+                    count=2,
+                    display_prefix="EV-L1",
+                    photo_evidence_id="pe_missing",
+                ),
+            )
+
+        assert exc_info.value.status_code == 400
+        with db.connection() as conn:
+            offspring_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM mouse_master WHERE litter_id = ?",
+                ("litter_event_evidence",),
+            ).fetchone()["count"]
+            litter = conn.execute(
+                "SELECT number_alive, status FROM litter_registry WHERE litter_id = ?",
+                ("litter_event_evidence",),
+            ).fetchone()
+            event_count = conn.execute("SELECT COUNT(*) AS count FROM mouse_event").fetchone()["count"]
+            source_count = conn.execute("SELECT COUNT(*) AS count FROM source_record").fetchone()["count"]
+
+        assert offspring_count == 0
+        assert dict(litter) == {"number_alive": None, "status": "born"}
+        assert event_count == 0
+        assert source_count == 0
     finally:
         db.DB_PATH = old_db_path
 
