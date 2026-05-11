@@ -15,10 +15,12 @@ Adopted project documents:
 - `pvm_photo_evidence_ledger_adoption_ko.md`: non-canonical adoption review that translates Persistent Visual Memory into a MouseDB workflow-level Photo Evidence Ledger, not model training or VLM internals.
 - `wet_lab_operational_review_ko.md`: non-canonical operational review note from a wet-lab workflow perspective.
 - `ui_image_usage_improvement_plan_ko.md`: non-canonical UI review note for reducing decorative image noise while preserving evidence-first workflows.
+- `docs/ui_interaction_visual_feedback_direction_2026-05-11_ko.md`: non-canonical UI interaction and visual feedback note for using icons, chips, progress, selected states, and loading feedback without weakening evidence-first boundaries.
 - `review_burden_reduction_plan_ko.md`: non-canonical workflow planning note for separating Focus Review blockers from quick checks and trace-only uncertainty.
 - `selective_normalization_controls_plan_ko.md`: non-canonical workflow planning note for keeping raw evidence separate while using bounded selection controls for normalized/reviewed values.
 - `mvp_vertical_slice_plan.md`: non-canonical implementation planning note for the first end-to-end workflow.
 - `mousedb_cli_first_review_ko.md`: non-canonical review note for a standalone CLI-first MouseDB core that can later be called by PaperPipe, a personal Research Assistant, API, or MCP server.
+- `docs/mouse_db_assistant_integration_review_2026-05-11.md`: non-canonical MouseDB-specific review note for keeping assistant/API/MCP readiness as a design habit without starting adapter implementation too early.
 - `mousedb_open_design_artifact_workflow_review_ko.md`: non-canonical architecture review that rejects open-design as a MouseDB runtime dependency while adopting structure-only artifact lifecycle, preview-before-commit, validation report, and export provenance patterns.
 
 ## 1. Product Summary
@@ -1585,6 +1587,15 @@ CLI or UI -> schemas/input validation -> services -> repositories -> models/db
 ```
 
 The CLI is a public integration surface. Major commands should support stable `--json` output so later automation can call MouseDB without scraping human-readable tables.
+
+Assistant/API/MCP readiness should be treated as a design habit during MVP work, not as a separate adapter project. When adding or changing IDs, service methods, CLI commands, read models, review gates, exports, or artifacts, preserve these habits:
+
+- keep MouseDB as the owner of colony truth;
+- keep assistant-facing data as read-only summaries, exports/views, or caches unless the PRD explicitly adopts a canonical table;
+- expose source/evidence references and review/export blockers in machine-readable output where practical;
+- classify operations as read-only, additive/review-producing, or operator-confirmed before exposing them to automation;
+- avoid assistant-owned copies of canonical mouse, cage, mating, litter, genotype, or event state;
+- defer MCP/API wrappers until CLI JSON, service boundaries, review gates, and evidence-backed summaries are stable enough to wrap safely.
 
 ### 18.2 Storage
 
