@@ -365,6 +365,46 @@ def test_domain_event_rejects_mismatched_photo_evidence_trace(tmp_path) -> None:
         db.DB_PATH = old_db_path
 
 
+def test_domain_event_rejects_note_from_different_source_photo(tmp_path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            seed_cage_move_state(conn)
+            seed_photo_note_evidence(conn)
+            seed_mismatched_photo_evidence(conn)
+
+        with pytest.raises(HTTPException) as exc_info:
+            move_mouse_to_cage(
+                "mouse_event_evidence",
+                MouseCageMove(
+                    cage_id="cage_new",
+                    source_photo_id="photo_other_event",
+                    source_note_item_id="note_domain_event",
+                ),
+            )
+
+        assert exc_info.value.status_code == 400
+        assert "source_note_item_id does not match source_photo_id" in str(exc_info.value.detail)
+        with db.connection() as conn:
+            event_count = conn.execute("SELECT COUNT(*) AS count FROM mouse_event").fetchone()["count"]
+            active_assignment = conn.execute(
+                """
+                SELECT cage_id
+                FROM mouse_cage_assignment
+                WHERE mouse_id = ?
+                  AND status = 'active'
+                """,
+                ("mouse_event_evidence",),
+            ).fetchone()
+
+        assert event_count == 0
+        assert active_assignment["cage_id"] == "cage_old"
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_weaning_preserves_specific_photo_note_evidence_refs(tmp_path) -> None:
     old_db_path = db.DB_PATH
     db.DB_PATH = tmp_path / "mouse_lims.sqlite"

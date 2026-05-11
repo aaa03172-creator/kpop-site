@@ -332,6 +332,7 @@ def test_persist_export_manifest_links_validation_report_and_sources(
             "source_refs": {
                 "photo_ids": ["photo_030"],
                 "note_item_ids": ["note_030"],
+                "source_record_ids": ["source_030"],
                 "review_ids": [],
                 "mouse_ids": ["mouse_030"],
             },
@@ -364,6 +365,7 @@ def test_persist_export_manifest_links_validation_report_and_sources(
     assert manifest["state_watermark"] == "2026-05-09T11:45:00Z"
     assert manifest["source_refs"]["photo_ids"] == ["photo_030"]
     assert manifest["source_refs"]["note_item_ids"] == ["note_030"]
+    assert manifest["source_refs"]["source_record_ids"] == ["source_030"]
 
 
 def test_log_workbook_export_preserves_manifest_provenance(tmp_path: Path) -> None:

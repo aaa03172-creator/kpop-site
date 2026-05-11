@@ -4416,6 +4416,7 @@ def build_export_manifest(
         "source_refs": {
             "photo_ids": unique_nonempty(source_refs.get("photo_ids", [])),
             "note_item_ids": unique_nonempty(source_refs.get("note_item_ids", [])),
+            "source_record_ids": unique_nonempty(source_refs.get("source_record_ids", [])),
             "review_ids": unique_nonempty(source_refs.get("review_ids", [])),
             "mouse_ids": unique_nonempty(source_refs.get("mouse_ids", [])),
         },
@@ -5245,12 +5246,16 @@ def validated_optional_event_evidence_refs(conn: Any, payload: Any) -> dict[str,
         if exists is None:
             raise HTTPException(status_code=400, detail="source_photo_id does not exist.")
     if refs["source_note_item_id"]:
-        exists = conn.execute(
-            "SELECT 1 FROM card_note_item_log WHERE note_item_id = ?",
+        note_row = conn.execute(
+            "SELECT photo_id FROM card_note_item_log WHERE note_item_id = ?",
             (refs["source_note_item_id"],),
         ).fetchone()
-        if exists is None:
+        if note_row is None:
             raise HTTPException(status_code=400, detail="source_note_item_id does not exist.")
+        note_photo_id = str(note_row["photo_id"] or "")
+        if refs["source_photo_id"] and note_photo_id and refs["source_photo_id"] != note_photo_id:
+            raise HTTPException(status_code=400, detail="source_note_item_id does not match source_photo_id.")
+        refs["source_photo_id"] = refs["source_photo_id"] or note_photo_id
     if refs["photo_evidence_id"]:
         evidence = conn.execute(
             """
