@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.db import DB_PATH  # noqa: E402
-from app.main import list_review_items  # noqa: E402
+from app import db  # noqa: E402
+from app.main import list_review_items, review_attention_level, review_check_targets  # noqa: E402
 
 MANIFEST_PATH = ROOT / "config" / "photo_e2e_validation_cases.json"
 REQUIRED_TABLES = {"photo_log", "parse_result", "card_note_item_log", "review_queue"}
@@ -27,10 +27,11 @@ def parse_json_object(raw: str | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def missing_fixture_tables() -> list[str]:
-    if not DB_PATH.exists():
+def missing_fixture_tables(db_path: Path | None = None) -> list[str]:
+    selected_db_path = db_path or db.DB_PATH
+    if not selected_db_path.exists():
         return sorted(REQUIRED_TABLES)
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(selected_db_path) as conn:
         rows = conn.execute(
             """
             SELECT name
@@ -168,8 +169,32 @@ def check_note_items(
     return failures
 
 
-def open_review_index() -> dict[str, list[dict[str, Any]]]:
+def open_review_index(db_path: Path | None = None) -> dict[str, list[dict[str, Any]]]:
     by_parse: dict[str, list[dict[str, Any]]] = {}
+    if db_path is not None and db_path != db.DB_PATH:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT review.review_id, review.parse_id, review.severity, review.issue,
+                       review.current_value, review.suggested_value, review.review_reason,
+                       review.status, review.created_at, review.resolved_at,
+                       review.resolution_note, parse.raw_payload, parse.source_name,
+                       parse.photo_id, parse.confidence
+                FROM review_queue review
+                LEFT JOIN parse_result parse ON parse.parse_id = review.parse_id
+                """
+            ).fetchall()
+        for row in rows:
+            item = dict(row)
+            parse_payload = parse_json_object(item.pop("raw_payload", "{}"))
+            item.update(review_attention_level(item, parse_payload))
+            item["review_check_targets"] = review_check_targets(item, parse_payload)
+            if item.get("status") != "open":
+                continue
+            by_parse.setdefault(item.get("parse_id", ""), []).append(item)
+        return by_parse
+
     for item in list_review_items():
         if item.get("status") != "open":
             continue
@@ -204,13 +229,13 @@ def check_open_review(
     return failures
 
 
-def verify(manifest: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+def verify(manifest: dict[str, Any], db_path: Path | None = None) -> tuple[list[dict[str, Any]], int]:
     selector = manifest.get("latest_parse_selector", {})
     source_name = selector.get("source_name", "ai_photo_extraction")
-    reviews_by_parse = open_review_index()
+    reviews_by_parse = open_review_index(db_path)
     results: list[dict[str, Any]] = []
     fail_count = 0
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(db_path or db.DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         for case in manifest.get("cases", []):
             failures: list[str] = []
@@ -384,6 +409,13 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     parser.add_argument("--manifest", default=str(MANIFEST_PATH), help="Validation manifest path.")
     parser.add_argument(
+        "--db",
+        "--db-path",
+        dest="db",
+        default=str(db.DB_PATH),
+        help="Fixture SQLite database path.",
+    )
+    parser.add_argument(
         "--require-fixtures",
         action="store_true",
         help="Fail instead of skipping when the local photo E2E fixture database is unavailable.",
@@ -391,7 +423,8 @@ def main() -> int:
     args = parser.parse_args()
 
     manifest = load_manifest(Path(args.manifest))
-    missing_tables = missing_fixture_tables()
+    db_path = Path(args.db)
+    missing_tables = missing_fixture_tables(db_path)
     if missing_tables:
         summary = build_missing_fixture_summary(
             manifest=manifest,
@@ -412,7 +445,7 @@ def main() -> int:
                 f"(missing table(s): {', '.join(missing_tables)})."
             )
         return missing_fixture_exit_code(summary)
-    results, fail_count = verify(manifest)
+    results, fail_count = verify(manifest, db_path)
     summary = build_summary(
         manifest=manifest,
         manifest_path=Path(args.manifest),

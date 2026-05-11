@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sqlite3
 from pathlib import Path
 
 
@@ -108,3 +109,14 @@ def test_missing_fixture_summary_can_be_required_as_failed_gate() -> None:
     assert summary["missing_tables"] == ["card_note_item_log", "photo_log"]
     assert "required" in summary["failure_reason"]
     assert verifier.missing_fixture_exit_code(summary) == 1
+
+
+def test_missing_fixture_tables_can_use_explicit_db_path(tmp_path: Path) -> None:
+    verifier = load_verifier_module()
+    db_path = tmp_path / "synthetic_photo_e2e.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE photo_log (photo_id TEXT PRIMARY KEY)")
+
+    missing = verifier.missing_fixture_tables(db_path)
+
+    assert missing == ["card_note_item_log", "parse_result", "review_queue"]
