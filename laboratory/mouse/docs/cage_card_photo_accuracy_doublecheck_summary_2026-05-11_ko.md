@@ -36,6 +36,11 @@ Focused tests now cover:
 - canonical apply event details that carry `photo_evidence_id`;
 - export preview consistency checks that assert export rows remain traceable
   views.
+- real-photo E2E calibration output with required fixture mode, confidence
+  bands, low-confidence guard cases, and coverage tags for clear,
+  low-confidence, cropped/blurry, and dense-note examples.
+- export manifests that explicitly mark workbook visual QA as a manual
+  lab-format review boundary.
 
 ## Verification Run
 
@@ -53,12 +58,31 @@ Observed result:
 - review attention set: 31 passed;
 - `git diff --check`: passed, with only existing Windows CRLF warnings.
 
+Additional current gate:
+
+```powershell
+python scripts/verify-photo-e2e-cases.py --require-fixtures --json
+npm run verify
+```
+
+Observed current result:
+
+- real-photo E2E fixture set: 5 passed, 0 failed, 0 skipped;
+- confidence calibration bands: one `0_20_must_review` case and four
+  `60_100_clearer` cases;
+- recommended real-photo coverage tags: no missing tags for the current
+  clear, low-confidence, cropped/blurry, and dense-note categories;
+- full repository verification: 186 Python tests passed after MVP,
+  acceptance, local app, photo E2E, and skill-gym gates.
+
 ## Remaining Risks
 
-- Real-photo OCR confidence still needs ground-truth calibration.
+- Real-photo OCR confidence has an initial local five-case calibration gate;
+  more photos should still be added as the lab collects new card patterns.
 - Domain-specific mating, litter, offspring, movement, and weaning flows still
   need broader evidence propagation checks.
 - Biological/date thresholds must remain configurable rather than hard-coded.
-- Excel workbook visual QA still needs manual lab-format review.
+- Excel workbook visual QA is now explicit in export manifests, but the
+  actual lab-format review remains a manual handoff step.
 - External OCR/LLM payload minimization still needs operator approval review for
   any new provider or payload shape.
