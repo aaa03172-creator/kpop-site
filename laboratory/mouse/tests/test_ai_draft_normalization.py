@@ -210,3 +210,27 @@ def test_ai_draft_flags_invalid_visible_calendar_date() -> None:
         finding["field"] == "dob_raw" and finding["severity"] == "high"
         for finding in draft["plausibility_findings"]
     )
+
+
+def test_ai_draft_reclassifies_numeric_only_notes_as_reviewable_labels() -> None:
+    draft = normalize_ai_draft_payload(
+        base_draft(
+            notes=[
+                {
+                    "raw": "1 2 3",
+                    "meaning": "mouse_ids",
+                    "strike": "none",
+                    "confidence": 86,
+                }
+            ]
+        )
+    )
+
+    assert draft["notes"] == [
+        {
+            "raw": "1 2 3",
+            "meaning": "unlabeled_numeric_note",
+            "strike": "none",
+            "confidence": 86.0,
+        }
+    ]
