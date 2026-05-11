@@ -79,7 +79,7 @@ Observed current result:
   `60_100_clearer` cases;
 - recommended real-photo coverage tags: no missing tags for the current
   clear, low-confidence, cropped/blurry, and dense-note categories;
-- full repository verification: 182 Python tests passed after MVP,
+- full repository verification: 186 Python tests passed after MVP,
   acceptance, local app, photo E2E, and skill-gym gates.
 
 ## Remaining Risks
