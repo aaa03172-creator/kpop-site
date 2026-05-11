@@ -4536,6 +4536,20 @@ def build_export_manifest(
             "review_ids": unique_nonempty(source_refs.get("review_ids", [])),
             "mouse_ids": unique_nonempty(source_refs.get("mouse_ids", [])),
         },
+        "visual_qa": {
+            "status": "manual_review_required",
+            "automated_checks": [
+                "workbook_structure",
+                "trace_sheet_present",
+                "source_refs_present",
+            ],
+            "manual_checks": [
+                "lab_format_spacing",
+                "printed_readability",
+                "recipient_template_compatibility",
+            ],
+            "note": "Automated export checks do not replace manual lab-format workbook QA.",
+        },
         "notes": "Generated from export preview and validation report. This manifest is not canonical state.",
     }
 

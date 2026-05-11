@@ -366,6 +366,20 @@ def test_persist_export_manifest_links_validation_report_and_sources(
     assert manifest["source_refs"]["photo_ids"] == ["photo_030"]
     assert manifest["source_refs"]["note_item_ids"] == ["note_030"]
     assert manifest["source_refs"]["source_record_ids"] == ["source_030"]
+    assert manifest["visual_qa"] == {
+        "status": "manual_review_required",
+        "automated_checks": [
+            "workbook_structure",
+            "trace_sheet_present",
+            "source_refs_present",
+        ],
+        "manual_checks": [
+            "lab_format_spacing",
+            "printed_readability",
+            "recipient_template_compatibility",
+        ],
+        "note": "Automated export checks do not replace manual lab-format workbook QA.",
+    }
 
 
 def test_log_workbook_export_preserves_manifest_provenance(tmp_path: Path) -> None:

@@ -92,6 +92,28 @@
       },
       "default": {}
     },
+    "visual_qa": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "automated_checks", "manual_checks", "note"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["manual_review_required", "reviewed"]
+        },
+        "automated_checks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "manual_checks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
     "notes": {
       "type": "string"
     }
