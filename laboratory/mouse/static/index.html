@@ -586,6 +586,38 @@
       border-color: var(--cue-must-line);
       background: var(--cue-must-bg);
     }
+    .state-message {
+      display: grid;
+      gap: 4px;
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px 12px;
+    }
+    .state-message strong {
+      color: var(--ink);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+    .state-message span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+    .state-message[data-state-kind="loading"] {
+      border-color: #d9e7e2;
+      background: #f8fbfa;
+    }
+    .state-message[data-state-kind="empty"] {
+      border-color: var(--cue-trace-line);
+      background: var(--cue-trace-bg);
+    }
+    .state-message[data-state-kind="error"] {
+      border-color: var(--cue-must-line);
+      background: var(--cue-must-bg);
+    }
     .focus-review-card,
     .colony-state-card,
     .colony-schedule-card,
@@ -2466,7 +2498,10 @@
           <h3>Evidence & Review Readiness</h3>
           <div class="evidence-ledger-read-model" id="evidenceLedgerReadModel" aria-live="polite">
             <h3>Evidence Ledger</h3>
-            <p>Loading photo evidence ledger...</p>
+            <div class="state-message" data-state-kind="loading">
+              <strong>Loading evidence ledger</strong>
+              <span>Waiting for source photo, OCR, note-line, review, and export evidence.</span>
+            </div>
           </div>
           <p class="viz-note">Visualization numbers are useful only when they stay tied to source photos, note lines, reviewed corrections, and export blockers.</p>
           <table aria-label="Visualization data quality">
@@ -2501,7 +2536,10 @@
           <h3>Pedigree</h3>
           <div class="mouse-pedigree-read-model" id="mousePedigreeReadModel" aria-live="polite">
             <h3>Pedigree / Lineage</h3>
-            <p>Loading accepted relationship path...</p>
+            <div class="state-message" data-state-kind="loading">
+              <strong>Loading accepted relationship path</strong>
+              <span>Unconfirmed parentage and inferred relationships stay out of the accepted path.</span>
+            </div>
           </div>
           <div id="detailPedigreeVisual"></div>
           <table aria-label="Mouse pedigree preview">
@@ -2512,7 +2550,10 @@
           <h3>Timeline</h3>
           <div class="mouse-timeline-read-model" id="mouseTimelineReadModel" aria-live="polite">
             <h3>Mouse Timeline</h3>
-            <p>Loading accepted mouse events...</p>
+            <div class="state-message" data-state-kind="loading">
+              <strong>Loading accepted mouse events</strong>
+              <span>Proposed events remain review items until accepted through review.</span>
+            </div>
           </div>
           <div id="detailTimelineVisual"></div>
           <table aria-label="Mouse event timeline">
@@ -3011,7 +3052,10 @@
         <div class="review-list-panel">
           <div class="focus-review-read-model" id="focusReviewReadModel" aria-live="polite">
             <h3>Focus Review</h3>
-            <p>Loading evidence-backed review summary...</p>
+            <div class="state-message" data-state-kind="loading">
+              <strong>Loading review summary</strong>
+              <span>Waiting for source-backed review items without fabricating counts.</span>
+            </div>
           </div>
           <div class="review-queue-summary" id="reviewQueueSummary"></div>
           <div class="review-card-list" id="reviewRows" aria-label="Review items"></div>
@@ -3042,11 +3086,17 @@
     <section class="full" data-view="records" id="records-colony">
       <div class="colony-state-read-model" id="colonyStateReadModel" aria-live="polite">
         <h2>Colony State</h2>
-        <p>Loading accepted colony state...</p>
+        <div class="state-message" data-state-kind="loading">
+          <strong>Loading accepted colony state</strong>
+          <span>Only accepted source-backed records will appear here.</span>
+        </div>
       </div>
       <div class="colony-schedule-read-model" id="colonyScheduleReadModel" aria-live="polite">
         <h2>Colony Schedule</h2>
-        <p>Loading accepted schedule tasks...</p>
+        <div class="state-message" data-state-kind="loading">
+          <strong>Loading accepted schedule tasks</strong>
+          <span>External calendar state remains a mirror, not the colony source of truth.</span>
+        </div>
       </div>
       <h2>Candidate Records</h2>
       <p>Current mouse-level candidate state from accepted source-backed note lines.</p>
@@ -4119,13 +4169,13 @@
       if (model?.load_error) {
         panel.dataset.state = "error";
         panel.dataset.fabricatedRecords = "false";
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Focus Review unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("error", emptyState.message || "Focus Review unavailable.", model.error_message || "Read model failed; no review counts were fabricated.")}`;
         return;
       }
       if (!cards.length) {
         panel.dataset.state = "empty";
         panel.dataset.fabricatedRecords = String(fabricatedRecords);
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "No Focus Review items are currently open.")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("empty", emptyState.message || "No Focus Review items are currently open.", "No mouse IDs, strains, dates, or review counts are invented in this state.")}`;
         return;
       }
       panel.dataset.state = "loaded";
@@ -4196,13 +4246,13 @@
       if (model?.load_error) {
         panel.dataset.state = "error";
         panel.dataset.fabricatedRecords = "false";
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Colony State unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("error", emptyState.message || "Colony State unavailable.", model.error_message || "Accepted colony records were not loaded.")}`;
         return;
       }
       if (!cards.length && !matings.length && !litters.length) {
         panel.dataset.state = "empty";
         panel.dataset.fabricatedRecords = String(fabricatedRecords);
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "No accepted active colony records are available yet.")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("empty", emptyState.message || "No accepted active colony records are available yet.", "Upload, review, and accept source-backed cage-card evidence before this panel shows colony state.")}`;
         return;
       }
       const attentionLinks = Array.isArray(model?.attention_links) ? model.attention_links : [];
@@ -4299,13 +4349,13 @@
       if (model?.load_error) {
         panel.dataset.state = "error";
         panel.dataset.fabricatedRecords = "false";
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Colony Schedule unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("error", emptyState.message || "Colony Schedule unavailable.", model.error_message || "Accepted schedule tasks were not loaded.")}`;
         return;
       }
       if (!groups.length) {
         panel.dataset.state = "empty";
         panel.dataset.fabricatedRecords = String(fabricatedRecords);
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "No accepted schedule tasks are available yet.")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("empty", emptyState.message || "No accepted schedule tasks are available yet.", "Schedule tasks appear only after accepted events and configured rules can support them.")}`;
         return;
       }
       panel.dataset.state = "loaded";
@@ -4374,13 +4424,13 @@
       if (model?.load_error) {
         panel.dataset.state = "error";
         panel.dataset.fabricatedRecords = "false";
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Mouse Timeline unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("error", emptyState.message || "Mouse Timeline unavailable.", model.error_message || "Accepted mouse events were not loaded.")}`;
         return;
       }
       if (!events.length) {
         panel.dataset.state = "empty";
         panel.dataset.fabricatedRecords = String(fabricatedRecords);
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Choose a mouse to view accepted timeline events.")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("empty", emptyState.message || "Choose a mouse to view accepted timeline events.", "Proposed or uncertain events stay in review instead of appearing as accepted history.")}`;
         return;
       }
       panel.dataset.state = "loaded";
@@ -4455,13 +4505,13 @@
       if (model?.load_error) {
         panel.dataset.state = "error";
         panel.dataset.fabricatedRecords = "false";
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Pedigree / Lineage unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("error", emptyState.message || "Pedigree / Lineage unavailable.", model.error_message || "Accepted relationship data was not loaded.")}`;
         return;
       }
       if (!model?.mouse) {
         panel.dataset.state = "empty";
         panel.dataset.fabricatedRecords = String(fabricatedRecords);
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Choose a mouse to view accepted pedigree relationships.")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("empty", emptyState.message || "Choose a mouse to view accepted pedigree relationships.", "Unconfirmed parentage and inferred relationships stay out of the accepted path.")}`;
         return;
       }
       const relationshipNodes = [nodes.father, nodes.mother, nodes.mating, nodes.litter, nodes.selected_mouse].filter(Boolean);
@@ -4547,13 +4597,13 @@
       if (model?.load_error) {
         panel.dataset.state = "error";
         panel.dataset.fabricatedRecords = "false";
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "Evidence Ledger unavailable.")}</p><p class="muted">${escapeHtml(model.error_message || "")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("error", emptyState.message || "Evidence Ledger unavailable.", model.error_message || "Source evidence rows were not loaded.")}`;
         return;
       }
       if (!items.length) {
         panel.dataset.state = "empty";
         panel.dataset.fabricatedRecords = String(fabricatedRecords);
-        panel.innerHTML = `${summary}<p>${escapeHtml(emptyState.message || "No photo evidence items are available yet.")}</p>`;
+        panel.innerHTML = `${summary}${stateMessageHtml("empty", emptyState.message || "No photo evidence items are available yet.", "Source photos, OCR text, note lines, and review decisions remain separate when they appear.")}`;
         return;
       }
       panel.dataset.state = "loaded";
@@ -4578,6 +4628,15 @@
           </div>
         `;
       }).join("")}`;
+    }
+
+    function stateMessageHtml(kind, title, detail = "") {
+      return `
+        <div class="state-message" data-state-kind="${escapeHtml(kind)}">
+          <strong>${escapeHtml(title)}</strong>
+          ${detail ? `<span>${escapeHtml(detail)}</span>` : ""}
+        </div>
+      `;
     }
 
     function reviewStatusLabel(value) {

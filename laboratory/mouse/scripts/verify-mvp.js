@@ -135,8 +135,11 @@ async function main() {
     staticHtml.includes("/api/ui/focus-review") &&
       staticHtml.includes("renderFocusReviewReadModel") &&
       staticHtml.includes("Focus Review unavailable") &&
-      staticHtml.includes("fabricated_records"),
-    "Focus Review UI should consume the read-only read model and render honest unavailable or empty states without fabricated records."
+      staticHtml.includes("fabricated_records") &&
+      staticHtml.includes("function stateMessageHtml(kind, title, detail = \"\")") &&
+      staticHtml.includes('class="state-message"') &&
+      staticHtml.includes('data-state-kind="loading"'),
+    "Focus Review UI should consume the read-only read model and render honest loading, empty, or error states without fabricated records."
   );
   assert(
     staticHtml.includes("/api/ui/colony-state") &&
@@ -706,6 +709,7 @@ async function main() {
     const missingWorkload = {
       state: panel.dataset.state,
       fabricated: panel.dataset.fabricatedRecords,
+      stateKind: panel.querySelector(".state-message")?.dataset.stateKind || "",
       text: panel.textContent
     };
     renderFocusReviewReadModel({
@@ -718,6 +722,7 @@ async function main() {
     const malformedWorkload = {
       state: panel.dataset.state,
       fabricated: panel.dataset.fabricatedRecords,
+      stateKind: panel.querySelector(".state-message")?.dataset.stateKind || "",
       text: panel.textContent
     };
     renderFocusReviewReadModel({
@@ -735,6 +740,7 @@ async function main() {
       error: {
         state: panel.dataset.state,
         fabricated: panel.dataset.fabricatedRecords,
+        stateKind: panel.querySelector(".state-message")?.dataset.stateKind || "",
         text: panel.textContent
       }
     };
@@ -752,13 +758,16 @@ async function main() {
   assert(
     focusReviewRender.missingWorkload.state === "empty" &&
       focusReviewRender.missingWorkload.fabricated === "false" &&
+      focusReviewRender.missingWorkload.stateKind === "empty" &&
       focusReviewRender.missingWorkload.text.includes("Counts unavailable") &&
+      focusReviewRender.missingWorkload.text.includes("No mouse IDs, strains, dates, or review counts are invented") &&
       !focusReviewRender.missingWorkload.text.includes("Must review 0"),
     "Focus Review should not invent zero workload when workload_summary is missing."
   );
   assert(
     focusReviewRender.malformedWorkload.state === "empty" &&
       focusReviewRender.malformedWorkload.fabricated === "false" &&
+      focusReviewRender.malformedWorkload.stateKind === "empty" &&
       focusReviewRender.malformedWorkload.text.includes("Counts unavailable") &&
       !focusReviewRender.malformedWorkload.text.includes("Must review 0"),
     "Focus Review should not invent zero workload when workload_summary values are malformed."
@@ -766,6 +775,7 @@ async function main() {
   assert(
     focusReviewRender.error.state === "error" &&
       focusReviewRender.error.fabricated === "false" &&
+      focusReviewRender.error.stateKind === "error" &&
       focusReviewRender.error.text.includes("Focus Review unavailable") &&
       focusReviewRender.error.text.includes("backend down"),
     "Focus Review unavailable state should be explicit and non-fabricated."
