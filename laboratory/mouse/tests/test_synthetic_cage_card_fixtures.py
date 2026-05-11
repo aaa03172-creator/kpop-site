@@ -1,0 +1,79 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import sqlite3
+from pathlib import Path
+
+
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "generate_synthetic_cage_card_fixtures.py"
+
+
+def load_generator_module():
+    spec = importlib.util.spec_from_file_location("generate_synthetic_cage_card_fixtures", SCRIPT_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_generate_synthetic_cage_card_fixtures_creates_images_manifest_and_db(tmp_path: Path) -> None:
+    generator = load_generator_module()
+    output_dir = tmp_path / "synthetic_cage_cards"
+
+    summary = generator.generate(output_dir)
+
+    manifest_path = output_dir / "synthetic_photo_e2e_validation_cases.json"
+    db_path = output_dir / "synthetic_photo_e2e.sqlite"
+    assert summary == {
+        "boundary": "review item / test fixture",
+        "canonical": False,
+        "case_count": 5,
+        "image_count": 5,
+        "manifest": str(manifest_path),
+        "database": str(db_path),
+    }
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["boundary"] == "review item / test fixture"
+    assert manifest["canonical"] is False
+    assert "Do not send synthetic validation payloads to external services." in manifest["source_policy"]
+    assert manifest["latest_parse_selector"]["source_name"] == "synthetic_photo_fixture"
+    assert manifest["recommended_coverage_tags"] == [
+        "clear",
+        "low_confidence",
+        "dense_notes",
+        "cropped_or_blurry",
+        "ear_label_ambiguity",
+        "numeric_notes",
+    ]
+    assert len(manifest["cases"]) == 5
+    assert {case["case_id"] for case in manifest["cases"]} == {
+        "synthetic_clear_card",
+        "synthetic_low_confidence_blurry_card",
+        "synthetic_numeric_notes_card",
+        "synthetic_digit_prime_confusion_card",
+        "synthetic_dense_mating_notes_card",
+    }
+    for case in manifest["cases"]:
+        image_path = output_dir / case["photo_filename"]
+        assert image_path.exists()
+        assert image_path.stat().st_size >= case["min_photo_bytes"]
+
+    with sqlite3.connect(db_path) as conn:
+        photo_count = conn.execute("SELECT COUNT(*) FROM photo_log").fetchone()[0]
+        parse_count = conn.execute("SELECT COUNT(*) FROM parse_result").fetchone()[0]
+        note_count = conn.execute("SELECT COUNT(*) FROM card_note_item_log").fetchone()[0]
+        review_count = conn.execute("SELECT COUNT(*) FROM review_queue").fetchone()[0]
+        raw_source_kinds = {
+            row[0] for row in conn.execute("SELECT DISTINCT raw_source_kind FROM photo_log").fetchall()
+        }
+        source_layers = {
+            row[0] for row in conn.execute("SELECT DISTINCT source_layer FROM photo_log").fetchall()
+        }
+
+    assert photo_count == 5
+    assert parse_count == 5
+    assert note_count >= 8
+    assert review_count >= 4
+    assert raw_source_kinds == {"synthetic_cage_card_photo"}
+    assert source_layers == {"raw source"}
