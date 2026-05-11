@@ -265,6 +265,7 @@ def confidence_calibration_summary(manifest: dict[str, Any], results: list[dict[
         for result in results
         if "max_confidence" in cases_by_id.get(result.get("case_id"), {}).get("expected_parse", {})
     ]
+    coverage = coverage_summary(manifest)
     if not confidences:
         return {
             "case_count": 0,
@@ -277,6 +278,7 @@ def confidence_calibration_summary(manifest: dict[str, Any], results: list[dict[
                 "60_100_clearer": 0,
             },
             "low_confidence_guard_cases": guard_cases,
+            "coverage": coverage,
         }
     return {
         "case_count": len(confidences),
@@ -289,6 +291,35 @@ def confidence_calibration_summary(manifest: dict[str, Any], results: list[dict[
             "60_100_clearer": len([value for value in confidences if value >= 60]),
         },
         "low_confidence_guard_cases": guard_cases,
+        "coverage": coverage,
+    }
+
+
+def coverage_summary(manifest: dict[str, Any]) -> dict[str, Any]:
+    recommended_tags = [
+        str(tag)
+        for tag in manifest.get("recommended_coverage_tags", [])
+        if str(tag).strip()
+    ]
+    case_tags = {}
+    covered_tags: list[str] = []
+    for case in manifest.get("cases", []):
+        case_id = str(case.get("case_id") or "")
+        tags = [
+            str(tag)
+            for tag in case.get("coverage_tags", [])
+            if str(tag).strip()
+        ]
+        if case_id:
+            case_tags[case_id] = tags
+        for tag in tags:
+            if tag not in covered_tags:
+                covered_tags.append(tag)
+    return {
+        "recommended_tags": recommended_tags,
+        "covered_tags": covered_tags,
+        "missing_tags": [tag for tag in recommended_tags if tag not in covered_tags],
+        "case_tags": case_tags,
     }
 
 
