@@ -4,10 +4,12 @@ Layer classification: review item / test fixture. Canonical: false.
 
 ## Purpose
 
-This workflow creates local-only synthetic cage-card images, a matching
+This workflow creates local-only synthetic cage-card JPEG images, a matching
 validation manifest, and a SQLite fixture database so the photo E2E verifier can
 exercise parser and review-routing safety contracts without touching real lab
-photos or the operational database.
+photos or the operational database. The JPEG renderer adds deterministic
+photo-like perturbations such as blur, slight rotation, crop-like framing, and
+pixel noise.
 
 ## Run
 
@@ -20,9 +22,10 @@ python scripts/verify-photo-e2e-cases.py `
   --require-fixtures
 ```
 
-Expected result: five synthetic cases pass. The generated set covers clear,
+Expected result: five synthetic JPEG cases pass. The generated set covers clear,
 low-confidence, dense-note, cropped/blurry, ear-label ambiguity, and numeric-note
-contracts.
+contracts. Each manifest case includes `synthetic_source.rendering:
+local_jpeg_photo_simulation`.
 
 ## Boundaries
 
