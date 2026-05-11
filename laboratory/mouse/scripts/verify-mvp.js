@@ -125,8 +125,11 @@ async function main() {
       staticHtml.includes("attention-trace-only") &&
       staticHtml.includes("Needs quick confirmation") &&
       staticHtml.includes("Trace only") &&
-      staticHtml.includes("data-attention-level"),
-    "Focus Review should expose low-fatigue attention cues with text, structure, and stable classes."
+      staticHtml.includes("data-attention-level") &&
+      staticHtml.includes("review-card-symbol") &&
+      staticHtml.includes("review-card-consequence") &&
+      staticHtml.includes("Blocks export until reviewed."),
+    "Focus Review should expose low-fatigue attention cues with text, symbols, consequence copy, structure, and stable classes."
   );
   assert(
     staticHtml.includes("/api/ui/focus-review") &&
@@ -616,7 +619,8 @@ async function main() {
     const host = document.createElement("div");
     host.innerHTML = `
       <article class="review-card ${attentionClass}" data-attention-level="${item.attention_level}">
-        <span class="review-card-kind ${visual.tone}">${visual.label}</span>
+        <span class="review-card-kind ${visual.tone}"><span class="review-card-symbol" aria-hidden="true">${visual.symbol}</span>${visual.label}</span>
+        <div class="review-card-consequence">${visual.consequence}</div>
         <button class="inspect-review" type="button">Inspect</button>
       </article>
     `;
@@ -624,17 +628,21 @@ async function main() {
     const card = host.querySelector(".review-card");
     return {
       label: host.querySelector(".review-card-kind")?.textContent || "",
+      consequence: host.querySelector(".review-card-consequence")?.textContent || "",
       hasDataLevel: card?.getAttribute("data-attention-level") === "quick_check",
       hasStableClass: card?.classList.contains("attention-quick-check"),
+      symbolHidden: host.querySelector(".review-card-symbol")?.getAttribute("aria-hidden") === "true",
       hasAction: Boolean(host.querySelector(".inspect-review")),
     };
   });
   assert(
-    attentionCue.label === "Needs quick confirmation" &&
+    attentionCue.label.includes("Needs quick confirmation") &&
+      attentionCue.consequence === "Check source evidence before accepting." &&
       attentionCue.hasDataLevel &&
       attentionCue.hasStableClass &&
+      attentionCue.symbolHidden &&
       attentionCue.hasAction,
-    "Rendered Focus Review cards should expose quick-check text, stable cue class, data level, and actions."
+    "Rendered Focus Review cards should expose quick-check text, symbol, consequence copy, stable cue class, data level, and actions."
   );
   const focusReviewRender = await staticPage.evaluate(() => {
     const panel = document.getElementById("focusReviewReadModel");
