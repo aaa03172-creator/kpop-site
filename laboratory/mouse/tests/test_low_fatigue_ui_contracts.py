@@ -1139,6 +1139,76 @@ def test_mouse_timeline_empty_state_does_not_fabricate_events(tmp_path: Path) ->
         db.DB_PATH = old_db_path
 
 
+def test_action_log_viewer_exposes_recent_actions_without_mutation(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        with db.connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO action_log
+                    (action_id, action_type, target_id, before_value, after_value,
+                     performed_by, performed_role, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "action_review_resolved",
+                        "review_resolved",
+                        "review_mt401",
+                        json.dumps({"status": "open"}, ensure_ascii=False),
+                        json.dumps({"status": "resolved"}, ensure_ascii=False),
+                        "local_user",
+                        "Colony Reviewer",
+                        "2026-05-09T11:20:00Z",
+                    ),
+                    (
+                        "action_mouse_update",
+                        "mouse_updated",
+                        "MT401",
+                        "unknown",
+                        "female",
+                        "local_user",
+                        "Colony Reviewer",
+                        "2026-05-09T11:18:00Z",
+                    ),
+                ],
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/ui/action-log?target_id=review_mt401")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_layer"] == "export or view"
+        assert payload["filters"] == {"target_id": "review_mt401", "action_type": "", "limit": 50}
+        assert payload["summary"] == {"returned_actions": 1, "available_action_types": 2}
+        assert payload["action_types"] == [
+            {"action_type": "mouse_updated", "count": 1},
+            {"action_type": "review_resolved", "count": 1},
+        ]
+        assert payload["actions"] == [
+            {
+                "action_id": "action_review_resolved",
+                "action_type": "review_resolved",
+                "target_id": "review_mt401",
+                "before_value": '{"status": "open"}',
+                "after_value": '{"status": "resolved"}',
+                "before": {"status": "open"},
+                "after": {"status": "resolved"},
+                "performed_by": "local_user",
+                "performed_role": "Colony Reviewer",
+                "created_at": "2026-05-09T11:20:00Z",
+            }
+        ]
+        with db.connection() as conn:
+            action_count = conn.execute("SELECT COUNT(*) AS count FROM action_log").fetchone()["count"]
+        assert action_count == 2
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_mouse_pedigree_shows_selected_path_and_field_evidence(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:

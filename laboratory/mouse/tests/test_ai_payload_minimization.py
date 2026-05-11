@@ -7,7 +7,8 @@ import pytest
 from fastapi import HTTPException
 
 from app import db
-from app.main import ROOT, ai_transcription_image_content
+from app import main as app_main
+from app.main import ROOT, PhotoAiDraftCreate, ai_transcription_image_content, request_ai_transcription_draft
 
 
 def test_ai_image_content_does_not_send_unreadable_full_photo_fallback(tmp_path: Path) -> None:
@@ -45,3 +46,96 @@ def test_ai_image_content_does_not_send_unreadable_full_photo_fallback(tmp_path:
     finally:
         db.DB_PATH = old_db_path
         shutil.rmtree(photo_dir, ignore_errors=True)
+
+
+def test_external_ai_draft_response_records_approval_and_payload_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    posted_payloads: list[dict] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "output_text": """
+                {
+                  "card_type": "Separated",
+                  "raw_strain": "ApoM Tg/Tg",
+                  "matched_strain": "ApoM Tg/Tg",
+                  "sex_raw": "F",
+                  "id_raw": "MT",
+                  "dob_raw": "",
+                  "dob_normalized": "",
+                  "mating_date_raw": "",
+                  "mating_date_normalized": "",
+                  "lmo_raw": "",
+                  "mouse_count": "2 total",
+                  "notes": [],
+                  "raw_visible_text_lines": ["ApoM Tg/Tg", "Sex F 2"],
+                  "symbol_confusions": [],
+                  "confidence": 88,
+                  "uncertain_fields": [],
+                  "reviewer_note": ""
+                }
+                """
+            }
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, headers: dict, json: dict):
+            posted_payloads.append(json)
+            return FakeResponse()
+
+    monkeypatch.setattr(app_main, "current_openai_api_key", lambda: "test-key")
+    monkeypatch.setattr(
+        app_main,
+        "photo_image_path",
+        lambda photo_id: (
+            {"original_filename": "approval-card.jpg"},
+            Path("unused.jpg"),
+            "image/jpeg",
+        ),
+    )
+    monkeypatch.setattr(
+        app_main,
+        "ai_transcription_image_content",
+        lambda photo_id, image_path, media_type, detail: {
+            "mode": "roi_field_crops",
+            "payload_minimization": "Only ROI crops and active assigned strain names/aliases were sent.",
+            "extraction_regions": [{"label": "card", "target_fields": ["raw_visible_text_lines"]}],
+            "roi_template_type": "blue_structured_card",
+            "content": [{"type": "input_text", "text": "ROI crop payload"}],
+        },
+    )
+    monkeypatch.setattr(
+        app_main,
+        "assigned_strain_scope_for_prompt",
+        lambda: [{"display_name": "ApoM Tg/Tg", "aliases": ["ApoM"]}],
+    )
+    monkeypatch.setattr(app_main.httpx, "Client", FakeClient)
+
+    result = request_ai_transcription_draft(
+        "photo_approval_review",
+        PhotoAiDraftCreate(approved_external_inference=True, detail="low"),
+    )
+
+    assert posted_payloads
+    assert result["external_approval"] == {
+        "approved_external_inference": True,
+        "approval_scope": "single_photo_ai_transcription_draft",
+        "payload_review": {
+            "full_colony_records_sent": False,
+            "excel_rows_sent": False,
+            "raw_source_photo_sent": False,
+            "derived_roi_crops_sent": True,
+            "assigned_strain_scope_sent": True,
+        },
+    }

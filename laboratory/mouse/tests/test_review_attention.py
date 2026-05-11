@@ -21,6 +21,7 @@ from app.main import (
     resolve_review_item,
     review_check_targets,
     review_attention_level,
+    ui_action_log,
     write_note_items_and_mouse_candidates,
 )
 
@@ -76,6 +77,60 @@ def seed_numeric_note_parse(tmp_path: Path, parse_suffix: str, notes: list[dict[
             "review",
         )
     return parse_id, snapshot_id
+
+
+def test_ui_action_log_filters_and_parses_action_values(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO action_log
+                    (action_id, action_type, target_id, before_value, after_value,
+                     performed_by, performed_role, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "action_review_target",
+                    "correction_recorded",
+                    "mouse_001",
+                    json.dumps({"status": "review"}, ensure_ascii=False),
+                    json.dumps({"status": "accepted"}, ensure_ascii=False),
+                    "local_user",
+                    "reviewer",
+                    "2026-05-09T00:01:00Z",
+                    "action_other_target",
+                    "cage_created",
+                    "cage_001",
+                    "",
+                    json.dumps({"cage_label": "A1"}, ensure_ascii=False),
+                    "local_user",
+                    "reviewer",
+                    "2026-05-09T00:00:00Z",
+                ),
+            )
+
+        result = ui_action_log(target_id="mouse_001", limit=500)
+
+        assert result["source_layer"] == "export or view"
+        assert result["filters"] == {
+            "target_id": "mouse_001",
+            "action_type": "",
+            "limit": 200,
+        }
+        assert result["summary"]["returned_actions"] == 1
+        assert result["action_types"] == [
+            {"action_type": "cage_created", "count": 1},
+            {"action_type": "correction_recorded", "count": 1},
+        ]
+        [action] = result["actions"]
+        assert action["action_id"] == "action_review_target"
+        assert action["before"] == {"status": "review"}
+        assert action["after"] == {"status": "accepted"}
+    finally:
+        db.DB_PATH = old_db_path
 
 
 def test_correction_empty_source_record_does_not_create_orphan_source(tmp_path: Path) -> None:

@@ -3372,6 +3372,23 @@
       </details>
     </section>
 
+    <section class="full collapsible-section" data-view="records" id="records-action-log">
+      <details>
+        <summary>
+          <div>
+            <h2>Action Log Viewer</h2>
+            <p>Recent local actions with before and after values for audit checks.</p>
+          </div>
+          <span class="summary-action">Show actions</span>
+        </summary>
+      <p class="muted" id="actionLogSummary">No local actions recorded yet.</p>
+      <table>
+        <thead><tr><th>When</th><th>Action</th><th>Target</th><th>Before</th><th>After</th><th>Actor</th></tr></thead>
+        <tbody id="actionLogRows"></tbody>
+      </table>
+      </details>
+    </section>
+
     <section class="full" data-view="exports">
       <h2>Export Center</h2>
       <div class="visual-guide">
@@ -5069,6 +5086,23 @@
       ).join("") || row(["No trace items yet", "", "", "", ""]);
     }
 
+    function renderActionLogViewer(actionLog) {
+      const actions = actionLog.actions || [];
+      const types = actionLog.action_types || [];
+      document.getElementById("actionLogSummary").textContent =
+        `${actions.length} recent action(s), ${types.length} action type(s).`;
+      document.getElementById("actionLogRows").innerHTML = actions.map((action) =>
+        row([
+          action.created_at || "--",
+          action.action_type || "--",
+          action.target_id || "--",
+          compactDetails(action.before || action.before_value || {}),
+          compactDetails(action.after || action.after_value || {}),
+          [action.performed_by, action.performed_role].filter(Boolean).join(" / ") || "--"
+        ])
+      ).join("") || row(["No actions yet", "", "", "", "", ""]);
+    }
+
     function statusCell(value) {
       return `<span class="status${String(value || "").toLowerCase().includes("review") ? " warn" : ""}">${escapeHtml(value || "--")}</span>`;
     }
@@ -6228,12 +6262,13 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, colonySchedule, evidenceLedger, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, actionLog, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, colonySchedule, evidenceLedger, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
         api("/api/source-records"),
         api("/api/corrections"),
+        api("/api/ui/action-log"),
         api("/api/canonical-candidates"),
         api("/api/distribution-imports"),
         api("/api/legacy-workbook-imports"),
@@ -6272,6 +6307,7 @@
       const selectedTimelineMouse = firstMouse(mice);
       renderMousePedigreeReadModel(await loadMousePedigreeReadModel(selectedTimelineMouse?.mouse_id || ""));
       renderMouseTimelineReadModel(await loadMouseTimelineReadModel(selectedTimelineMouse?.mouse_id || ""));
+      renderActionLogViewer(actionLog);
       const aiStatus = health.ai_draft || {};
       currentAiStatus = aiStatus;
       document.getElementById("aiDraftMessage").textContent = aiStatus.available
