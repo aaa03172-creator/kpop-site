@@ -20,15 +20,18 @@ def test_photo_e2e_summary_reports_confidence_calibration_bands() -> None:
     manifest = {
         "boundary": "review item / test fixture",
         "source_policy": "Use only local photo fixtures.",
+        "recommended_coverage_tags": ["clear", "low_confidence", "dense_notes", "cropped_or_blurry"],
         "cases": [
             {
                 "case_id": "clear_card",
                 "purpose": "Clear card should stay high confidence.",
+                "coverage_tags": ["clear"],
                 "expected_parse": {"min_confidence": 60},
             },
             {
                 "case_id": "low_confidence_card_blocks_export",
                 "purpose": "Low confidence card should remain review-blocking.",
+                "coverage_tags": ["low_confidence"],
                 "expected_parse": {"max_confidence": 20},
             },
         ],
@@ -72,6 +75,15 @@ def test_photo_e2e_summary_reports_confidence_calibration_bands() -> None:
             "60_100_clearer": 1,
         },
         "low_confidence_guard_cases": ["low_confidence_card_blocks_export"],
+        "coverage": {
+            "recommended_tags": ["clear", "low_confidence", "dense_notes", "cropped_or_blurry"],
+            "covered_tags": ["clear", "low_confidence"],
+            "missing_tags": ["dense_notes", "cropped_or_blurry"],
+            "case_tags": {
+                "clear_card": ["clear"],
+                "low_confidence_card_blocks_export": ["low_confidence"],
+            },
+        },
     }
 
 

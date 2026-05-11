@@ -3,6 +3,7 @@
   "canonical": false,
   "description": "Small real-photo regression set for cage-card extraction contracts. These cases do not replace raw photos or review decisions.",
   "source_policy": "Use only locally stored photos and local SQLite parse results. Do not send validation payloads to external services.",
+  "recommended_coverage_tags": ["clear", "low_confidence", "dense_notes", "cropped_or_blurry"],
   "latest_parse_selector": {
     "source_name": "ai_photo_extraction",
     "order": "parsed_at DESC",
@@ -11,6 +12,7 @@
   "cases": [
     {
       "case_id": "rwm_impossible_ear_label",
+      "coverage_tags": ["ear_label_ambiguity"],
       "photo_id": "photo_45193d422a8f",
       "photo_filename": "KakaoTalk_20260502_102059315_09.jpg",
       "purpose": "A W-like struck note must remain reviewable instead of being accepted as a clean ear label.",
@@ -47,6 +49,7 @@
     },
     {
       "case_id": "numeric_notes_are_not_mouse_ids",
+      "coverage_tags": ["numeric_notes"],
       "photo_id": "photo_cdde8898f569",
       "photo_filename": "KakaoTalk_20260502_102059315_15.jpg",
       "purpose": "Numeric note lines must stay reviewable as note anchors and must not silently become mouse IDs.",
@@ -75,6 +78,7 @@
     },
     {
       "case_id": "digit_prime_ear_label_confusion",
+      "coverage_tags": ["ear_label_ambiguity", "clear"],
       "photo_id": "photo_7cc0a42a188e",
       "photo_filename": "KakaoTalk_20260502_102059315_11.jpg",
       "purpose": "A possible prime mark misread as digit 1 must stay reviewable, while clear adjacent labels can auto-fill.",
@@ -110,6 +114,7 @@
     },
     {
       "case_id": "low_confidence_card_blocks_export",
+      "coverage_tags": ["low_confidence", "cropped_or_blurry"],
       "photo_id": "photo_ffd23b32d912",
       "photo_filename": "KakaoTalk_20260502_102059315_14.jpg",
       "purpose": "A very low confidence extraction must be promoted to must-review instead of being hidden as ordinary noise.",
@@ -126,6 +131,7 @@
     },
     {
       "case_id": "mating_note_lines_remain_reviewable",
+      "coverage_tags": ["dense_notes", "mating_litter_notes"],
       "photo_id": "photo_2ab2d80c7d36",
       "photo_filename": "KakaoTalk_20260502_102059315_02.jpg",
       "purpose": "Dense mating/litter-like note lines must preserve raw line evidence and stay reviewable when parsed values are uncertain.",
