@@ -19,6 +19,9 @@ def test_static_ui_exposes_review_assistant_draft_controls() -> None:
     assert "assistant-review-draft" in html
     assert "renderAssistantReviewDraft" in html
     assert "Load Assistant Draft" in html
+    assert "function fillReviewResolutionFromAssistantDraft" in html
+    assert "apply-assistant-review-draft" in html
+    assert "Apply Draft To Form" in html
 
 
 def test_review_assistant_draft_is_local_read_only_and_traceable(tmp_path: Path) -> None:

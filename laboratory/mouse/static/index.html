@@ -5910,7 +5910,26 @@
         <span>Draft value: ${escapeHtml(resolution.resolved_value || "--")}</span>
         <span>Draft note: ${escapeHtml(resolution.resolution_note || "--")}</span>
         <span>Trace: ${escapeHtml([refs.source_photo_id, refs.parse_id, (refs.note_item_ids || []).join(", ")].filter(Boolean).join(" / ") || "--")}</span>
+        <button class="apply-assistant-review-draft" type="button">Apply Draft To Form</button>
       `;
+      const applyButton = panel.querySelector(".apply-assistant-review-draft");
+      applyButton?.addEventListener("click", () => fillReviewResolutionFromAssistantDraft(result));
+    }
+
+    function fillReviewResolutionFromAssistantDraft(result) {
+      const resolution = result?.draft?.resolution_payload || {};
+      const actions = document.querySelector(".review-actions");
+      if (!actions) return;
+      const valueInput = actions.querySelector(".review-resolved-value");
+      const noteInput = actions.querySelector(".review-resolution-note");
+      const decisionInput = actions.querySelector(".review-legacy-decision");
+      if (valueInput && resolution.resolved_value !== undefined) valueInput.value = resolution.resolved_value || "";
+      if (noteInput) noteInput.value = resolution.resolution_note || "";
+      if (decisionInput && resolution.legacy_decision) decisionInput.value = resolution.legacy_decision;
+      const message = actions.querySelector(".review-resolution-message");
+      if (message) {
+        message.textContent = "Assistant draft copied into the form. Review source evidence before resolving.";
+      }
     }
 
     function attachReviewAuditHandler() {
