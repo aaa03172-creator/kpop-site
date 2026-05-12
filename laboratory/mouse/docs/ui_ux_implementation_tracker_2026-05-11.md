@@ -39,10 +39,10 @@ runtime code, those sources win.
 
 | Guidance area | Current status | Evidence | Remaining gap |
 | --- | --- | --- | --- |
-| Export action feedback | Implemented and guarded, with row-level preview chips for workbook preview state. | #113, #115, #131 plus export preview row-state chip implementation. | Add direct evidence links for blockers that have source photo or note-line evidence but no review item. |
+| Export action feedback | Implemented and guarded, with row-level preview chips for workbook preview state and direct evidence links for blockers without review items. | #113, #115, #131 plus export preview row-state chip and direct evidence-link implementations. | Add row-level anchors if future blocker payloads expose stable evidence-row IDs. |
 | Upload / extraction progress | Implemented for upload/extraction operation progress and visible photo-stage progress from source stored through export ready/blocked. | #118 plus photo-stage progress UI implementation. | Add later quality/OCR confidence sub-stages if the parse pipeline exposes stable quality signals. |
 | Review status cues | Implemented for Review Queue cards. | #125. | Improve resolved/after-action feedback and keyboard next/previous cues for repeated review work. |
-| Export blocker navigation | Implemented for blockers with `review_id`. | #131. | Add direct evidence links for blockers that have source photo or note-line evidence but no review item. |
+| Export blocker navigation | Implemented for blockers with `review_id`, and for blocker warnings that only expose source photo, note-line, or artifact evidence. | #131 plus direct evidence-link UI implementation. | Extend link targeting if future blocker payloads add stable row-level anchors inside note/evidence tables. |
 | Brand and color direction | Semantic token foundation implemented for chips, status pills, selected rows/cards, disabled controls, ready/blocked states, progress, and focus rings. | #111 plus `static/index.html` and `index.html` token aliases. | Extend the same token vocabulary to future row-state chips and evidence badges as those slices land. |
 | Empty/loading/error state | Implemented for read-model panels and high-traffic table empty states. | #111, #137, #140. | Extend the same state-message pattern to lower-priority settings/reference tables when those screens are next touched. |
 | Evidence type badges | Implemented for Evidence Ledger cards, Focus Review detail source panels, and Export Log artifact cells. | #111 plus evidence badge UI implementation. | Extend badges to lower-priority audit/detail tables when those screens are next touched. |
@@ -50,19 +50,19 @@ runtime code, those sources win.
 
 ## Recommended Next Slices
 
-1. Direct evidence links for export blockers without `review_id`.
-   - Scope: Export Center blockers that still have source photo, note-line, or
-     artifact evidence but no Focus Review item.
-   - Boundary: export or view navigation only.
-   - Verification: DOM checks that the links preserve traceability and do not
-     enable final export actions.
-
-2. Lower-priority audit/detail table polish.
+1. Lower-priority audit/detail table polish.
    - Scope: settings/reference/audit tables that were intentionally left out
      of the high-traffic UI pass.
    - Boundary: UI readability and accessibility behavior only.
    - Verification: DOM checks for state messages, evidence badges, and
      focus-visible controls where rows have actions.
+
+2. Row-level evidence anchors.
+   - Scope: stable row anchors for parsed note evidence, Evidence Ledger items,
+     and export preview rows when the backend exposes durable IDs for each view.
+   - Boundary: export or view navigation only.
+   - Verification: DOM checks that deep links select or scroll to the intended
+     evidence row without changing canonical state.
 
 ## Current Foundation Slice
 
@@ -73,6 +73,7 @@ runtime code, those sources win.
 | Evidence badge pass | Adds consistent text-backed badges for source photo, OCR text, note line, review item, export manifest, and validation report evidence in high-traffic review/export surfaces. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for badge text in Evidence Ledger, Focus Review detail, and Export Log. |
 | Photo-stage progress expansion | Adds per-photo stage chips for `Uploaded`, `Parse/OCR`, `Review`, `Candidate`, `Accepted/Held`, and `Export`, using blocked/held states without implying canonical acceptance early. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for stage labels and blocked/held/done classes. |
 | Keyboard and focus pass | Adds consistent focus-visible treatment, `aria-current` state, and specific accessible names for high-traffic photo review, Review Queue, export blocker, and artifact preview actions. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and Playwright DOM checks for focus-within/current-state/action-name contracts. |
+| Export blocker evidence links | Adds source photo, parsed note, and artifact preview actions for Export Center blockers that do not have a Focus Review `review_id`, while keeping final export gating unchanged. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and Playwright DOM checks for evidence-link navigation and artifact preview loading. |
 
 ## Verification Commands To Prefer
 

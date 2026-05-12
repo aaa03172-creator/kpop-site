@@ -2011,9 +2011,19 @@
       justify-self: start;
       margin-top: 4px;
     }
+    .export-blocker-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      justify-content: flex-start;
+    }
     .artifact-preview-button:focus-visible,
     .export-blocker-action:focus-visible,
-    .open-export-blocker-review:focus-visible {
+    .open-export-blocker-review:focus-visible,
+    .open-export-blocker-photo:focus-visible,
+    .open-export-blocker-note:focus-visible,
+    .open-export-blocker-artifact:focus-visible {
       box-shadow: 0 0 0 3px var(--focus-ring);
     }
     .export-detail-grid {
@@ -6685,6 +6695,35 @@
             `Opened export blocker review ${selectedReviewId}. Source evidence remains available in Focus Review.`;
         });
       });
+      document.querySelectorAll(".open-export-blocker-photo").forEach((button) => {
+        button.addEventListener("click", () => {
+          const photoId = button.dataset.photoId || "";
+          setActiveView("photo");
+          if (photoId && latestPhotos.some((photo) => photo.photo_id === photoId)) {
+            setTranscriptionPhoto(photoId);
+          }
+          document.getElementById("viewSubtitle").textContent =
+            `Opened source photo evidence ${photoId || "pending"} from Export Center blocker.`;
+        });
+      });
+      document.querySelectorAll(".open-export-blocker-note").forEach((button) => {
+        button.addEventListener("click", () => {
+          setActiveView("records");
+          const section = document.getElementById("records-evidence");
+          section?.querySelector("details")?.setAttribute("open", "");
+          section?.scrollIntoView({ block: "start" });
+          document.getElementById("viewSubtitle").textContent =
+            `Opened parsed note evidence ${button.dataset.noteItemId || "pending"} from Export Center blocker.`;
+        });
+      });
+      document.querySelectorAll(".open-export-blocker-artifact").forEach((button) => {
+        button.addEventListener("click", () => {
+          setActiveView("exports");
+          showArtifactPreview(button.dataset.artifactPath || "");
+          document.getElementById("viewSubtitle").textContent =
+            "Opened export blocker artifact preview. Artifact remains an export or view surface.";
+        });
+      });
       document.getElementById("exportLogRows").innerHTML = exportLog.map((item) => `
         <tr>
           <td>${escapeHtml(item.filename)}</td>
@@ -6706,8 +6745,37 @@
     }
 
     function exportBlockerReviewButton(item) {
-      if (!item?.review_id) return `<span class="muted">Open Focus Review</span>`;
-      return `<button class="export-blocker-action open-export-blocker-review" type="button" data-review-id="${escapeHtml(item.review_id)}" aria-label="Open Focus Review item ${escapeHtml(item.review_id)} from export blocker">Open review</button>`;
+      return exportBlockerEvidenceActions(item);
+    }
+
+    function firstEvidenceId(item, keys) {
+      for (const key of keys) {
+        const value = item?.[key];
+        if (Array.isArray(value) && value.length) return String(value[0]);
+        if (typeof value === "string" && value.trim()) return value.split(/[,;]/)[0].trim();
+      }
+      return "";
+    }
+
+    function exportBlockerEvidenceActions(item) {
+      if (item?.review_id) {
+        return `<button class="export-blocker-action open-export-blocker-review" type="button" data-review-id="${escapeHtml(item.review_id)}" aria-label="Open Focus Review item ${escapeHtml(item.review_id)} from export blocker">Open review</button>`;
+      }
+      const photoId = firstEvidenceId(item, ["photo_id", "source_photo_id", "source_photo_ids"]);
+      const noteItemId = firstEvidenceId(item, ["note_item_id", "source_note_item_id", "source_note_item_ids"]);
+      const artifactPath = firstEvidenceId(item, ["artifact_path", "validation_report_path", "export_manifest_path"]);
+      const actions = [];
+      if (photoId) {
+        actions.push(`<button class="export-blocker-action open-export-blocker-photo" type="button" data-photo-id="${escapeHtml(photoId)}" aria-label="Open source photo evidence ${escapeHtml(photoId)} from export blocker">Open photo</button>`);
+      }
+      if (noteItemId) {
+        actions.push(`<button class="export-blocker-action open-export-blocker-note" type="button" data-note-item-id="${escapeHtml(noteItemId)}" aria-label="Open note evidence ${escapeHtml(noteItemId)} from export blocker">Open note</button>`);
+      }
+      if (artifactPath) {
+        actions.push(`<button class="export-blocker-action open-export-blocker-artifact" type="button" data-artifact-path="${escapeHtml(artifactPath)}" aria-label="Preview blocker artifact from export blocker">Preview artifact</button>`);
+      }
+      if (!actions.length) return `<span class="muted">Evidence link pending</span>`;
+      return `<div class="export-blocker-actions" aria-label="Export blocker evidence links">${actions.join("")}</div>`;
     }
 
     async function showArtifactPreview(path) {
