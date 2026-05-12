@@ -1952,6 +1952,42 @@
     .export-table-wrap table {
       min-width: 760px;
     }
+    .row-state-cell {
+      min-width: 150px;
+    }
+    .row-state-stack {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .row-state-chip {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--neutral-line);
+      border-radius: 999px;
+      background: var(--neutral-bg);
+      color: var(--muted);
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .row-state-chip.ready {
+      border-color: var(--ready-line);
+      background: var(--ready-bg);
+      color: var(--ready-ink);
+    }
+    .row-state-chip.blocked {
+      border-color: var(--blocked-line);
+      background: var(--blocked-bg);
+      color: var(--blocked-ink);
+    }
+    .row-state-chip.trace {
+      border-color: var(--neutral-line);
+      background: #fff;
+      color: var(--cue-trace-ink);
+    }
     .visual-shell {
       display: grid;
       gap: 16px;
@@ -3601,7 +3637,7 @@
             <h3>Separation workbook preview</h3>
             <div class="export-table-wrap">
               <table>
-                <thead><tr><th>Cage number</th><th>Strain</th><th>Genotype</th><th>Total</th><th>DOB</th><th>WT</th><th>Tg</th><th>Sampling point</th><th>Source note</th><th>Evidence</th><th>Uncertainty</th></tr></thead>
+                <thead><tr><th>Preview state</th><th>Cage number</th><th>Strain</th><th>Genotype</th><th>Total</th><th>DOB</th><th>WT</th><th>Tg</th><th>Sampling point</th><th>Source note</th><th>Evidence</th><th>Uncertainty</th></tr></thead>
                 <tbody id="exportRows"></tbody>
               </table>
             </div>
@@ -3610,7 +3646,7 @@
             <h3>Animal sheet preview</h3>
             <div class="export-table-wrap">
               <table>
-                <thead><tr><th>Cage No.</th><th>Strain</th><th>Sex</th><th>I.D</th><th>genotype</th><th>DOB</th><th>Mating date</th><th>Pubs</th><th>Status</th><th>Source</th><th>Evidence</th><th>Uncertainty</th></tr></thead>
+                <thead><tr><th>Preview state</th><th>Cage No.</th><th>Strain</th><th>Sex</th><th>I.D</th><th>genotype</th><th>DOB</th><th>Mating date</th><th>Pubs</th><th>Status</th><th>Source</th><th>Evidence</th><th>Uncertainty</th></tr></thead>
                 <tbody id="animalSheetRows"></tbody>
               </table>
             </div>
@@ -3688,6 +3724,38 @@
           <td colspan="${escapeHtml(String(colspan))}">
             ${stateMessageHtml("empty", title, detail)}
           </td>
+        </tr>
+      `;
+    }
+
+    function exportPreviewRowStateChips(item, previewReady) {
+      const uncertainty = String(item?.uncertainty || "").trim();
+      const hasUncertainty = uncertainty && uncertainty !== "--" && !/^none$/i.test(uncertainty);
+      const evidenceText = [
+        item?.source_note_item_ids,
+        item?.source_photo_ids,
+        item?.card_snapshot_ids,
+        item?.raw_note_lines,
+        item?.source
+      ].filter(Boolean).join(" ");
+      const traceLinked = Boolean(evidenceText.trim());
+      const chips = [
+        ["Preview only", "neutral"],
+        [previewReady && !hasUncertainty ? "Ready" : "Blocked", previewReady && !hasUncertainty ? "ready" : "blocked"]
+      ];
+      if (traceLinked) chips.push(["Trace linked", "trace"]);
+      return `
+        <div class="row-state-stack" aria-label="Export preview row state">
+          ${chips.map(([label, tone]) => `<span class="row-state-chip ${escapeHtml(tone)}">${escapeHtml(label)}</span>`).join("")}
+        </div>
+      `;
+    }
+
+    function exportPreviewRow(cells, item, previewReady) {
+      return `
+        <tr>
+          <td class="row-state-cell">${exportPreviewRowStateChips(item, previewReady)}</td>
+          ${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
         </tr>
       `;
     }
@@ -6369,7 +6437,7 @@
         </div>
       `;
       document.getElementById("exportRows").innerHTML = (preview.separation_rows || []).map((item) =>
-        row([
+        exportPreviewRow([
           item.cage_number || "--",
           item.strain || "--",
           item.genotype || "--",
@@ -6381,10 +6449,10 @@
           item.source_note_item_ids || "--",
           [item.source_photo_ids && `photo ${item.source_photo_ids}`, item.card_snapshot_ids && `snapshot ${item.card_snapshot_ids}`, item.raw_note_lines && `raw ${item.raw_note_lines}`].filter(Boolean).join(" / ") || "--",
           item.uncertainty || "--"
-        ])
-      ).join("") || emptyTableRow("No separation preview rows yet", "Accepted source-backed separated cage rows will appear here before workbook export.", 11);
+        ], item, preview.ready)
+      ).join("") || emptyTableRow("No separation preview rows yet", "Accepted source-backed separated cage rows will appear here before workbook export.", 12);
       document.getElementById("animalSheetRows").innerHTML = (preview.animal_sheet_rows || []).map((item) =>
-        row([
+        exportPreviewRow([
           item.cage_no || "--",
           item.strain || "--",
           item.sex || "--",
@@ -6397,8 +6465,8 @@
           item.source || "--",
           [item.source_photo_ids && `photo ${item.source_photo_ids}`, item.card_snapshot_ids && `snapshot ${item.card_snapshot_ids}`, item.raw_note_lines && `raw ${item.raw_note_lines}`].filter(Boolean).join(" / ") || "--",
           item.uncertainty || "--"
-        ])
-      ).join("") || emptyTableRow("No animal sheet preview rows yet", "Accepted source-backed animal rows will appear here before workbook export.", 12);
+        ], item, preview.ready)
+      ).join("") || emptyTableRow("No animal sheet preview rows yet", "Accepted source-backed animal rows will appear here before workbook export.", 13);
       document.getElementById("exportBlockerRows").innerHTML = readinessItems.map((item) => `
         <tr>
           <td>${escapeHtml(item.issue || "Review blocker")}</td>

@@ -558,8 +558,51 @@
 
     .spreadsheet-table .row-number {
       left: 0;
-      min-width: 42px;
-      width: 42px;
+      min-width: 132px;
+      width: 132px;
+    }
+
+    .spreadsheet-table .row-number.row-state-number {
+      text-align: left;
+    }
+
+    .preview-row-state {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+    }
+
+    .row-state-chip {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--neutral-line);
+      border-radius: 999px;
+      background: var(--neutral-bg);
+      color: var(--quiet);
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 900;
+      line-height: 1.35;
+      white-space: nowrap;
+    }
+
+    .row-state-chip.ready {
+      border-color: var(--ready-line);
+      background: var(--ready-bg);
+      color: var(--ready-ink);
+    }
+
+    .row-state-chip.blocked {
+      border-color: var(--blocked-line);
+      background: var(--blocked-bg);
+      color: var(--blocked-ink);
+    }
+
+    .row-state-chip.trace {
+      background: #fff;
+      color: var(--quiet);
     }
 
     .spreadsheet-table .sheet-header {
@@ -3497,6 +3540,25 @@
       };
     }
 
+    function workbookPreviewRowState(rowIndex, headerCount, row, model) {
+      if (rowIndex < headerCount) {
+        return `<span>${escapeHtml(rowIndex + 1)}</span>`;
+      }
+      const hasTrace = row.some((cell) => /^FIXTURE-|^UPLOAD-|photo_|parse_|source_/i.test(String(cell || "")));
+      const blocked = blockedExportItems().length > 0;
+      const chips = [
+        ["Preview only", ""],
+        [blocked ? "Blocked" : "Ready", blocked ? "blocked" : "ready"]
+      ];
+      if (hasTrace) chips.push(["Source evidence", "trace"]);
+      return `
+        <div class="preview-row-state" aria-label="${escapeHtml(model.exportType)} preview row ${rowIndex - headerCount + 1} state">
+          <span>${escapeHtml(rowIndex + 1)}</span>
+          ${chips.map(([label, tone]) => `<span class="row-state-chip ${escapeHtml(tone)}">${escapeHtml(label)}</span>`).join("")}
+        </div>
+      `;
+    }
+
     function renderMetrics() {
       const uploaded = photos.length;
       const auto = photos.filter((photo) => photo.status === "auto").length;
@@ -3606,10 +3668,11 @@
       const previewRows = model.headerRows.concat(model.rows);
       const bodyRows = previewRows.map((row, rowIndex) => {
         const rowClass = rowIndex < model.headerRows.length ? "sheet-header" : "";
+        const rowStateClass = rowIndex < model.headerRows.length ? "" : " row-state-number";
         const padded = row.concat(Array.from({ length: columnCount - row.length }, () => ""));
         return `
           <tr>
-            <th class="row-number">${rowIndex + 1}</th>
+            <th class="row-number${rowStateClass}">${workbookPreviewRowState(rowIndex, model.headerRows.length, row, model)}</th>
             ${padded.map((cell) => `<td class="${rowClass}">${escapeHtml(cell)}</td>`).join("")}
           </tr>
         `;

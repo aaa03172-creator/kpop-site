@@ -237,6 +237,9 @@ Excel export:
 - show export readiness as a view over accepted state;
 - show stale/export-blocked state with source blockers;
 - never style Excel as the canonical editing surface.
+- workbook preview rows should show text-backed row-state chips such as
+  `Preview only`, `Ready`, `Blocked`, and source-trace labels without writing
+  those UI labels into the exported workbook schema.
 
 ## Screen Acceptance Criteria
 
