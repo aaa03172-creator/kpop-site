@@ -4706,9 +4706,10 @@
     function operationsTargetButton(task) {
       const targetType = task?.target_type || "";
       const targetId = task?.target_id || "";
+      const actionChannel = task?.action_channel || "human";
       if (!targetType || !targetId) return "";
       const label = targetType === "review"
-        ? "Open review"
+        ? actionChannel === "assistant" ? "Open assistant draft" : "Open review"
         : targetType === "photo"
           ? "Open photo"
           : targetType === "canonical_candidate"
@@ -4718,7 +4719,7 @@
               : targetType === "mouse"
                 ? "Open mouse"
                 : "Open target";
-      return `<button class="operations-target-action" type="button" data-target-type="${escapeHtml(targetType)}" data-target-id="${escapeHtml(targetId)}">${escapeHtml(label)}</button>`;
+      return `<button class="operations-target-action" type="button" data-target-type="${escapeHtml(targetType)}" data-target-id="${escapeHtml(targetId)}" data-action-channel="${escapeHtml(actionChannel)}">${escapeHtml(label)}</button>`;
     }
 
     function renderOperationsHomeReadModel(model) {
@@ -4783,6 +4784,7 @@
             selectedReviewId = targetId;
             setActiveView("review");
             await refresh();
+            if (button.dataset.actionChannel === "assistant") await loadAssistantReviewDraft(targetId);
           } else if (targetType === "photo") {
             if (targetId) setTranscriptionPhoto(targetId);
             setActiveView("photo");
@@ -5910,7 +5912,37 @@
         <span>Draft value: ${escapeHtml(resolution.resolved_value || "--")}</span>
         <span>Draft note: ${escapeHtml(resolution.resolution_note || "--")}</span>
         <span>Trace: ${escapeHtml([refs.source_photo_id, refs.parse_id, (refs.note_item_ids || []).join(", ")].filter(Boolean).join(" / ") || "--")}</span>
+        <button class="apply-assistant-review-draft" type="button">Apply Draft To Form</button>
       `;
+      const applyButton = panel.querySelector(".apply-assistant-review-draft");
+      applyButton?.addEventListener("click", () => fillReviewResolutionFromAssistantDraft(result));
+    }
+
+    function fillReviewResolutionFromAssistantDraft(result) {
+      const resolution = result?.draft?.resolution_payload || {};
+      const actions = document.querySelector(".review-actions");
+      if (!actions) return;
+      const valueInput = actions.querySelector(".review-resolved-value");
+      const noteInput = actions.querySelector(".review-resolution-note");
+      const decisionInput = actions.querySelector(".review-legacy-decision");
+      if (valueInput && resolution.resolved_value !== undefined) valueInput.value = resolution.resolved_value || "";
+      if (noteInput) noteInput.value = resolution.resolution_note || "";
+      if (decisionInput && resolution.legacy_decision) decisionInput.value = resolution.legacy_decision;
+      const message = actions.querySelector(".review-resolution-message");
+      if (message) {
+        message.textContent = "Assistant draft copied into the form. Review source evidence before resolving.";
+      }
+    }
+
+    async function loadAssistantReviewDraft(reviewId) {
+      const panel = document.getElementById("assistantReviewDraftPanel");
+      if (panel) {
+        panel.dataset.stateKind = "loading";
+        panel.innerHTML = `<strong>Assistant draft</strong><span>Loading local evidence draft...</span>`;
+      }
+      const result = await api(`/api/review-items/${encodeURIComponent(reviewId)}/assistant-draft`);
+      renderAssistantReviewDraft(result);
+      return result;
     }
 
     function attachReviewAuditHandler() {
@@ -5926,13 +5958,7 @@
       });
       document.querySelectorAll(".assistant-review-draft").forEach((button) => {
         button.addEventListener("click", async () => {
-          const panel = document.getElementById("assistantReviewDraftPanel");
-          if (panel) {
-            panel.dataset.stateKind = "loading";
-            panel.innerHTML = `<strong>Assistant draft</strong><span>Loading local evidence draft...</span>`;
-          }
-          const result = await api(`/api/review-items/${encodeURIComponent(button.dataset.reviewId)}/assistant-draft`);
-          renderAssistantReviewDraft(result);
+          await loadAssistantReviewDraft(button.dataset.reviewId);
         });
       });
     }
