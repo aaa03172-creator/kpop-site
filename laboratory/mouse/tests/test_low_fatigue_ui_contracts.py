@@ -1544,10 +1544,12 @@ def test_evidence_ledger_separates_raw_ocr_interpretation_and_links_review(tmp_p
                 INSERT INTO photo_evidence_item
                     (photo_evidence_id, source_photo_id, parse_id, note_item_id,
                      card_type, evidence_kind, roi_label, bbox_json,
-                     observed_raw_text, ocr_text, parsed_value, confidence,
+                     observed_raw_text, ocr_text, parsed_value,
+                     raw_extracted_value, normalized_value, confidence,
+                     confidence_source, evidence_reference_json,
                      interpretation, needs_review, review_reason, linked_mouse_id,
                      status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "pe_ledger_mt401_ear",
@@ -1561,7 +1563,20 @@ def test_evidence_ledger_separates_raw_ocr_interpretation_and_links_review(tmp_p
                     "MT401 R0",
                     "MT401 R0",
                     "right_circle",
+                    "MT401 R0",
+                    "right_circle",
                     0.62,
+                    "manual_photo_transcription:note_line",
+                    json.dumps(
+                        {
+                            "source_layer": "parsed or intermediate result",
+                            "source_photo_id": "photo_ledger_card",
+                            "parse_id": "parse_ledger_card",
+                            "note_item_id": "note_ledger_mt401",
+                            "evidence_kind": "ear_label",
+                            "roi_label": "note_line_1",
+                        }
+                    ),
                     "R0 may indicate a right ear circle; keep reviewable.",
                     1,
                     "Ambiguous ear mark.",
@@ -1642,14 +1657,25 @@ def test_evidence_ledger_separates_raw_ocr_interpretation_and_links_review(tmp_p
                     "roi_label": "note_line_1",
                     "bbox": {"x": 10, "y": 20, "w": 80, "h": 24},
                     "observed_raw_text": "MT401 R0",
+                    "raw_extracted_value": "MT401 R0",
                 },
                 "ocr": {"text": "MT401 R0"},
                 "ai_interpretation": {
                     "parsed_value": "right_circle",
+                    "normalized_value": "right_circle",
                     "confidence": 0.62,
+                    "confidence_source": "manual_photo_transcription:note_line",
                     "interpretation": "R0 may indicate a right ear circle; keep reviewable.",
                     "needs_review": True,
                     "review_reason": "Ambiguous ear mark.",
+                },
+                "evidence_reference": {
+                    "source_layer": "parsed or intermediate result",
+                    "source_photo_id": "photo_ledger_card",
+                    "parse_id": "parse_ledger_card",
+                    "note_item_id": "note_ledger_mt401",
+                    "evidence_kind": "ear_label",
+                    "roi_label": "note_line_1",
                 },
                 "links": {
                     "note_item_id": "note_ledger_mt401",

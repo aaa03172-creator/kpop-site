@@ -917,6 +917,7 @@ def test_canonical_candidate_apply_links_note_evidence_to_created_event(tmp_path
             "requires_resolved_review": True,
             "requires_note_line_evidence": True,
             "requires_duplicate_check": True,
+            "writes_only_after_preview_clear": True,
         }
         assert details["source_trace"] == {
             "source_photo_id": "photo_apply_evidence",
@@ -1149,6 +1150,13 @@ def test_canonical_candidate_apply_blocks_unresolved_note_review_and_missing_evi
             preview = canonical_candidate_apply_preview(conn, "candidate_block_apply")
 
         assert preview["blocked"] is True
+        assert preview["canonical_apply_rule"] == {
+            "source_layer": "canonical structured state",
+            "requires_resolved_review": True,
+            "requires_note_line_evidence": True,
+            "requires_duplicate_check": True,
+            "writes_only_after_preview_clear": True,
+        }
         assert "All note-line review items must be resolved before applying." in preview["blockers"]
         assert "Each canonical apply row must have note-line photo evidence." in preview["blockers"]
 

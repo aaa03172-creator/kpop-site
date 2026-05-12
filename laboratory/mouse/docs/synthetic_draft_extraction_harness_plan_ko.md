@@ -9,22 +9,20 @@ verifies the next extraction boundary: source image evidence can produce a
 reviewable draft payload, the draft can be normalized, and uncertain or risky
 fields stay reviewable instead of becoming canonical state.
 
-## Current Local Constraint
+## Current Local OCR Status
 
-This workstation does not currently expose a local OCR engine:
+This workstation currently exposes local Tesseract OCR on PATH, so the harness
+can probe generated synthetic JPEGs without sending photos, draft payloads, or
+source records to an external OCR/LLM/inference service.
 
-- `tesseract` is not on PATH;
-- `pytesseract` is not installed;
-- `cv2` is not installed.
-
-Because of that, the current implementation uses the synthetic fixture's local
-raw payload as an OCR surrogate for draft verification. This is still useful
-because it exercises the draft extraction, normalization, reviewability,
-confidence, and payload boundary contracts without sending images or records to
-external services. The local Tesseract adapter contract is present behind the
-same script boundary: when `tesseract` is available on PATH, the harness can
-probe generated JPEGs locally; when unavailable, it reports a skipped local OCR
-probe.
+The fixture raw payload is still used as the deterministic draft surrogate for
+normalization and reviewability checks. The Tesseract probe is a local-only raw
+text quality report beside that surrogate: it measures whether OCR produced any
+text, whether expected note-line hints were seen, text length range, a simple
+quality grade, case-level review actions, coverage-tag summaries, and weak-spot
+findings that make empty or garbled card types visible. If Tesseract is
+unavailable on another workstation, the same script reports a skipped local OCR
+probe and keeps the run local.
 
 ## Data Boundaries
 
@@ -46,6 +44,9 @@ probe.
    - no external inference is used;
    - local OCR provider availability is reported explicitly;
    - local OCR probe status is reported explicitly;
+   - local OCR raw text quality reports empty OCR cases, note-line hint
+     matches, text length range, quality grades, case-level review actions,
+     coverage-tag summaries, and weak-spot findings;
    - source photo IDs and filenames are preserved;
    - every draft remains non-canonical;
    - low-confidence and ambiguous cases remain reviewable;
@@ -71,8 +72,20 @@ python scripts/verify-synthetic-draft-extraction.py `
 - The script reports five generated synthetic cases.
 - All five draft extraction cases pass.
 - The report has `source_policy` stating local-only, no external inference.
-- The report has `ocr_provider` and `local_ocr_probe` status. If Tesseract is
-  unavailable, the harness reports `extraction_mode: fixture_payload_surrogate`,
-  reports `local_ocr_probe.status: skipped`, and keeps the run local.
+- The report has `ocr_provider`, `local_ocr_probe`, and
+  `local_ocr_probe.quality_report` status. If Tesseract is unavailable, the
+  harness reports `extraction_mode: fixture_payload_surrogate`, reports
+  `local_ocr_probe.status: skipped`, emits a zero-count `quality_report`, and
+  keeps the run local.
+- The local OCR quality report classifies cases as `empty`, `garbled`,
+  `partial_note_match`, or `usable_note_match`, and groups those outcomes by
+  synthetic coverage tag such as `cropped_or_blurry`, `ear_label_ambiguity`,
+  `numeric_notes`, and `dense_notes`.
+- The local OCR quality report emits `quality_findings` for coverage tags with
+  empty or garbled OCR so those card types stay review-first and can guide
+  future local preprocessing work.
+- Each local OCR case includes `review_required`, `canonical_write: false`, and
+  `recommended_action` so OCR output remains a review aid rather than an
+  acceptance path.
 - The harness can run with a disposable temp directory and clean it up.
 - Existing real-photo E2E and synthetic photo E2E gates still pass.

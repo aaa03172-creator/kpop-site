@@ -13,6 +13,7 @@ from app.main import (
     create_correction,
     create_card_snapshot,
     export_review_blocker_count,
+    list_corrections,
     list_review_items,
     list_note_items,
     open_review_attention_counts,
@@ -269,6 +270,24 @@ def test_correction_preserves_before_after_with_evidence_context(tmp_path: Path)
         assert correction_context["before_value"] == "unknown"
         assert correction_context["after_value"] == "female"
         assert correction_context["field_name"] == "sex"
+
+        [listed] = list_corrections()
+        assert listed["source_layer"] == "review item"
+        assert listed["evidence_reference"] == {
+            "source_layer": "review item",
+            "source_record_id": "source_correction_context",
+            "review_id": "review_correction_context",
+        }
+        assert listed["correction_context"] == {
+            "entity_type": "mouse",
+            "entity_id": "MT401",
+            "field_name": "sex",
+            "before_value": "unknown",
+            "after_value": "female",
+            "reason": "Reviewed source photo and corrected parsed sex.",
+        }
+        assert "evidence_reference_json" not in listed
+        assert "correction_context_json" not in listed
     finally:
         db.DB_PATH = old_db_path
 
@@ -594,6 +613,112 @@ def test_review_items_api_exposes_plausibility_findings(tmp_path: Path) -> None:
             }
         ]
         assert item["review_check_targets"][:3] == ["Plausibility warning", "Sex/count field", "Mouse count"]
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_review_items_api_exposes_evidence_reference_and_trigger_contract(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_review_trace",
+                    "review-trace-card.jpg",
+                    "data/photos/test/review-trace-card.jpg",
+                    "2026-05-09T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_review_trace",
+                    "photo_review_trace",
+                    "manual_photo_transcription",
+                    json.dumps({"confidence": 52, "uncertainFields": ["notes"]}, ensure_ascii=False),
+                    "2026-05-09T00:00:01Z",
+                    "review",
+                    52,
+                    1,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, source_layer,
+                     evidence_reference_json, review_trigger_json, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_trace",
+                    "parse_review_trace",
+                    "Medium",
+                    "AI-extracted photo transcription needs review",
+                    "raw note MT401 R0",
+                    "Confirm parsed note before canonical use.",
+                    "Low-confidence note-line parsing must stay reviewable.",
+                    "review item",
+                    json.dumps(
+                        {
+                            "source_layer": "review item",
+                            "source_photo_id": "photo_review_trace",
+                            "parse_id": "parse_review_trace",
+                            "card_snapshot_id": "snapshot_review_trace",
+                            "photo_evidence_items": 2,
+                            "linked_photo_evidence_items": 1,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        {
+                            "reason": "manual_transcription_review_required",
+                            "confidence": 52,
+                            "review_required_conditions": [
+                                {
+                                    "condition": "low_ocr_confidence",
+                                    "message": "OCR confidence is below the canonical apply threshold.",
+                                }
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "open",
+                    "2026-05-09T00:00:02Z",
+                ),
+            )
+
+        [item] = list_review_items()
+
+        assert item["source_layer"] == "review item"
+        assert item["evidence_reference"] == {
+            "source_layer": "review item",
+            "source_photo_id": "photo_review_trace",
+            "parse_id": "parse_review_trace",
+            "card_snapshot_id": "snapshot_review_trace",
+            "photo_evidence_items": 2,
+            "linked_photo_evidence_items": 1,
+        }
+        assert item["review_trigger"]["reason"] == "manual_transcription_review_required"
+        assert item["review_trigger"]["review_required_conditions"] == [
+            {
+                "condition": "low_ocr_confidence",
+                "message": "OCR confidence is below the canonical apply threshold.",
+            }
+        ]
     finally:
         db.DB_PATH = old_db_path
 
