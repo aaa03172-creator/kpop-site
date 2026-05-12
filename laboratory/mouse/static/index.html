@@ -747,6 +747,53 @@
     .review-follow-through:empty {
       display: none;
     }
+    .review-completion-summary {
+      display: grid;
+      gap: 8px;
+      margin: 10px 0;
+    }
+    .review-completion-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .review-completion-card {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+    }
+    .review-completion-card strong {
+      font-size: 12px;
+      color: var(--ink);
+    }
+    .review-completion-card ul {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .review-completion-card li {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .review-completion-label {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .review-completion-count {
+      flex: 0 0 auto;
+      color: var(--ink);
+      font-weight: 700;
+    }
     .table-empty-row td {
       background: #fff;
       padding: 10px 6px;
@@ -2465,6 +2512,7 @@
         max-height: 360px;
       }
       .review-workbench { grid-template-columns: 1fr; }
+      .review-completion-grid { grid-template-columns: 1fr; }
       .comparison-workbench { grid-template-columns: 1fr; }
       .comparison-list-panel { overflow-x: auto; }
       .comparison-list-panel table { min-width: 720px; }
@@ -3307,6 +3355,7 @@
           </div>
           <div class="review-queue-summary" id="reviewQueueSummary"></div>
           <div class="review-follow-through" id="reviewFollowThrough" role="status" aria-live="polite"></div>
+          <div class="review-completion-summary" id="reviewCompletionSummary" aria-live="polite"></div>
           <div class="review-card-list" id="reviewRows" aria-label="Review items"></div>
         </div>
         <aside class="review-detail-panel" id="reviewDetailPanel" aria-label="Selected review detail">
@@ -5264,6 +5313,111 @@
       panel.innerHTML = stateMessageHtml("success", reviewFollowThroughMessage.title, detail);
     }
 
+    function reviewCompletionReviewId(action) {
+      return [
+        action?.review_id,
+        action?.target_review_id,
+        action?.after?.review_id,
+        action?.before?.review_id,
+        action?.target_id
+      ].map((value) => String(value || "").trim()).find((value) => value.startsWith("review")) || "";
+    }
+
+    function isReviewCompletionAction(action) {
+      const actionType = String(action?.action_type || "").toLowerCase();
+      const targetId = reviewCompletionReviewId(action);
+      const afterStatus = String(action?.after?.status || action?.after?.review_status || action?.after?.resolution_status || "").toLowerCase();
+      const isReviewAction = Boolean(targetId) || actionType.includes("review");
+      return isReviewAction && (
+        actionType.includes("resolve") ||
+        actionType.includes("resolved") ||
+        actionType.includes("quick") ||
+        afterStatus.includes("resolved") ||
+        afterStatus.includes("closed")
+      );
+    }
+
+    function reviewCompletionSourceLabel(action, review) {
+      const reviewContext = review ? reviewSourceContextText(review) : "";
+      if (reviewContext && reviewContext !== "source evidence pending") return reviewContext;
+      return [
+        action?.after?.original_filename,
+        action?.after?.source_name,
+        action?.after?.photo_id,
+        action?.after?.parse_id,
+        action?.target_id
+      ].filter(Boolean).join(" / ") || "source evidence pending";
+    }
+
+    function reviewCompletionRows(actionLog, reviews) {
+      const reviewById = new Map((reviews || []).map((item) => [item.review_id, item]));
+      return (actionLog?.actions || [])
+        .filter(isReviewCompletionAction)
+        .map((action) => {
+          const reviewId = reviewCompletionReviewId(action);
+          const review = reviewById.get(reviewId) || null;
+          return {
+            reviewId,
+            role: review?.assigned_role || action?.after?.assigned_role || action?.performed_role || "Role pending",
+            issue: review?.issue || action?.after?.issue || action?.action_type || "Review completion",
+            source: reviewCompletionSourceLabel(action, review)
+          };
+        });
+    }
+
+    function reviewCompletionBuckets(rows, key) {
+      const buckets = new Map();
+      rows.forEach((item) => {
+        const label = String(item[key] || "--").trim() || "--";
+        buckets.set(label, (buckets.get(label) || 0) + 1);
+      });
+      return Array.from(buckets.entries())
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+        .slice(0, 3);
+    }
+
+    function reviewCompletionBucketCard(title, buckets, emptyText) {
+      const rows = buckets.map((bucket) => `
+        <li>
+          <span class="review-completion-label">${escapeHtml(bucket.label)}</span>
+          <span class="review-completion-count">${escapeHtml(bucket.count)}</span>
+        </li>
+      `).join("");
+      return `
+        <div class="review-completion-card">
+          <strong>${escapeHtml(title)}</strong>
+          ${rows ? `<ul>${rows}</ul>` : `<span class="muted">${escapeHtml(emptyText)}</span>`}
+        </div>
+      `;
+    }
+
+    function renderReviewCompletionSummary(actionLog, reviews) {
+      const panel = document.getElementById("reviewCompletionSummary");
+      if (!panel) return;
+      const rows = reviewCompletionRows(actionLog, reviews);
+      if (!rows.length) {
+        panel.innerHTML = stateMessageHtml(
+          "empty",
+          "No recent review completions",
+          "Action log only; canonical writes still require an explicit apply step."
+        );
+        return;
+      }
+      panel.innerHTML = `
+        ${stateMessageHtml(
+          "success",
+          `Review action summary: ${rows.length} recent completion(s)`,
+          "Action log only; canonical writes still require an explicit apply step."
+        )}
+        <div class="review-completion-grid" aria-label="Recent review completions grouped by source, role, and blocker type">
+          ${reviewCompletionBucketCard("By source evidence", reviewCompletionBuckets(rows, "source"), "Source evidence pending")}
+          ${reviewCompletionBucketCard("By review role", reviewCompletionBuckets(rows, "role"), "Role pending")}
+          ${reviewCompletionBucketCard("By blocker type", reviewCompletionBuckets(rows, "issue"), "Blocker type pending")}
+        </div>
+      `;
+    }
+
     function reviewPlausibilityFindings(item) {
       return (item?.review_plausibility_findings || [])
         .filter((finding) => finding && finding.field && finding.message)
@@ -7139,6 +7293,7 @@
         selectedReviewId = visibleReviews[0]?.review_id || "";
       }
       renderReviewFollowThroughStatus(visibleReviews);
+      renderReviewCompletionSummary(actionLog, reviews);
       const selectedReview = visibleReviews.find((item) => item.review_id === selectedReviewId);
       document.getElementById("reviewRows").innerHTML = visibleReviews.map((item) => {
         const visual = reviewVisual(item);
