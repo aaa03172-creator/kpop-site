@@ -210,6 +210,16 @@ async function main() {
     "Export Center final actions should expose disabled reasons, accessibility links, and empty accepted-row guidance."
   );
   assert(
+    html.includes("function workbookPreviewRowState(rowIndex, headerCount, row, model)") &&
+      html.includes("Preview only") &&
+      html.includes("Source evidence") &&
+      staticHtml.includes("function exportPreviewRowStateChips(item, previewReady)") &&
+      staticHtml.includes("Preview state") &&
+      staticHtml.includes("row-state-chip") &&
+      staticHtml.includes("Trace linked"),
+    "Workbook preview rows should expose text-backed row-state chips without changing export schemas."
+  );
+  assert(
     staticHtml.includes("function exportBlockerReviewButton(item)") &&
       staticHtml.includes("open-export-blocker-review") &&
       staticHtml.includes("Opened export blocker review") &&
@@ -1283,6 +1293,15 @@ async function main() {
     (await page.locator("#workbookPreviewTable").filter({ hasText: "FIXTURE-AUTO-SEPARATED" }).count()) === 1,
     "Accepted separated fixture missing from separation workbook preview."
   );
+  assert(
+    (await page.locator("#workbookPreviewTable .row-state-chip", { hasText: "Preview only" }).count()) >= 1 &&
+      (
+        (await page.locator("#workbookPreviewTable .row-state-chip", { hasText: "Ready" }).count()) >= 1 ||
+        (await page.locator("#workbookPreviewTable .row-state-chip", { hasText: "Blocked" }).count()) >= 1
+      ) &&
+      (await page.locator("#workbookPreviewTable .row-state-chip", { hasText: "Source evidence" }).count()) >= 1,
+    "Separation workbook preview rows should show preview-only, explicit readiness/blocker, and source evidence chips."
+  );
   await page.getByRole("button", { name: "Preview Animalsheet" }).click();
   assert(
     (await page.locator("#exportStrainSelect option", { hasText: "ApoM Tg/Tg" }).count()) === 1,
@@ -1300,6 +1319,10 @@ async function main() {
   assert(
     (await page.locator("#workbookPreviewTable").filter({ hasText: "F1" }).count()) === 1,
     "Accepted mating fixture did not render a litter row."
+  );
+  assert(
+    (await page.locator("#workbookPreviewTable .row-state-chip", { hasText: "Preview only" }).count()) >= 1,
+    "Animalsheet preview rows should keep preview-only row-state chips visible."
   );
   assert(
     (await page.locator("#workbookPreviewTable").filter({ hasText: "Source evidence" }).count()) === 1,
