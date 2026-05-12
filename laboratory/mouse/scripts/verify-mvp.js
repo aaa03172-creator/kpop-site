@@ -247,6 +247,15 @@ async function main() {
     "Upload and extraction progress should expose an accessible progressbar, visible percentage, and state-specific visual cues."
   );
   assert(
+    staticHtml.includes("button:focus-visible") &&
+      staticHtml.includes(".review-card:focus-within") &&
+      staticHtml.includes('.photo-worklist-card[aria-current="true"]') &&
+      staticHtml.includes('card.setAttribute("aria-current"') &&
+      staticHtml.includes("Open Focus Review item") &&
+      staticHtml.includes("Preview ${escapeHtml(label)} artifact"),
+    "High-traffic review, photo, blocker, and artifact controls should expose focus-visible styles, current-state attributes, and specific accessible names."
+  );
+  assert(
     staticHtml.includes("function photoStageProgress(photo, compact = false)") &&
       staticHtml.includes("Photo stage progress") &&
       staticHtml.includes("Parse/OCR") &&
@@ -736,6 +745,36 @@ async function main() {
   assert(
     (await staticPage.locator('#reviewRows .review-card.selected-card[data-review-id="review_focus_static_contract"]').count()) === 1,
     "Export blocker Open review should navigate to Review Queue and select the responsible review item."
+  );
+  const keyboardFocusCue = await staticPage.evaluate(() => {
+    const selectedCard = document.querySelector('#reviewRows .review-card.selected-card[data-review-id="review_focus_static_contract"]');
+    const inspectButton = selectedCard?.querySelector(".inspect-review");
+    inspectButton?.focus();
+    const host = document.createElement("div");
+    host.innerHTML = `
+      <button class="photo-worklist-card" aria-current="true">Keyboard photo</button>
+      <button class="export-blocker-action open-export-blocker-review" aria-label="Open Focus Review item review_keyboard_static from export blocker">Open review</button>
+      <button class="artifact-preview-button" aria-label="Preview Manifest artifact">Manifest</button>
+    `;
+    document.body.appendChild(host);
+    const photoButton = host.querySelector(".photo-worklist-card");
+    const blockerButton = host.querySelector(".open-export-blocker-review");
+    const artifactButton = host.querySelector(".artifact-preview-button");
+    return {
+      selectedCurrent: selectedCard?.getAttribute("aria-current") === "true",
+      focusWithin: Boolean(selectedCard?.matches(":focus-within")),
+      photoCurrent: photoButton?.getAttribute("aria-current") === "true",
+      blockerName: blockerButton?.getAttribute("aria-label") || "",
+      artifactName: artifactButton?.getAttribute("aria-label") || ""
+    };
+  });
+  assert(
+    keyboardFocusCue.selectedCurrent &&
+      keyboardFocusCue.focusWithin &&
+      keyboardFocusCue.photoCurrent &&
+      keyboardFocusCue.blockerName.includes("Open Focus Review item") &&
+      keyboardFocusCue.artifactName.includes("Preview Manifest artifact"),
+    "Keyboard focus checks should preserve selected review state, focus-within card feedback, current photo state, and specific action names."
   );
   const attentionCue = await staticPage.evaluate(() => {
     const item = { review_id: "review_dom_contract", attention_level: "quick_check", status: "open" };

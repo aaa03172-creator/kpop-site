@@ -46,15 +46,23 @@ runtime code, those sources win.
 | Brand and color direction | Semantic token foundation implemented for chips, status pills, selected rows/cards, disabled controls, ready/blocked states, progress, and focus rings. | #111 plus `static/index.html` and `index.html` token aliases. | Extend the same token vocabulary to future row-state chips and evidence badges as those slices land. |
 | Empty/loading/error state | Implemented for read-model panels and high-traffic table empty states. | #111, #137, #140. | Extend the same state-message pattern to lower-priority settings/reference tables when those screens are next touched. |
 | Evidence type badges | Implemented for Evidence Ledger cards, Focus Review detail source panels, and Export Log artifact cells. | #111 plus evidence badge UI implementation. | Extend badges to lower-priority audit/detail tables when those screens are next touched. |
-| Keyboard and focus pass | Documented. | #111. | Run a focused keyboard traversal pass through upload, review, export blockers, and detail drawers. |
+| Keyboard and focus pass | Implemented for high-traffic photo review, Review Queue, export blockers, and export artifact controls. | #111 plus keyboard/focus UI implementation. | Extend the same contract to lower-priority settings/reference tables when those screens are next touched. |
 
 ## Recommended Next Slices
 
-1. Keyboard and focus pass.
-   - Scope: upload, review, export blockers, and detail drawers.
-   - Boundary: UI accessibility behavior only.
-   - Verification: keyboard traversal check and DOM checks for focus-visible
-     states and non-color-only labels.
+1. Direct evidence links for export blockers without `review_id`.
+   - Scope: Export Center blockers that still have source photo, note-line, or
+     artifact evidence but no Focus Review item.
+   - Boundary: export or view navigation only.
+   - Verification: DOM checks that the links preserve traceability and do not
+     enable final export actions.
+
+2. Lower-priority audit/detail table polish.
+   - Scope: settings/reference/audit tables that were intentionally left out
+     of the high-traffic UI pass.
+   - Boundary: UI readability and accessibility behavior only.
+   - Verification: DOM checks for state messages, evidence badges, and
+     focus-visible controls where rows have actions.
 
 ## Current Foundation Slice
 
@@ -64,6 +72,7 @@ runtime code, those sources win.
 | Export preview row-state chips | Adds text-backed chips such as `Preview only`, `Ready` or `Blocked`, and source trace indicators to workbook preview rows without changing export schemas or canonical records. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks that preview chips render while final export gating remains enforced. |
 | Evidence badge pass | Adds consistent text-backed badges for source photo, OCR text, note line, review item, export manifest, and validation report evidence in high-traffic review/export surfaces. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for badge text in Evidence Ledger, Focus Review detail, and Export Log. |
 | Photo-stage progress expansion | Adds per-photo stage chips for `Uploaded`, `Parse/OCR`, `Review`, `Candidate`, `Accepted/Held`, and `Export`, using blocked/held states without implying canonical acceptance early. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for stage labels and blocked/held/done classes. |
+| Keyboard and focus pass | Adds consistent focus-visible treatment, `aria-current` state, and specific accessible names for high-traffic photo review, Review Queue, export blocker, and artifact preview actions. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and Playwright DOM checks for focus-within/current-state/action-name contracts. |
 
 ## Verification Commands To Prefer
 
