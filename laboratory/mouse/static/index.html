@@ -473,6 +473,58 @@
       border-radius: 999px;
       background: currentColor;
     }
+    .photo-stage-progress {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 7px;
+      padding: 0;
+      list-style: none;
+    }
+    .photo-stage-progress.compact {
+      margin-top: 0;
+    }
+    .photo-stage-step {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid var(--neutral-line);
+      border-radius: 999px;
+      background: var(--neutral-bg);
+      color: var(--muted);
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .photo-stage-step::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+    .photo-stage-step.done {
+      border-color: var(--ready-line);
+      background: var(--ready-bg);
+      color: var(--ready-ink);
+    }
+    .photo-stage-step.active {
+      border-color: var(--selected-line);
+      background: var(--selected-bg);
+      color: var(--accent);
+    }
+    .photo-stage-step.blocked {
+      border-color: var(--blocked-line);
+      background: var(--blocked-bg);
+      color: var(--blocked-ink);
+    }
+    .photo-stage-step.held {
+      border-color: var(--warning-line);
+      background: var(--warning-bg);
+      color: var(--warning);
+    }
     .status.progress-uploading,
     .status.progress-extracting {
       background: var(--processing-bg);
@@ -3098,7 +3150,7 @@
     <section data-view="records">
       <h2>Photo Inbox</h2>
       <table>
-        <thead><tr><th>ID</th><th>Batch</th><th>File</th><th>Status</th><th>Uploaded</th><th>Action</th></tr></thead>
+        <thead><tr><th>ID</th><th>Batch</th><th>File</th><th>Status</th><th>Stage progress</th><th>Uploaded</th><th>Action</th></tr></thead>
         <tbody id="photoRows"></tbody>
       </table>
     </section>
@@ -3834,6 +3886,35 @@
     function evidenceBadgeList(items) {
       const badges = items.filter(Boolean).map((item) => Array.isArray(item) ? evidenceBadge(item[0], item[1]) : evidenceBadge(item));
       return badges.length ? `<div class="evidence-badge-list">${badges.join("")}</div>` : "";
+    }
+
+    function photoStageProgress(photo, compact = false) {
+      const nextAction = String(photo?.next_action || "");
+      const transcriptionCount = Number(photo?.transcription_count || 0);
+      const noteLineCount = Number(photo?.note_line_count || 0);
+      const totalReviews = Number(photo?.total_review_count || photo?.review_count || 0);
+      const openReviews = Number(photo?.open_review_count || 0);
+      const candidates = Number(photo?.canonical_candidate_count || 0);
+      const applied = Number(photo?.applied_candidate_count || 0);
+      const parsed = transcriptionCount > 0 || noteLineCount > 0 || !["", "transcribe_photo"].includes(nextAction);
+      const reviewStarted = totalReviews > 0 || openReviews > 0 || ["resolve_reviews", "map_canonical_candidate", "apply_canonical_candidate", "ready_to_close"].includes(nextAction);
+      const reviewDone = reviewStarted && openReviews === 0 && !["resolve_reviews"].includes(nextAction);
+      const candidateReady = candidates > 0;
+      const accepted = candidateReady && applied >= candidates && nextAction === "ready_to_close";
+      const exportReady = accepted;
+      const stages = [
+        ["Uploaded", "done"],
+        ["Parse/OCR", parsed ? "done" : nextAction === "transcribe_photo" ? "active" : "pending"],
+        ["Review", openReviews > 0 || nextAction === "resolve_reviews" ? "blocked" : reviewDone ? "done" : parsed ? "active" : "pending"],
+        ["Candidate", candidateReady ? "done" : nextAction === "map_canonical_candidate" ? "active" : reviewDone ? "active" : "pending"],
+        ["Accepted/Held", accepted ? "done" : nextAction === "apply_canonical_candidate" || candidateReady ? "held" : "pending"],
+        ["Export", exportReady ? "done" : openReviews > 0 ? "blocked" : candidateReady ? "held" : "pending"]
+      ];
+      return `
+        <ol class="photo-stage-progress ${compact ? "compact" : ""}" aria-label="Photo stage progress">
+          ${stages.map(([label, state]) => `<li class="photo-stage-step ${escapeHtml(state)}">${escapeHtml(label)}</li>`).join("")}
+        </ol>
+      `;
     }
 
     function artifactPreviewButton(path, label) {
@@ -6777,6 +6858,7 @@
           <span>${escapeHtml(photo.batch_label || "Unbatched source")}</span>
           <span>${escapeHtml(photo.next_action || photo.status || "--")}</span>
           <span>${escapeHtml(`${photo.note_line_count || 0} note lines / ${photo.open_review_count || 0} open review(s)`)}</span>
+          ${photoStageProgress(photo, true)}
         </button>
       `).join("") || '<p class="muted">Upload photos to start review.</p>';
       document.getElementById("photoRows").innerHTML = latestPhotos.map((photo) => `
@@ -6785,10 +6867,11 @@
           <td>${escapeHtml(photo.batch_label || photo.upload_batch_id || "--")}</td>
           <td>${escapeHtml(photo.original_filename)}</td>
           <td>${escapeHtml(`${photo.status} / ${photo.next_action} / ${photo.open_review_count || 0} open`)}</td>
+          <td>${photoStageProgress(photo, true)}</td>
           <td>${escapeHtml(photo.uploaded_at)}</td>
           <td><button class="select-photo-review" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">Use</button></td>
         </tr>
-      `).join("") || emptyTableRow("No photos yet", "Uploaded source photos remain raw evidence and will appear here before review.", 6);
+      `).join("") || emptyTableRow("No photos yet", "Uploaded source photos remain raw evidence and will appear here before review.", 7);
       document.getElementById("transcriptionPhotoId").innerHTML = latestPhotos.map((photo) =>
         `<option value="${escapeHtml(photo.photo_id)}">${escapeHtml(photo.original_filename)} (${escapeHtml(photo.status)})</option>`
       ).join("") || '<option value="">No photos uploaded</option>';

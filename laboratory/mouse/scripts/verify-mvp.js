@@ -246,6 +246,15 @@ async function main() {
       staticHtml.includes("progress-uploading"),
     "Upload and extraction progress should expose an accessible progressbar, visible percentage, and state-specific visual cues."
   );
+  assert(
+    staticHtml.includes("function photoStageProgress(photo, compact = false)") &&
+      staticHtml.includes("Photo stage progress") &&
+      staticHtml.includes("Parse/OCR") &&
+      staticHtml.includes("Accepted/Held") &&
+      staticHtml.includes(".photo-stage-step.blocked") &&
+      staticHtml.includes("photoStageProgress(photo, true)"),
+    "Photo Review should expose per-photo stage progress without implying early canonical acceptance."
+  );
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   assert(scriptMatch, "index.html must contain an inline script.");
   new Function(scriptMatch[1]);
@@ -674,6 +683,52 @@ async function main() {
     (await staticPage.locator("#exportBlockerList .open-export-blocker-review").filter({ hasText: "Open review" }).count()) === 1 &&
       (await staticPage.locator("#exportBlockerRows .open-export-blocker-review").filter({ hasText: "Open review" }).count()) === 1,
     "Static Export Center should expose direct Open review actions for source-backed blockers."
+  );
+  const photoStageRender = await staticPage.evaluate(() => {
+    const blockedPhoto = {
+      photo_id: "photo_stage_static",
+      original_filename: "stage-card.png",
+      status: "stored",
+      next_action: "resolve_reviews",
+      transcription_count: 1,
+      note_line_count: 2,
+      total_review_count: 2,
+      open_review_count: 1,
+      canonical_candidate_count: 0,
+      applied_candidate_count: 0
+    };
+    const readyPhoto = {
+      photo_id: "photo_ready_static",
+      original_filename: "ready-card.png",
+      status: "stored",
+      next_action: "ready_to_close",
+      transcription_count: 1,
+      note_line_count: 2,
+      total_review_count: 2,
+      open_review_count: 0,
+      canonical_candidate_count: 1,
+      applied_candidate_count: 1
+    };
+    const host = document.createElement("div");
+    host.innerHTML = photoStageProgress(blockedPhoto, true) + photoStageProgress(readyPhoto, true);
+    document.body.append(host);
+    return {
+      text: host.textContent,
+      blocked: host.querySelectorAll(".photo-stage-step.blocked").length,
+      held: host.querySelectorAll(".photo-stage-step.held").length,
+      done: host.querySelectorAll(".photo-stage-step.done").length
+    };
+  });
+  assert(
+    photoStageRender.text.includes("Uploaded") &&
+      photoStageRender.text.includes("Parse/OCR") &&
+      photoStageRender.text.includes("Review") &&
+      photoStageRender.text.includes("Candidate") &&
+      photoStageRender.text.includes("Accepted/Held") &&
+      photoStageRender.text.includes("Export") &&
+      photoStageRender.blocked >= 2 &&
+      photoStageRender.done >= 6,
+    "Photo-stage progress should render all stages with blocked and done states."
   );
   await staticPage.locator('button[data-view-target="exports"]').click();
   await staticPage.locator("#exportBlockerList .open-export-blocker-review").click();
