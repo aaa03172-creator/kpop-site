@@ -233,9 +233,13 @@ async function main() {
   assert(
     staticHtml.includes("function exportBlockerReviewButton(item)") &&
       staticHtml.includes("open-export-blocker-review") &&
+      staticHtml.includes("function exportBlockerEvidenceActions(item)") &&
+      staticHtml.includes("open-export-blocker-photo") &&
+      staticHtml.includes("open-export-blocker-note") &&
+      staticHtml.includes("open-export-blocker-artifact") &&
       staticHtml.includes("Opened export blocker review") &&
       staticHtml.includes("selectedReviewId = button.dataset.reviewId"),
-    "Export Center blockers should link directly to the responsible Focus Review item without editing export preview data."
+    "Export Center blockers should link directly to responsible Focus Review items or source evidence without editing export preview data."
   );
   assert(
     staticHtml.includes('id="extractionProgressBar" role="progressbar"') &&
@@ -329,6 +333,31 @@ async function main() {
       original_filename: "focus-card.png",
       note_line_count: 2
     };
+    const evidenceWarning = {
+      issue: "Genotype readiness warning",
+      severity: "Medium",
+      priority: "medium",
+      review_reason: "Genotype readiness needs source evidence before export.",
+      evidence_preview: "Check source photo and note evidence before final workbook export.",
+      photo_id: "photo_warning_static",
+      original_filename: "warning-card.png",
+      note_item_id: "note_warning_static",
+      artifact_path: "mousedb_artifacts/validation/static-warning.json"
+    };
+    const warningPhoto = {
+      photo_id: "photo_warning_static",
+      original_filename: "warning-card.png",
+      batch_label: "Static warning batch",
+      status: "stored",
+      next_action: "resolve_reviews",
+      uploaded_at: "2026-05-09T12:00:00Z",
+      transcription_count: 1,
+      note_line_count: 1,
+      total_review_count: 0,
+      open_review_count: 0,
+      canonical_candidate_count: 0,
+      applied_candidate_count: 0
+    };
     const responses = {
       "/api/health": { ai_draft: { available: false } },
       "/api/assigned-strains": [],
@@ -340,9 +369,9 @@ async function main() {
       "/api/legacy-workbook-imports": [],
       "/api/evidence-reconciliation": {},
       "/api/evidence-comparison": { comparisons: [] },
-      "/api/photo-review-workbench": { pending_transcription_count: 0 },
+      "/api/photo-review-workbench": { pending_transcription_count: 0, rows: [warningPhoto], batches: [] },
       "/api/upload-batches": [],
-      "/api/photos": [],
+      "/api/photos": [warningPhoto],
       "/api/review-items": [reviewItem],
       "/api/ui/focus-review": {
         source_layer: "export or view",
@@ -570,7 +599,20 @@ async function main() {
         empty_state: { message: "", fabricated_records: false }
       },
       "/api/mice": [],
-      "/api/note-items": [],
+      "/api/note-items": [
+        {
+          note_item_id: "note_warning_static",
+          photo_id: "photo_warning_static",
+          parse_id: "parse_warning_static",
+          line_number: 1,
+          raw_line_text: "MT401 genotype pending",
+          parsed_type: "genotype_note",
+          interpreted_status: "needs_review",
+          mouse_display_id: "MT401",
+          ear_code: "",
+          needs_review: true
+        }
+      ],
       "/api/card-snapshots": [],
       "/api/mouse-events": [],
       "/api/cages": [],
@@ -587,7 +629,7 @@ async function main() {
         blocked_review_items: 1,
         open_review_items: 1,
         review_blockers: [reviewItem],
-        readiness_warnings: [],
+        readiness_warnings: [evidenceWarning],
         preview_row_count: 0,
         photos: 0,
         parsed_results: 0,
@@ -596,6 +638,13 @@ async function main() {
         genotype_blocker_items: 0
       },
       "/api/export-log": [],
+      "/api/artifacts/preview": {
+        artifact: {
+          artifact_type: "validation_report",
+          source_layer: "export or view",
+          note_item_id: "note_warning_static"
+        }
+      },
       "/api/search": { query: "", mice: [], strains: [], reviews: [], sources: [] }
     };
     window.fetch = async (input) => {
@@ -692,6 +741,34 @@ async function main() {
     (await staticPage.locator("#exportBlockerList .open-export-blocker-review").filter({ hasText: "Open review" }).count()) === 1 &&
       (await staticPage.locator("#exportBlockerRows .open-export-blocker-review").filter({ hasText: "Open review" }).count()) === 1,
     "Static Export Center should expose direct Open review actions for source-backed blockers."
+  );
+  assert(
+    (await staticPage.locator(".open-export-blocker-photo").filter({ hasText: "Open photo" }).count()) === 2 &&
+      (await staticPage.locator(".open-export-blocker-note").filter({ hasText: "Open note" }).count()) === 2 &&
+      (await staticPage.locator(".open-export-blocker-artifact").filter({ hasText: "Preview artifact" }).count()) === 2,
+    "Static Export Center should expose direct photo, note, and artifact evidence links when a blocker has no review_id."
+  );
+  await staticPage.locator('button[data-view-target="exports"]').click();
+  await staticPage.locator("#exportBlockerList .open-export-blocker-photo").click();
+  await staticPage.waitForFunction(() => document.querySelector("#appContent")?.dataset.activeView === "photo");
+  assert(
+    (await staticPage.locator("#viewSubtitle").innerText()).includes("photo_warning_static"),
+    "Export blocker photo evidence should open Photo Review without requiring a review item."
+  );
+  await staticPage.locator('button[data-view-target="exports"]').click();
+  await staticPage.locator("#exportBlockerList .open-export-blocker-note").click();
+  await staticPage.waitForFunction(() => document.querySelector("#appContent")?.dataset.activeView === "records");
+  assert(
+    (await staticPage.locator("#viewSubtitle").innerText()).includes("note_warning_static") &&
+      (await staticPage.locator("#records-evidence details").evaluate((details) => details.hasAttribute("open"))),
+    "Export blocker note evidence should open the parsed note evidence section without requiring a review item."
+  );
+  await staticPage.locator('button[data-view-target="exports"]').click();
+  await staticPage.locator("#exportBlockerList .open-export-blocker-artifact").click();
+  await staticPage.waitForFunction(() => document.querySelector("#artifactPreviewJson")?.textContent.includes("validation_report"));
+  assert(
+    (await staticPage.locator("#artifactPreviewJson").innerText()).includes("export or view"),
+    "Export blocker artifact evidence should load artifact preview as an export or view surface."
   );
   const photoStageRender = await staticPage.evaluate(() => {
     const blockedPhoto = {
