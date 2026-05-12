@@ -3384,7 +3384,14 @@ def list_corrections() -> list[dict[str, Any]]:
             ORDER BY corrected_at DESC
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    corrections = []
+    for row in rows:
+        payload = dict(row)
+        payload["source_layer"] = payload.get("source_layer") or "review item"
+        payload["evidence_reference"] = json_object(payload.pop("evidence_reference_json", "{}"))
+        payload["correction_context"] = json_object(payload.pop("correction_context_json", "{}"))
+        corrections.append(payload)
+    return corrections
 
 
 @app.get("/api/ui/action-log")
@@ -4735,6 +4742,7 @@ def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str,
     return {
         "boundary": "export or view",
         "candidate_id": candidate_id,
+        "canonical_apply_rule": canonical_apply_rule(),
         "candidate_status": candidate["status"],
         "review_id": candidate["review_id"],
         "review_status": candidate["review_status"],
@@ -4753,6 +4761,16 @@ def canonical_candidate_apply_preview(conn: Any, candidate_id: str) -> dict[str,
             "events": len(proposed_mice),
             "duplicate_risks": len(duplicate_risks),
         },
+    }
+
+
+def canonical_apply_rule() -> dict[str, Any]:
+    return {
+        "source_layer": "canonical structured state",
+        "requires_resolved_review": True,
+        "requires_note_line_evidence": True,
+        "requires_duplicate_check": True,
+        "writes_only_after_preview_clear": True,
     }
 
 
@@ -5040,12 +5058,7 @@ def apply_canonical_candidate(candidate_id: str) -> dict[str, Any]:
                     "note_item_id": note["note_item_id"],
                     "raw_line_text": note["raw_line_text"],
                     "boundary": "canonical structured state",
-                    "canonical_apply_rule": {
-                        "source_layer": "canonical structured state",
-                        "requires_resolved_review": True,
-                        "requires_note_line_evidence": True,
-                        "requires_duplicate_check": True,
-                    },
+                    "canonical_apply_rule": canonical_apply_rule(),
                     "source_trace": {
                         "source_photo_id": note["photo_id"] or "",
                         "parse_id": candidate["parse_id"],
@@ -8133,6 +8146,8 @@ def list_review_items() -> list[dict[str, Any]]:
             SELECT review.review_id, review.parse_id, review.severity, review.issue,
                    review.current_value, review.suggested_value, review.review_reason,
                    review.assigned_role, review.assigned_to, review.priority,
+                   review.source_layer, review.evidence_reference_json,
+                   review.review_trigger_json,
                    review.status, review.created_at, review.resolved_at, review.resolution_note,
                    parse.source_name, parse.photo_id, parse.raw_payload AS parse_raw_payload,
                    parse.confidence AS parse_confidence, photo.original_filename,
@@ -8208,6 +8223,9 @@ def list_review_items() -> list[dict[str, Any]]:
             payload.get("review_reason", ""),
             payload.get("source_name", ""),
         )
+        payload["source_layer"] = payload.get("source_layer") or "review item"
+        payload["evidence_reference"] = json_object(payload.pop("evidence_reference_json", "{}"))
+        payload["review_trigger"] = json_object(payload.pop("review_trigger_json", "{}"))
         payload["priority"] = payload.get("priority") or review_priority(
             payload.get("severity", ""),
             payload.get("issue", ""),
@@ -9215,7 +9233,9 @@ def ui_evidence_ledger(source_photo_id: str = "", linked_mouse_id: str = "") -> 
                    evidence.card_snapshot_id, evidence.note_item_id, evidence.card_type,
                    evidence.evidence_kind, evidence.roi_label, evidence.bbox_json,
                    evidence.observed_raw_text, evidence.ocr_text, evidence.parsed_value,
-                   evidence.confidence, evidence.interpretation, evidence.needs_review,
+                   evidence.raw_extracted_value, evidence.normalized_value,
+                   evidence.confidence, evidence.confidence_source,
+                   evidence.evidence_reference_json, evidence.interpretation, evidence.needs_review,
                    evidence.review_reason, evidence.linked_mouse_id, evidence.linked_cage_id,
                    evidence.linked_event_id, evidence.status, evidence.created_at,
                    evidence.updated_at, photo.original_filename, photo.raw_source_kind,
@@ -9252,6 +9272,7 @@ def ui_evidence_ledger(source_photo_id: str = "", linked_mouse_id: str = "") -> 
             bbox = json.loads(row["bbox_json"] or "{}")
         except json.JSONDecodeError:
             bbox = {}
+        evidence_reference = json_object(row["evidence_reference_json"])
         evidence_items.append(
             {
                 "photo_evidence_id": row["photo_evidence_id"],
@@ -9276,15 +9297,19 @@ def ui_evidence_ledger(source_photo_id: str = "", linked_mouse_id: str = "") -> 
                     "roi_label": row["roi_label"] or "",
                     "bbox": bbox,
                     "observed_raw_text": row["observed_raw_text"] or "",
+                    "raw_extracted_value": row["raw_extracted_value"] or "",
                 },
                 "ocr": {"text": row["ocr_text"] or ""},
                 "ai_interpretation": {
                     "parsed_value": row["parsed_value"] or "",
+                    "normalized_value": row["normalized_value"] or "",
                     "confidence": row["confidence"] or 0,
+                    "confidence_source": row["confidence_source"] or "",
                     "interpretation": row["interpretation"] or "",
                     "needs_review": bool(row["needs_review"]),
                     "review_reason": row["review_reason"] or "",
                 },
+                "evidence_reference": evidence_reference,
                 "links": {
                     "note_item_id": row["note_item_id"] or "",
                     "linked_mouse_id": row["linked_mouse_id"] or "",
