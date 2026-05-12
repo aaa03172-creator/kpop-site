@@ -746,3 +746,170 @@ def test_separation_xlsx_renders_trace_sheet_with_row_state_and_source_refs(
         assert trace.cell(2, 11).value == "Canonical row is ready for Excel export."
     finally:
         db.DB_PATH = old_db_path
+
+
+def test_animal_sheet_xlsx_renders_trace_sheet_with_row_state_and_source_refs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    monkeypatch.setattr(app_main, "ARTIFACT_ROOT", tmp_path / "mousedb_artifacts")
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_animal_render",
+                    "animal-render-card.jpg",
+                    "data/photos/test/animal-render-card.jpg",
+                    "2026-05-09T00:00:00Z",
+                    "accepted",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_animal_render",
+                    "photo_animal_render",
+                    "manual_photo_transcription",
+                    "{}",
+                    "2026-05-09T00:00:01Z",
+                    "accepted",
+                    96,
+                    0,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, photo_id, parse_id, card_snapshot_id, card_type,
+                     line_number, raw_line_text, parsed_type, interpreted_status,
+                     parsed_mouse_display_id, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "note_animal_render",
+                    "photo_animal_render",
+                    "parse_animal_render",
+                    "card_animal_render",
+                    "mating",
+                    1,
+                    "MT888 R'",
+                    "mouse_item",
+                    "mating",
+                    "MT888",
+                    96,
+                    0,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO mouse_master
+                    (mouse_id, display_id, raw_strain_text, sex, dob_raw,
+                     source_note_item_id, current_card_snapshot_id, status,
+                     source_photo_id, last_verified_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "mouse_animal_render",
+                    "MT888",
+                    "ApoM Tg/Tg",
+                    "male",
+                    "2026-03-01",
+                    "note_animal_render",
+                    "card_animal_render",
+                    "mating",
+                    "photo_animal_render",
+                    "2026-05-09T00:00:02Z",
+                    "2026-05-09T00:00:02Z",
+                    "2026-05-09T00:00:02Z",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO mating_registry
+                    (mating_id, mating_label, strain_goal, expected_genotype,
+                     start_date, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "mating_animal_render",
+                    "Mating A",
+                    "ApoM Tg/Tg",
+                    "Tg/Tg",
+                    "2026-05-01",
+                    "active",
+                    "2026-05-09T00:00:03Z",
+                    "2026-05-09T00:00:03Z",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO mating_mouse
+                    (mating_mouse_id, mating_id, mouse_id, role,
+                     joined_date, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "mating_mouse_animal_render",
+                    "mating_animal_render",
+                    "mouse_animal_render",
+                    "male",
+                    "2026-05-01",
+                    "2026-05-09T00:00:04Z",
+                ),
+            )
+
+        response = TestClient(app_main.app).get("/api/exports/animal-sheet.xlsx")
+
+        assert response.status_code == 200
+        assert response.content[:4] == b"PK\x03\x04"
+        workbook = load_workbook(io.BytesIO(response.content), data_only=True)
+        assert "animal sheet" in workbook.sheetnames
+        assert "Export_Trace" in workbook.sheetnames
+        animal_sheet = workbook["animal sheet"]
+        assert [animal_sheet.cell(1, column).value for column in range(1, 11)] == [
+            "Cage No.",
+            "Strain",
+            "Sex",
+            "I.D",
+            "genotype",
+            "DOB",
+            "Mating date",
+            "Pubs",
+            "Status",
+            "Source",
+        ]
+        assert animal_sheet.cell(2, 4).value == "MT888"
+        trace = workbook["Export_Trace"]
+        assert [trace.cell(1, column).value for column in range(1, 12)] == [
+            "Row",
+            "Source note",
+            "Source record",
+            "Boundary",
+            "Export note",
+            "Source photo",
+            "Card snapshot",
+            "Raw note line",
+            "Uncertainty",
+            "Row state",
+            "Row state reason",
+        ]
+        assert trace.cell(2, 2).value == "note_animal_render"
+        assert trace.cell(2, 4).value == "export or view"
+        assert trace.cell(2, 6).value == "photo_animal_render"
+        assert trace.cell(2, 8).value == "MT888 R'"
+        assert trace.cell(2, 10).value == "ready"
+    finally:
+        db.DB_PATH = old_db_path
