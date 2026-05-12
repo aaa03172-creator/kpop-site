@@ -281,6 +281,14 @@ async function main() {
     "High-traffic review, photo, blocker, and artifact controls should expose focus-visible styles, current-state attributes, and specific accessible names."
   );
   assert(
+    staticHtml.includes('id="reviewFollowThrough"') &&
+      staticHtml.includes("function setReviewFollowThroughMessage(resolvedItem, nextItem)") &&
+      staticHtml.includes("function renderReviewFollowThroughStatus(visibleReviews)") &&
+      staticHtml.includes("reviewSourceContextText") &&
+      staticHtml.includes('stateMessageHtml("success"'),
+    "Review resolution should expose follow-through status with next-item and source-evidence context."
+  );
+  assert(
     staticHtml.includes("function photoStageProgress(photo, compact = false)") &&
       staticHtml.includes("Photo stage progress") &&
       staticHtml.includes("Parse/OCR") &&
@@ -1236,6 +1244,70 @@ async function main() {
       legacyApplyFailure.status === "open" &&
       legacyApplyFailure.detailText.includes("Reviewed strain name must match the mapped canonical strain."),
     "Legacy strain apply failures should stay on the open review and show the backend guard message."
+  );
+  const reviewFollowThrough = await staticPage.evaluate(async () => {
+    const originalFetch = window.fetch;
+    window.fetch = async (input, options) => {
+      const key = String(input).replace("file://", "").split("?")[0];
+      if (key === "/api/review-items/review_follow_done/resolve") {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return originalFetch(input, options);
+    };
+    try {
+      const doneItem = {
+        review_id: "review_follow_done",
+        parse_id: "parse_follow_done",
+        status: "open",
+        issue: "Resolved count check",
+        severity: "Medium",
+        attention_level: "quick_check",
+        priority: "medium",
+        assigned_role: "Colony Reviewer",
+        suggested_value: "ok",
+        evidence_preview: "done raw evidence",
+        photo_id: "photo_done",
+        original_filename: "done-card.png",
+        note_item_id: "note_done"
+      };
+      const nextItem = {
+        review_id: "review_follow_next",
+        parse_id: "parse_follow_next",
+        status: "open",
+        issue: "Next count check",
+        severity: "High",
+        attention_level: "must_review",
+        priority: "high",
+        assigned_role: "Colony Reviewer",
+        suggested_value: "review next",
+        evidence_preview: "next raw evidence",
+        photo_id: "photo_next",
+        original_filename: "next-card.png",
+        note_item_id: "note_next"
+      };
+      currentVisibleReviews = [doneItem, nextItem];
+      selectedReviewId = doneItem.review_id;
+      renderReviewDetail(doneItem);
+      await submitReviewResolution(document.querySelector("#reviewDetailPanel .quick-resolve-review"), doneItem, true);
+      return {
+        statusText: document.getElementById("reviewFollowThrough")?.textContent || "",
+        selectedReviewId,
+        stateKind: document.querySelector("#reviewFollowThrough .state-message")?.dataset.stateKind || ""
+      };
+    } finally {
+      window.fetch = originalFetch;
+    }
+  });
+  assert(
+    reviewFollowThrough.stateKind === "success" &&
+      reviewFollowThrough.statusText.includes("Review resolved: Resolved count check") &&
+      reviewFollowThrough.statusText.includes("Next: Next count check") &&
+      reviewFollowThrough.statusText.includes("next-card.png") &&
+      reviewFollowThrough.statusText.includes("Current detail remains anchored"),
+    "Successful review resolution should leave a follow-through message with next-item and source evidence context."
   );
   const legacyWorkbookHtml = await staticPage.evaluate(() => legacyWorkbookRow({
     source_file_name: "legacy <source>.xlsx",
