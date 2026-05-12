@@ -26,6 +26,18 @@ def test_static_ui_exposes_operations_home_surface() -> None:
     assert "external_payload_policy" in html
 
 
+def test_static_operations_home_target_actions_refresh_selected_views() -> None:
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    start = html.index('document.querySelectorAll(".operations-target-action")')
+    end = html.index("function renderColonyStateReadModel", start)
+    handler = html[start:end]
+
+    assert 'targetType === "review"' in handler
+    assert 'selectedReviewId = targetId;\n            setActiveView("review");\n            await refresh();' in handler
+    assert 'setTranscriptionPhoto(targetId);\n            setActiveView("photo");\n            await refresh();' in handler
+    assert 'selectedAuditMouseId = targetId;\n            setActiveView("mouse-detail");\n            await refresh();' in handler
+
+
 def test_operations_home_empty_state_is_read_only_view(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:

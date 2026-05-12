@@ -4782,9 +4782,11 @@
             reviewStatusFilter = "all";
             selectedReviewId = targetId;
             setActiveView("review");
+            await refresh();
           } else if (targetType === "photo") {
             if (targetId) setTranscriptionPhoto(targetId);
             setActiveView("photo");
+            await refresh();
           } else if (targetType === "canonical_candidate") {
             const result = await api(`/api/canonical-candidates/${encodeURIComponent(targetId)}/apply-preview`);
             renderCanonicalApplyPreview(result);
@@ -4794,6 +4796,7 @@
           } else if (targetType === "mouse") {
             selectedAuditMouseId = targetId;
             setActiveView("mouse-detail");
+            await refresh();
           }
         });
       });
