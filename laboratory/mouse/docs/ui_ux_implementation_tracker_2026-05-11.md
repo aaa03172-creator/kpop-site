@@ -44,25 +44,25 @@ runtime code, those sources win.
 | Review status cues | Implemented for Review Queue cards. | #125. | Improve resolved/after-action feedback and keyboard next/previous cues for repeated review work. |
 | Export blocker navigation | Implemented for blockers with `review_id`, and for blocker warnings that only expose source photo, note-line, or artifact evidence. | #131 plus direct evidence-link UI implementation. | Extend link targeting if future blocker payloads add stable row-level anchors inside note/evidence tables. |
 | Brand and color direction | Semantic token foundation implemented for chips, status pills, selected rows/cards, disabled controls, ready/blocked states, progress, and focus rings. | #111 plus `static/index.html` and `index.html` token aliases. | Extend the same token vocabulary to future row-state chips and evidence badges as those slices land. |
-| Empty/loading/error state | Implemented for read-model panels and high-traffic table empty states. | #111, #137, #140. | Extend the same state-message pattern to lower-priority settings/reference tables when those screens are next touched. |
-| Evidence type badges | Implemented for Evidence Ledger cards, Focus Review detail source panels, and Export Log artifact cells. | #111 plus evidence badge UI implementation. | Extend badges to lower-priority audit/detail tables when those screens are next touched. |
+| Empty/loading/error state | Implemented for read-model panels, high-traffic table empty states, and lower-priority settings/reference/audit tables. | #111, #137, #140 plus audit/detail table polish. | Extend the same state-message pattern to any newly added tables when those screens are introduced. |
+| Evidence type badges | Implemented for Evidence Ledger cards, Focus Review detail source panels, Export Log artifact cells, and audit trace evidence cells. | #111 plus evidence badge UI and audit/detail table polish implementations. | Add row-level evidence anchors if future audit payloads expose stable deep-link targets. |
 | Keyboard and focus pass | Implemented for high-traffic photo review, Review Queue, export blockers, and export artifact controls. | #111 plus keyboard/focus UI implementation. | Extend the same contract to lower-priority settings/reference tables when those screens are next touched. |
 
 ## Recommended Next Slices
 
-1. Lower-priority audit/detail table polish.
-   - Scope: settings/reference/audit tables that were intentionally left out
-     of the high-traffic UI pass.
-   - Boundary: UI readability and accessibility behavior only.
-   - Verification: DOM checks for state messages, evidence badges, and
-     focus-visible controls where rows have actions.
-
-2. Row-level evidence anchors.
+1. Row-level evidence anchors.
    - Scope: stable row anchors for parsed note evidence, Evidence Ledger items,
      and export preview rows when the backend exposes durable IDs for each view.
    - Boundary: export or view navigation only.
    - Verification: DOM checks that deep links select or scroll to the intended
      evidence row without changing canonical state.
+
+2. Resolved review follow-through.
+   - Scope: after-action feedback for repeated review work after quick confirm,
+     resolve with note, and correction preparation.
+   - Boundary: review-item UI behavior only.
+   - Verification: DOM checks for next-item selection, source evidence context,
+     and unchanged review/audit contracts.
 
 ## Current Foundation Slice
 
@@ -74,6 +74,7 @@ runtime code, those sources win.
 | Photo-stage progress expansion | Adds per-photo stage chips for `Uploaded`, `Parse/OCR`, `Review`, `Candidate`, `Accepted/Held`, and `Export`, using blocked/held states without implying canonical acceptance early. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for stage labels and blocked/held/done classes. |
 | Keyboard and focus pass | Adds consistent focus-visible treatment, `aria-current` state, and specific accessible names for high-traffic photo review, Review Queue, export blocker, and artifact preview actions. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and Playwright DOM checks for focus-within/current-state/action-name contracts. |
 | Export blocker evidence links | Adds source photo, parsed note, and artifact preview actions for Export Center blockers that do not have a Focus Review `review_id`, while keeping final export gating unchanged. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and Playwright DOM checks for evidence-link navigation and artifact preview loading. |
+| Audit/detail table polish | Extends structured empty states to lower-priority settings, reference, correction, audit, action log, genotype, parsed evidence, snapshot, and event tables; adds badge-backed audit trace evidence cells. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for structured empty states plus audit trace badge contracts. |
 
 ## Verification Commands To Prefer
 

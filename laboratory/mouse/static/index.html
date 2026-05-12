@@ -5040,7 +5040,7 @@
           role.default_priority,
           role.responsibility || "--"
         ])
-      ).join("") || row(["No review roles configured", "", ""]);
+      ).join("") || emptyTableRow("No review roles configured", "Configured review roles will appear here before they are used for work queues.", 3);
       document.getElementById("reviewPriorityRows").innerHTML = priorities.map((priority) =>
         row([
           priority.display_label || priority.priority_key,
@@ -5048,7 +5048,7 @@
           priority.export_blocking_hint ? "Review before export" : "Does not normally block export",
           priority.response_expectation || "--"
         ])
-      ).join("") || row(["No review priorities configured", "", "", ""]);
+      ).join("") || emptyTableRow("No review priorities configured", "Priority meanings remain explicit here once review vocabulary is loaded.", 4);
     }
 
     function earLabelReviewOptions(item) {
@@ -5498,7 +5498,7 @@
       if (!mice.length) {
         selectedAuditMouseId = "";
         document.getElementById("auditTraceSummary").textContent = "Import mouse candidates to inspect trace evidence.";
-        document.getElementById("auditTraceRows").innerHTML = row(["No mouse selected", "", "", "", ""]);
+        document.getElementById("auditTraceRows").innerHTML = emptyTableRow("No mouse selected", "Accepted or candidate mouse rows are needed before audit trace evidence can be inspected.", 5);
         return;
       }
       if (previous && mice.some((mouse) => mouse.mouse_id === previous)) {
@@ -5512,15 +5512,8 @@
         `${trace.source_records.length} source records, ${trace.review_items.length} review items, ` +
         `${trace.corrections.length} corrections, ${trace.events.length} events, ` +
         `${trace.cage_assignments.length} cage assignments, ${trace.actions.length} actions.`;
-      document.getElementById("auditTraceRows").innerHTML = trace.timeline.map((item) =>
-        row([
-          item.category,
-          item.at || "--",
-          item.title || "--",
-          [item.evidence_id, item.source_record_id].filter(Boolean).join(" / ") || "--",
-          compactDetails(item.details || {})
-        ])
-      ).join("") || row(["No trace items yet", "", "", "", ""]);
+      document.getElementById("auditTraceRows").innerHTML = trace.timeline.map(auditTraceRow).join("") ||
+        emptyTableRow("No trace items yet", "Trace rows appear after source evidence, reviews, corrections, or canonical events exist for the selected mouse.", 5);
     }
 
     function renderActionLogViewer(actionLog) {
@@ -5537,7 +5530,22 @@
           compactDetails(action.after || action.after_value || {}),
           [action.performed_by, action.performed_role].filter(Boolean).join(" / ") || "--"
         ])
-      ).join("") || row(["No actions yet", "", "", "", "", ""]);
+      ).join("") || emptyTableRow("No actions yet", "Local audit actions with before and after values will appear here after review or apply operations.", 6);
+    }
+
+    function auditTraceRow(item) {
+      const evidenceIds = [item.evidence_id, item.source_record_id].filter(Boolean).join(" / ") || "--";
+      const badgeKind = item.source_record_id ? "source-photo" : item.evidence_id ? "note-line" : "source";
+      const badgeLabel = item.source_record_id ? "Source record" : item.evidence_id ? "Evidence" : "Evidence pending";
+      return `
+        <tr>
+          <td>${escapeHtml(item.category || "--")}</td>
+          <td>${escapeHtml(item.at || "--")}</td>
+          <td>${escapeHtml(item.title || "--")}</td>
+          <td>${evidenceBadge(badgeKind, badgeLabel)}${escapeHtml(evidenceIds)}</td>
+          <td>${escapeHtml(compactDetails(item.details || {}))}</td>
+        </tr>
+      `;
     }
 
     function statusCell(value) {
@@ -6853,7 +6861,7 @@
         : "No active search.";
       document.getElementById("assignedStrainRows").innerHTML = assignedStrains.map((strain) =>
         assignedStrainRow(strain)
-      ).join("") || row(["No assigned strains yet", "", "", "", ""]);
+      ).join("") || emptyTableRow("No assigned strains yet", "Configured strain scope will appear here before parsing or distribution imports use it.", 5);
       updateTranscriptionChoiceControls(assignedStrains);
       document.querySelectorAll(".deactivate-scope").forEach((button) => {
         button.addEventListener("click", async () => {
@@ -6871,12 +6879,12 @@
           strain.status,
           strain.source_record_id || "--"
         ])
-      ).join("") || row(["No confirmed strains yet", "", "", "", "", ""]);
+      ).join("") || emptyTableRow("No confirmed strains yet", "Confirmed strain registry rows remain configurable rather than hard-coded.", 6);
       const suggestions = distributionSuggestions(distributionImports, assignedStrains);
       document.getElementById("distributionRows").innerHTML = suggestions.map(distributionRow).join("") ||
-        row(["No distribution candidates yet", "", "", "", "", ""]);
+        emptyTableRow("No distribution candidates yet", "Distribution workbook rows remain parsed evidence until added to configured scope.", 6);
       document.getElementById("legacyWorkbookRows").innerHTML = legacyWorkbookImports.map(legacyWorkbookRow).join("") ||
-        row(["No legacy workbooks imported yet", "", "", "", "", "", ""]);
+        emptyTableRow("No legacy workbooks imported yet", "Imported Excel rows are comparison views, not the source of truth.", 7);
       document.getElementById("evidenceReconciliationRows").innerHTML = (evidenceReconciliation.comparison_rows || []).map((item) =>
         row([item.check, item.status, item.detail])
       ).join("") || row(["No evidence loaded", "missing", "Upload latest cage-card photos and predecessor Excel views."]);
@@ -7166,7 +7174,7 @@
           correction.reason || "--",
           correction.corrected_at
         ])
-      ).join("") || row(["No corrections yet", "", "", "", "", ""]);
+      ).join("") || emptyTableRow("No corrections yet", "Reviewed corrections will preserve before and after values here.", 6);
       document.getElementById("mouseRows").innerHTML = mice.map((mouse) =>
         row([
           mouse.display_id,
@@ -7243,7 +7251,7 @@
           target.purpose,
           target.active ? "Active" : "Inactive"
         ])
-      ).join("") || row(["No target genotypes configured", "", "", ""]);
+      ).join("") || emptyTableRow("No target genotypes configured", "Target genotype masters remain configurable and reviewable before experiment gating uses them.", 4);
       document.getElementById("genotypeStatusRows").innerHTML = genotypeStatuses.map((status) =>
         row([
           `${status.display_label || status.status_key} (${status.status_key})`,
@@ -7253,9 +7261,9 @@
           status.export_warning ? "Yes" : "No",
           status.meaning || "--"
         ])
-      ).join("") || row(["No genotype statuses configured", "", "", "", "", ""]);
+      ).join("") || emptyTableRow("No genotype statuses configured", "Genotype status meanings remain explicit instead of hidden in hard-coded rules.", 6);
       document.getElementById("noteEvidenceOverview").innerHTML = renderNoteEvidenceOverview(noteItems);
-      document.getElementById("noteRows").innerHTML = noteItems.map(noteEvidenceRow).join("") || row(["No parsed note evidence yet", "", "", "", "", "", "", "", ""]);
+      document.getElementById("noteRows").innerHTML = noteItems.map(noteEvidenceRow).join("") || emptyTableRow("No parsed note evidence yet", "Line-level note evidence will remain reviewable and traceable when parsed.", 9);
       document.getElementById("cardSnapshotRows").innerHTML = cardSnapshots.map((snapshot) => {
         const summary = snapshot.note_summary || {};
         const noteSummary = [
@@ -7273,7 +7281,7 @@
           noteSummary || "--",
           `${snapshot.status} / ${snapshot.boundary}`
         ]);
-      }).join("") || row(["No card snapshots yet", "", "", "", "", "", ""]);
+      }).join("") || emptyTableRow("No card snapshots yet", "Cage-card snapshots are parsed evidence and will appear after photo transcription.", 7);
       document.getElementById("eventRows").innerHTML = mouseEvents.map((event) =>
         row([
           event.mouse_id,
@@ -7282,7 +7290,7 @@
           [event.related_entity_type, event.related_entity_id].filter(Boolean).join(": ") || "--",
           compactDetails(event.details)
         ])
-      ).join("") || row(["No mouse events yet", "", "", "", ""]);
+      ).join("") || emptyTableRow("No mouse events yet", "Accepted source-backed events will appear here after reviewed apply paths.", 5);
       renderExportReadiness(preview, exportLog);
     }
 
