@@ -40,7 +40,7 @@ runtime code, those sources win.
 | Guidance area | Current status | Evidence | Remaining gap |
 | --- | --- | --- | --- |
 | Export action feedback | Implemented and guarded, with row-level preview chips for workbook preview state. | #113, #115, #131 plus export preview row-state chip implementation. | Add direct evidence links for blockers that have source photo or note-line evidence but no review item. |
-| Upload / extraction progress | Implemented for upload/extraction operation progress. | #118. | Expand from operation progress to full photo-stage progress: quality, parse, review, candidate, accepted/held, export ready/blocked. |
+| Upload / extraction progress | Implemented for upload/extraction operation progress and visible photo-stage progress from source stored through export ready/blocked. | #118 plus photo-stage progress UI implementation. | Add later quality/OCR confidence sub-stages if the parse pipeline exposes stable quality signals. |
 | Review status cues | Implemented for Review Queue cards. | #125. | Improve resolved/after-action feedback and keyboard next/previous cues for repeated review work. |
 | Export blocker navigation | Implemented for blockers with `review_id`. | #131. | Add direct evidence links for blockers that have source photo or note-line evidence but no review item. |
 | Brand and color direction | Semantic token foundation implemented for chips, status pills, selected rows/cards, disabled controls, ready/blocked states, progress, and focus rings. | #111 plus `static/index.html` and `index.html` token aliases. | Extend the same token vocabulary to future row-state chips and evidence badges as those slices land. |
@@ -50,15 +50,7 @@ runtime code, those sources win.
 
 ## Recommended Next Slices
 
-1. Photo-stage progress expansion.
-   - Scope: visible photo-stage progress from source stored through parse,
-     review, candidate preparation, accepted/held, and export ready/blocked.
-   - Boundary: UI display over raw source, parsed/intermediate result, review
-     item, canonical structured state, and export/view layers.
-   - Verification: `npm test`, `npm run test:local`, plus browser checks that
-     progress labels do not imply canonical acceptance before review.
-
-2. Keyboard and focus pass.
+1. Keyboard and focus pass.
    - Scope: upload, review, export blockers, and detail drawers.
    - Boundary: UI accessibility behavior only.
    - Verification: keyboard traversal check and DOM checks for focus-visible
@@ -71,6 +63,7 @@ runtime code, those sources win.
 | Semantic color token consolidation | Adds shared CSS variables for focus, selected, processing, success, warning, danger, disabled, ready, and blocked states; rewires high-traffic status, progress, review, and export readiness styles to those variables. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and a DOM/CSS check for token-backed selected/blocked/ready/status classes. |
 | Export preview row-state chips | Adds text-backed chips such as `Preview only`, `Ready` or `Blocked`, and source trace indicators to workbook preview rows without changing export schemas or canonical records. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks that preview chips render while final export gating remains enforced. |
 | Evidence badge pass | Adds consistent text-backed badges for source photo, OCR text, note line, review item, export manifest, and validation report evidence in high-traffic review/export surfaces. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for badge text in Evidence Ledger, Focus Review detail, and Export Log. |
+| Photo-stage progress expansion | Adds per-photo stage chips for `Uploaded`, `Parse/OCR`, `Review`, `Candidate`, `Accepted/Held`, and `Export`, using blocked/held states without implying canonical acceptance early. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for stage labels and blocked/held/done classes. |
 
 ## Verification Commands To Prefer
 

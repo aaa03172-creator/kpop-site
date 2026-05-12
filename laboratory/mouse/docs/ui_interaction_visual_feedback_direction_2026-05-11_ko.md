@@ -213,6 +213,8 @@ Rules:
 - a failed parse should say source stored, extraction failed;
 - low-confidence parsing should complete parse but mark review required;
 - held cards remain visible and traceable.
+- photo-stage progress chips must not mark `Accepted/Held` or `Export` as
+  complete until the reviewed canonical/apply path has actually succeeded.
 
 ## View-Specific Notes
 
