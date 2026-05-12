@@ -162,6 +162,17 @@ async function main() {
     "Table-only empty states should use consistent non-fabricated state-message rows for photo, review, candidate, and export surfaces."
   );
   assert(
+    staticHtml.includes("No review roles configured") &&
+      staticHtml.includes("No assigned strains yet") &&
+      staticHtml.includes("No corrections yet") &&
+      staticHtml.includes("No mouse selected") &&
+      staticHtml.includes("No genotype statuses configured") &&
+      staticHtml.includes("function auditTraceRow(item)") &&
+      staticHtml.includes("Source record") &&
+      staticHtml.includes("Evidence pending"),
+    "Lower-priority settings, reference, and audit tables should reuse state-message empty rows and badge trace evidence."
+  );
+  assert(
     staticHtml.includes("/api/ui/colony-state") &&
       staticHtml.includes("renderColonyStateReadModel") &&
       staticHtml.includes("Colony State unavailable") &&
@@ -736,6 +747,14 @@ async function main() {
       (await staticPage.locator("#evidenceLedgerReadModel .evidence-badge", { hasText: "Note line" }).count()) === 1 &&
       (await staticPage.locator("#evidenceLedgerReadModel .evidence-badge", { hasText: "Review item" }).count()) === 1,
     "Static Evidence Ledger should show text-backed evidence type badges."
+  );
+  assert(
+    (await staticPage.locator("#reviewRoleRows .table-empty-row").filter({ hasText: "No review roles configured" }).count()) === 1 &&
+      (await staticPage.locator("#reviewPriorityRows .table-empty-row").filter({ hasText: "No review priorities configured" }).count()) === 1 &&
+      (await staticPage.locator("#assignedStrainRows .table-empty-row").filter({ hasText: "No assigned strains yet" }).count()) === 1 &&
+      (await staticPage.locator("#auditTraceRows .table-empty-row").filter({ hasText: "No mouse selected" }).count()) === 1 &&
+      (await staticPage.locator("#actionLogRows .table-empty-row").filter({ hasText: "No actions yet" }).count()) === 1,
+    "Static lower-priority settings and audit tables should render structured empty states instead of bare placeholder cells."
   );
   assert(
     (await staticPage.locator("#exportBlockerList .open-export-blocker-review").filter({ hasText: "Open review" }).count()) === 1 &&
