@@ -21,6 +21,9 @@ def test_static_ui_exposes_operations_home_surface() -> None:
     assert 'api("/api/ui/operations-home")' in html
     assert "function renderOperationsHomeReadModel" in html
     assert "renderOperationsHomeReadModel(operationsHome)" in html
+    assert "function operationsActionChannelClass" in html
+    assert "action_channel_label" in html
+    assert "external_payload_policy" in html
 
 
 def test_operations_home_empty_state_is_read_only_view(tmp_path: Path) -> None:
@@ -215,6 +218,12 @@ def test_operations_home_groups_review_candidate_genotyping_and_export_tasks(tmp
         assert all(task["task_id"] for task in tasks)
         assert all(task["target_type"] for task in tasks)
         assert all("evidence_refs" in task for task in tasks)
+        assert all(task["action_channel"] in {"human", "assistant", "api_mcp"} for task in tasks)
+        assert all(task["action_channel_label"] for task in tasks)
+        assert all(task["external_payload_policy"] for task in tasks)
+        assert payload["summary"]["action_channels"]["human"] >= 1
+        assert payload["summary"]["action_channels"]["assistant"] >= 1
+        assert payload["summary"]["action_channels"]["api_mcp"] >= 1
 
         focus_task = next(task for task in tasks if task["family"] == "focus_review")
         assert focus_task["risk_class"] == "blocker"
@@ -222,6 +231,8 @@ def test_operations_home_groups_review_candidate_genotyping_and_export_tasks(tmp
         assert focus_task["target_id"] == "review_operations_focus"
         assert focus_task["evidence_refs"]["review_id"] == "review_operations_focus"
         assert focus_task["evidence_refs"]["source_photo_id"] == "photo_operations"
+        assert focus_task["action_channel"] == "assistant"
+        assert focus_task["external_payload_policy"] == "local_only_until_approved"
 
         photo_task = next(task for task in tasks if task["family"] == "photo_worklist")
         assert photo_task["status"] == "transcribe_photo"
@@ -229,16 +240,20 @@ def test_operations_home_groups_review_candidate_genotyping_and_export_tasks(tmp
         assert photo_task["target_id"] == "photo_operations_worklist"
         assert photo_task["evidence_refs"]["upload_batch_id"] == "batch_operations"
         assert photo_task["evidence_refs"]["source_photo_id"] == "photo_operations_worklist"
+        assert photo_task["action_channel"] == "human"
 
         candidate_task = next(task for task in tasks if task["family"] == "canonical_apply")
         assert candidate_task["target_type"] == "canonical_candidate"
         assert candidate_task["target_id"] == "candidate_operations"
         assert candidate_task["evidence_refs"]["review_id"] == "review_operations_resolved"
+        assert candidate_task["action_channel"] == "human"
+        assert candidate_task["external_payload_policy"] == "no_external_write"
 
         genotype_task = next(task for task in tasks if task["family"] == "genotyping")
         assert genotype_task["status"] == "awaiting_result"
         assert genotype_task["target_type"] == "mouse"
         assert genotype_task["target_id"] == "mouse_operations"
+        assert genotype_task["action_channel"] == "api_mcp"
 
         export_task = next(task for task in tasks if task["family"] == "export_readiness")
         assert export_task["status"] == "export_blocked"

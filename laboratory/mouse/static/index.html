@@ -4696,6 +4696,13 @@
       return "trace";
     }
 
+    function operationsActionChannelClass(task) {
+      const channel = String(task?.action_channel || "human").toLowerCase();
+      if (channel === "api_mcp") return "ready";
+      if (channel === "assistant") return "trace";
+      return "blocked";
+    }
+
     function operationsTargetButton(task) {
       const targetType = task?.target_type || "";
       const targetId = task?.target_id || "";
@@ -4719,6 +4726,7 @@
       if (!panel) return;
       const groups = Array.isArray(model?.task_groups) ? model.task_groups : [];
       const summary = model?.summary || {};
+      const actionChannels = summary.action_channels || {};
       const emptyState = model?.empty_state || {};
       document.getElementById("navOperationsCount").textContent = String(summary.total_tasks || 0);
       const summaryHtml = `
@@ -4734,6 +4742,9 @@
           <span>Must review ${escapeHtml(summary.must_review || 0)}</span>
           <span>Quick check ${escapeHtml(summary.quick_check || 0)}</span>
           <span>Export blockers ${escapeHtml(summary.export_blockers || 0)}</span>
+          <span>Human ${escapeHtml(actionChannels.human || 0)}</span>
+          <span>Assistant ${escapeHtml(actionChannels.assistant || 0)}</span>
+          <span>API/MCP ${escapeHtml(actionChannels.api_mcp || 0)}</span>
         </div>
       `;
       if (!groups.length) {
@@ -4754,6 +4765,9 @@
                 <span>${escapeHtml([task.status, task.risk_class, task.target_label].filter(Boolean).join(" / ") || "--")}</span>
                 <span>${escapeHtml(task.blocker_reason || "Review source evidence before acting.")}</span>
                 <span>${escapeHtml(compactDetails(task.evidence_refs || {}))}</span>
+                <span class="row-state-chip ${escapeHtml(operationsActionChannelClass(task))}">${escapeHtml(task.action_channel_label || task.action_channel || "Human review")}</span>
+                <span>${escapeHtml(task.action_channel_reason || "")}</span>
+                <span>Payload policy: ${escapeHtml(task.external_payload_policy || "local_only_until_approved")}</span>
                 ${operationsTargetButton(task)}
               </div>
             `).join("")}

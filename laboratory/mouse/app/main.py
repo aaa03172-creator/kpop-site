@@ -1086,6 +1086,10 @@ def operations_task(
     target_label: str,
     blocker_reason: str = "",
     evidence_refs: dict[str, Any] | None = None,
+    action_channel: str = "human",
+    action_channel_label: str = "Human review",
+    action_channel_reason: str = "This task changes or confirms colony records and should stay operator-led.",
+    external_payload_policy: str = "local_only_until_approved",
 ) -> dict[str, Any]:
     return {
         "task_id": task_id,
@@ -1098,6 +1102,10 @@ def operations_task(
         "target_label": target_label,
         "blocker_reason": blocker_reason,
         "evidence_refs": evidence_refs or {},
+        "action_channel": action_channel,
+        "action_channel_label": action_channel_label,
+        "action_channel_reason": action_channel_reason,
+        "external_payload_policy": external_payload_policy,
         "source_layer": "export or view",
     }
 
@@ -1205,6 +1213,10 @@ def operations_home_tasks(conn: Any) -> list[dict[str, Any]]:
                     "source_photo_id": payload.get("photo_id") or "",
                     "source_photo_filename": payload.get("original_filename") or "",
                 },
+                action_channel="assistant",
+                action_channel_label="Assistant-supported review",
+                action_channel_reason="Assistant can summarize evidence and draft a correction, but the review remains operator-approved.",
+                external_payload_policy="local_only_until_approved",
             )
         )
 
@@ -1243,6 +1255,10 @@ def operations_home_tasks(conn: Any) -> list[dict[str, Any]]:
                     "source_photo_id": payload.get("photo_id") or "",
                     "source_photo_filename": payload.get("original_filename") or "",
                 },
+                action_channel="human",
+                action_channel_label="Human canonical apply",
+                action_channel_reason="Applying this task writes canonical mouse state and events.",
+                external_payload_policy="no_external_write",
             )
         )
 
@@ -1263,6 +1279,13 @@ def operations_home_tasks(conn: Any) -> list[dict[str, Any]]:
         next_action = payload["next_action"] or "review_needed"
         family = "breeding_weaning" if next_action == "weaning_due" else "genotyping"
         risk_class = "blocker" if next_action in {"review_result", "review_needed", "weaning_due"} else "action"
+        action_channel = "api_mcp" if family == "genotyping" else "human"
+        action_channel_label = "API/MCP candidate" if action_channel == "api_mcp" else "Human colony action"
+        action_channel_reason = (
+            "This genotyping next action can be handed to a lab/API/MCP connector after traceable review."
+            if action_channel == "api_mcp"
+            else "This breeding or weaning action is physical colony work and should stay operator-led."
+        )
         tasks.append(
             operations_task(
                 task_id=f"{family}:{payload['mouse_id']}:{next_action}",
@@ -1280,6 +1303,10 @@ def operations_home_tasks(conn: Any) -> list[dict[str, Any]]:
                     "source_note_item_id": payload.get("source_note_item_id") or "",
                     "source_record_id": payload.get("source_record_id") or "",
                 },
+                action_channel=action_channel,
+                action_channel_label=action_channel_label,
+                action_channel_reason=action_channel_reason,
+                external_payload_policy="minimal_payload_after_approval",
             )
         )
 
@@ -1312,6 +1339,11 @@ def ui_operations_home() -> dict[str, Any]:
         attention_counts = open_review_attention_counts(conn)
         tasks = operations_home_tasks(conn)
     grouped = operations_home_grouped_tasks(tasks)
+    action_channels = {"human": 0, "assistant": 0, "api_mcp": 0}
+    for task in tasks:
+        channel = task.get("action_channel", "human")
+        if channel in action_channels:
+            action_channels[channel] += 1
     return {
         "source_layer": "export or view",
         "page_question": "What needs doing next?",
@@ -1321,6 +1353,7 @@ def ui_operations_home() -> dict[str, Any]:
             "quick_check": int(attention_counts.get("quick_check", 0)),
             "export_blockers": int(attention_counts.get("must_review", 0)),
             "families": {group["family"]: group["count"] for group in grouped},
+            "action_channels": action_channels,
         },
         "task_groups": grouped,
         "empty_state": operations_home_empty_state(),
