@@ -289,6 +289,15 @@ async function main() {
     "Review resolution should expose follow-through status with next-item and source-evidence context."
   );
   assert(
+    staticHtml.includes('id="reviewCompletionSummary"') &&
+      staticHtml.includes("function renderReviewCompletionSummary(actionLog, reviews)") &&
+      staticHtml.includes("function reviewCompletionRows(actionLog, reviews)") &&
+      staticHtml.includes("Review action summary") &&
+      staticHtml.includes("By source evidence") &&
+      staticHtml.includes("Action log only; canonical writes still require an explicit apply step."),
+    "Review queue should summarize recent completed review actions by evidence, role, and blocker type without implying canonical writes."
+  );
+  assert(
     staticHtml.includes("function photoStageProgress(photo, compact = false)") &&
       staticHtml.includes("Photo stage progress") &&
       staticHtml.includes("Parse/OCR") &&
@@ -714,6 +723,33 @@ async function main() {
   assert(
     (await staticPage.locator("#focusReviewReadModel").filter({ hasText: "Inspect source evidence" }).filter({ hasText: "manual_review_required" }).count()) === 1,
     "Static Focus Review cards should render read-model action hints without inventing actions."
+  );
+  const reviewCompletionSummaryText = await staticPage.evaluate(() => {
+    renderReviewCompletionSummary({
+      actions: [
+        {
+          action_type: "review_resolved",
+          target_id: "review_focus_static_contract",
+          performed_role: "Colony Reviewer",
+          after: { status: "resolved" }
+        },
+        {
+          action_type: "quick_review_resolved",
+          target_id: "review_focus_static_contract",
+          performed_role: "Colony Reviewer",
+          after: { status: "resolved" }
+        }
+      ]
+    }, currentVisibleReviews);
+    return document.getElementById("reviewCompletionSummary")?.textContent || "";
+  });
+  assert(
+    reviewCompletionSummaryText.includes("Review action summary: 2 recent completion(s)") &&
+      reviewCompletionSummaryText.includes("focus-card.png") &&
+      reviewCompletionSummaryText.includes("Colony Reviewer") &&
+      reviewCompletionSummaryText.includes("Count mismatch") &&
+      reviewCompletionSummaryText.includes("Action log only; canonical writes still require an explicit apply step."),
+    "Static Review Queue should group completed review actions by source evidence, role, and blocker type without mutating review rows."
   );
   assert(
     (await staticPage.locator("#colonyStateReadModel").filter({ hasText: "Active mice 2" }).filter({ hasText: "colony-card.png" }).count()) === 1,
