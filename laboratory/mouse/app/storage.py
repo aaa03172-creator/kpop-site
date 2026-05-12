@@ -7,7 +7,8 @@ from pathlib import Path
 
 from fastapi import UploadFile
 
-from .db import DATA_DIR, ensure_data_dirs
+from . import db as app_db
+from .db import ensure_data_dirs
 
 
 def utc_now() -> str:
@@ -28,7 +29,7 @@ def safe_suffix(filename: str) -> str:
 def save_upload(file: UploadFile, photo_id: str) -> Path:
     ensure_data_dirs()
     day = datetime.now().strftime("%Y%m%d")
-    target_dir = DATA_DIR / "photos" / day
+    target_dir = app_db.DATA_DIR / "photos" / day
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{photo_id}{safe_suffix(file.filename or '')}"
     with target.open("wb") as out:
@@ -39,7 +40,7 @@ def save_upload(file: UploadFile, photo_id: str) -> Path:
 def save_legacy_workbook(file: UploadFile, workbook_id: str) -> Path:
     ensure_data_dirs()
     day = datetime.now().strftime("%Y%m%d")
-    target_dir = DATA_DIR / "legacy_workbooks" / day
+    target_dir = app_db.DATA_DIR / "legacy_workbooks" / day
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{workbook_id}{safe_suffix(file.filename or '')}"
     with target.open("wb") as out:

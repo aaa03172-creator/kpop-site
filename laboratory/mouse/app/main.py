@@ -27,6 +27,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
 import httpx
 
+from . import db as app_db
 from .db import ROOT, connection, init_db
 from .breeding_rules import DEFAULT_BREEDING_RULE_SET
 from .labeling_rules import interpret_crossed_out_status, match_samples_to_mice
@@ -1539,9 +1540,9 @@ def photo_image_path(photo_id: str) -> tuple[Any, Path, str]:
     if photo is None:
         raise HTTPException(status_code=404, detail="Photo not found.")
 
-    stored_path = str(photo["stored_path"] or "")
-    image_path = (ROOT / stored_path).resolve()
-    photo_root = (ROOT / "data" / "photos").resolve()
+    stored_path = Path(str(photo["stored_path"] or ""))
+    image_path = (stored_path if stored_path.is_absolute() else ROOT / stored_path).resolve()
+    photo_root = (app_db.DATA_DIR / "photos").resolve()
     if photo_root != image_path and photo_root not in image_path.parents:
         raise HTTPException(status_code=400, detail="Stored photo path is outside the photo evidence directory.")
     if not image_path.exists() or not image_path.is_file():
@@ -1550,6 +1551,14 @@ def photo_image_path(photo_id: str) -> tuple[Any, Path, str]:
     filename = photo["original_filename"] or image_path.name
     media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     return photo, image_path, media_type
+
+
+def storage_trace_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(ROOT))
+    except ValueError:
+        return str(resolved)
 
 
 def load_roi_presets() -> dict[str, Any]:
@@ -3958,13 +3967,39 @@ def review_item_audit_view(conn: Any, review_id: str) -> dict[str, Any]:
     }
 
 
+def assistant_review_target_note_item_id(review: dict[str, Any], note_items: list[dict[str, Any]]) -> str:
+    issue = str(review.get("issue") or "").strip()
+    review_id = str(review.get("review_id") or "").strip()
+    inferred_note_item_id = review_note_item_id(review_id)
+    note_by_id = {str(item.get("note_item_id") or ""): item for item in note_items}
+    if issue == "Ear label needs review":
+        inferred_note = note_by_id.get(inferred_note_item_id)
+        if inferred_note is not None and str(inferred_note.get("parsed_type") or "") == "mouse_item":
+            return inferred_note_item_id
+        for item in note_items:
+            if (
+                str(item.get("parsed_type") or "") == "mouse_item"
+                and str(item.get("parsed_ear_label_review_status") or "") in {"check", "needs_review"}
+            ):
+                return str(item.get("note_item_id") or "")
+    if issue == "Unlabeled numeric note needs review":
+        inferred_note = note_by_id.get(inferred_note_item_id)
+        if inferred_note is not None and str(inferred_note.get("parsed_type") or "") == "unlabeled_numeric_note":
+            return inferred_note_item_id
+        for item in note_items:
+            if str(item.get("parsed_type") or "") == "unlabeled_numeric_note":
+                return str(item.get("note_item_id") or "")
+    return str(note_items[0].get("note_item_id") or "") if note_items else ""
+
+
 def assistant_review_draft_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
     review = audit["review"]
     note_items = audit.get("note_items", [])
     photo_evidence_items = audit.get("photo_evidence_items", [])
+    target_note_item_id = assistant_review_target_note_item_id(review, note_items)
     evidence_lines = [
         str(item.get("raw_line_text") or "").strip()
-        for item in note_items
+        for item in sorted(note_items, key=lambda item: str(item.get("note_item_id") or "") != target_note_item_id)
         if str(item.get("raw_line_text") or "").strip()
     ]
     evidence_summary = " | ".join(evidence_lines[:5])
@@ -3972,6 +4007,28 @@ def assistant_review_draft_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
         evidence_summary = review.get("suggested_value") or review.get("current_value") or review.get("review_reason") or ""
     suggested_value = str(review.get("suggested_value") or "").strip()
     current_value = str(review.get("current_value") or "").strip()
+    issue = str(review.get("issue") or "").strip()
+    review_type = "general_review"
+    form_fill_policy = "draft_value_and_note"
+    operator_note = "Use this as a local assistant draft. Do not resolve or write canonical state without operator approval."
+    correction_field_name = "reviewed_value"
+    extra_resolution_fields: dict[str, Any] = {}
+    if issue == "Ear label needs review":
+        review_type = "ear_label_review"
+        form_fill_policy = "bounded_choice_only"
+        operator_note = "Use this bounded ear-label draft only after comparing the source note and photo evidence."
+        correction_field_name = "ear_label_code"
+        extra_resolution_fields["ear_label_code"] = suggested_value
+        extra_resolution_fields["note_item_id"] = target_note_item_id
+    elif issue == "Unlabeled numeric note needs review":
+        review_type = "unlabeled_numeric_note_review"
+        form_fill_policy = "operator_choose_note_label"
+        operator_note = "Assistant can summarize the numeric note, but the operator must choose whether it is a count, mouse ID, reviewed note, or ignored line."
+        correction_field_name = "parsed_label"
+        extra_resolution_fields["note_item_id"] = target_note_item_id
+        extra_resolution_fields["note_label_decision"] = ""
+        extra_resolution_fields["note_label_mouse_id"] = ""
+        extra_resolution_fields["note_label_count"] = None
     resolution_note_parts = [
         "Assistant draft only; operator must compare against source evidence before resolving.",
         str(review.get("review_reason") or "").strip(),
@@ -4002,18 +4059,21 @@ def assistant_review_draft_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
             "photo_evidence_count": len(photo_evidence_items),
         },
         "draft": {
+            "review_type": review_type,
+            "form_fill_policy": form_fill_policy,
             "evidence_summary": evidence_summary,
-            "operator_note": "Use this as a local assistant draft. Do not resolve or write canonical state without operator approval.",
+            "operator_note": operator_note,
             "resolution_payload": {
                 "resolution_note": resolution_note,
                 "resolved_value": suggested_value or current_value,
                 "legacy_decision": "resolve",
                 "correction_entity_type": "review_item",
                 "correction_entity_id": review.get("review_id") or "",
-                "correction_field_name": "reviewed_value",
+                "correction_field_name": correction_field_name,
                 "correction_before_value": current_value,
                 "correction_after_value": suggested_value or current_value,
                 "correction_source_record_id": None,
+                **extra_resolution_fields,
             },
         },
     }
@@ -7830,7 +7890,7 @@ def create_legacy_workbook_import(
     import_id = new_id("legacy_import")
     parse_id = f"legacy_parse_{import_id}"
     stored_path = save_legacy_workbook(file, import_id)
-    source_uri = str(stored_path.relative_to(ROOT))
+    source_uri = storage_trace_path(stored_path)
     try:
         parsed = parse_workbook(stored_path, kind=kind, sheet_name=sheet_name.strip() or None)
     except Exception as error:
@@ -8064,7 +8124,7 @@ def upload_photo(file: UploadFile = File(...), upload_batch_id: str = Form("")) 
             source_record_id = create_source_record(
                 conn,
                 source_type="photo",
-                source_uri=str(stored_path.relative_to(ROOT)),
+                source_uri=storage_trace_path(stored_path),
                 source_label=file.filename,
                 raw_payload=json.dumps(
                     {"original_filename": file.filename, "upload_batch_id": batch_id},
@@ -8078,13 +8138,13 @@ def upload_photo(file: UploadFile = File(...), upload_batch_id: str = Form("")) 
                     (photo_id, upload_batch_id, original_filename, stored_path, uploaded_at, status)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (photo_id, batch_id, file.filename, str(stored_path.relative_to(ROOT)), uploaded_at, "uploaded"),
+                (photo_id, batch_id, file.filename, storage_trace_path(stored_path), uploaded_at, "uploaded"),
             )
             review_candidate = ensure_photo_review_candidate(
                 conn,
                 photo_id=photo_id,
                 original_filename=file.filename,
-                stored_path=str(stored_path.relative_to(ROOT)),
+                stored_path=storage_trace_path(stored_path),
                 uploaded_at=uploaded_at,
                 source_record_id=source_record_id,
             )
@@ -8094,7 +8154,7 @@ def upload_photo(file: UploadFile = File(...), upload_batch_id: str = Form("")) 
     return {
         "photo_id": photo_id,
         "original_filename": file.filename,
-        "stored_path": str(stored_path.relative_to(ROOT)),
+        "stored_path": storage_trace_path(stored_path),
         "uploaded_at": uploaded_at,
         "status": "review_pending",
         "upload_batch_id": batch_id,
