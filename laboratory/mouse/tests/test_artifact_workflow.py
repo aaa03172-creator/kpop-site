@@ -628,6 +628,46 @@ def test_export_preview_reports_export_view_consistency_checks(tmp_path: Path) -
         db.DB_PATH = old_db_path
 
 
+def test_export_row_state_uses_staleness_contract_and_blockers_take_priority() -> None:
+    assert app_main.export_row_state(0, {"export_stale": True, "latest_generated_export_at": ""}) == {
+        "row_state": "ready",
+        "row_state_reason": "Canonical row is ready for Excel export.",
+    }
+    assert app_main.export_row_state(
+        0,
+        {
+            "export_stale": True,
+            "latest_generated_export_at": "2026-05-08T00:00:00Z",
+        },
+    ) == {
+        "row_state": "stale_after_correction",
+        "row_state_reason": "Accepted state changed after the latest export.",
+    }
+    assert app_main.export_row_state(
+        2,
+        {
+            "export_stale": True,
+            "latest_generated_export_at": "2026-05-08T00:00:00Z",
+        },
+    ) == {
+        "row_state": "blocked_by_review",
+        "row_state_reason": "Focus Review blockers remain before Excel export.",
+    }
+
+
+def test_export_preview_ui_consumes_backend_row_state_contract() -> None:
+    static_html = Path("static/index.html").read_text(encoding="utf-8")
+
+    start = static_html.index("function exportPreviewRowStateChips")
+    row_state_function = static_html[
+        start : static_html.index("function exportPreviewRow", start + 1)
+    ]
+
+    assert "item?.row_state" in row_state_function
+    assert "row_state_reason" in row_state_function
+    assert "stale_after_correction" in row_state_function
+
+
 def test_separation_xlsx_renders_trace_sheet_with_row_state_and_source_refs(
     tmp_path: Path,
     monkeypatch,

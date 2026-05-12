@@ -13052,7 +13052,7 @@ def export_row_state(blocked_review_items: int, stale_state: dict[str, Any]) -> 
             "row_state": "blocked_by_review",
             "row_state_reason": "Focus Review blockers remain before Excel export.",
         }
-    if stale_state.get("stale"):
+    if stale_state.get("export_stale") and stale_state.get("latest_generated_export_at"):
         return {
             "row_state": "stale_after_correction",
             "row_state_reason": "Accepted state changed after the latest export.",

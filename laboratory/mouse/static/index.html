@@ -3861,6 +3861,15 @@
     function exportPreviewRowStateChips(item, previewReady) {
       const uncertainty = String(item?.uncertainty || "").trim();
       const hasUncertainty = uncertainty && uncertainty !== "--" && !/^none$/i.test(uncertainty);
+      const rowState = String(item?.row_state || "").trim();
+      const rowStateReason = String(item?.row_state_reason || "").trim();
+      const rowStateLabels = {
+        ready: "Ready",
+        blocked_by_review: "Blocked",
+        stale_after_correction: "Stale"
+      };
+      const rowStateLabel = rowStateLabels[rowState] || (previewReady && !hasUncertainty ? "Ready" : "Blocked");
+      const rowStateTone = rowState === "ready" || (!rowState && previewReady && !hasUncertainty) ? "ready" : "blocked";
       const evidenceText = [
         item?.source_note_item_ids,
         item?.source_photo_ids,
@@ -3871,9 +3880,10 @@
       const traceLinked = Boolean(evidenceText.trim());
       const chips = [
         ["Preview only", "neutral"],
-        [previewReady && !hasUncertainty ? "Ready" : "Blocked", previewReady && !hasUncertainty ? "ready" : "blocked"]
+        [rowStateLabel, rowStateTone]
       ];
       if (traceLinked) chips.push(["Trace linked", "trace"]);
+      if (rowStateReason) chips.push([rowStateReason, "neutral"]);
       return `
         <div class="row-state-stack" aria-label="Export preview row state">
           ${chips.map(([label, tone]) => `<span class="row-state-chip ${escapeHtml(tone)}">${escapeHtml(label)}</span>`).join("")}
