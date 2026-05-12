@@ -120,3 +120,43 @@ def test_missing_fixture_tables_can_use_explicit_db_path(tmp_path: Path) -> None
     missing = verifier.missing_fixture_tables(db_path)
 
     assert missing == ["card_note_item_log", "parse_result", "review_queue"]
+
+
+def test_missing_fixture_parse_rows_can_skip_default_gate() -> None:
+    verifier = load_verifier_module()
+    manifest = {
+        "boundary": "review item / test fixture",
+        "source_policy": "Use only local photo fixtures.",
+        "cases": [{"case_id": "clear_card"}, {"case_id": "low_confidence_card"}],
+    }
+    results = [
+        {
+            "case_id": "clear_card",
+            "status": "FAIL",
+            "photo_id": "photo_clear",
+            "parse_id": None,
+            "failures": ["latest parse missing for photo photo_clear"],
+        },
+        {
+            "case_id": "low_confidence_card",
+            "status": "FAIL",
+            "photo_id": "photo_low",
+            "parse_id": None,
+            "failures": ["latest parse missing for photo photo_low"],
+        },
+    ]
+
+    assert verifier.results_are_missing_fixture_parses(results)
+    summary = verifier.build_missing_parse_fixture_summary(
+        manifest=manifest,
+        manifest_path=Path("config/photo_e2e_validation_cases.json"),
+        results=results,
+        require_fixtures=False,
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["skipped"] == 2
+    assert summary["failed"] == 0
+    assert summary["missing_photo_ids"] == ["photo_clear", "photo_low"]
+    assert "required schema" in summary["skip_reason"]
+    assert verifier.missing_fixture_exit_code(summary) == 0

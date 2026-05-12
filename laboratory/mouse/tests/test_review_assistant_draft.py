@@ -31,11 +31,26 @@ def test_static_ui_exposes_review_assistant_draft_controls() -> None:
     start = html.index("function fillReviewResolutionFromAssistantDraft")
     end = html.index("async function loadAssistantReviewDraft", start)
     fill_function = html[start:end]
+    assert '#reviewDetailPanel .review-actions' in fill_function
+    assert "draft.review_type" in fill_function
+    assert "draft.form_fill_policy" in fill_function
     assert ".review-resolved-value" in fill_function
     assert ".review-resolution-note" in fill_function
+    assert ".ear-label-code" in fill_function
+    assert ".note-label-decision" in fill_function
+    assert ".note-label-mouse-id" in fill_function
+    assert ".note-label-count" in fill_function
+    assert "assistantCorrectionFieldName" in fill_function
+    assert "assistantNoteItemId" in fill_function
     assert "Assistant draft copied into the form" in fill_function
     assert "submitReviewResolution" not in fill_function
     assert "api(" not in fill_function
+
+    start = html.index("function reviewResolutionPayload")
+    end = html.index("async function submitReviewResolution", start)
+    payload_function = html[start:end]
+    assert "assistantCorrectionFieldName" in payload_function
+    assert "assistantNoteItemId" in payload_function
 
     start = html.index("async function loadAssistantReviewDraft")
     end = html.index("function attachReviewAuditHandler", start)
@@ -263,6 +278,66 @@ def test_review_assistant_draft_specializes_unlabeled_numeric_note_payload(tmp_p
         assert payload["draft"]["resolution_payload"]["note_label_decision"] == ""
         assert payload["draft"]["resolution_payload"]["correction_field_name"] == "parsed_label"
         assert "must choose" in payload["draft"]["operator_note"].lower()
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_review_assistant_draft_anchors_type_specific_note_item_when_parse_has_multiple_notes(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("parse_multi_note_draft", "manual_photo_transcription", "{}", "2026-05-12T11:20:00Z", "review", 58, 1),
+            )
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, parse_id, line_number, raw_line_text, parsed_type,
+                     parsed_mouse_display_id, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("note_mouse_first", "parse_multi_note_draft", 1, "MT318 R' clear", "mouse_item", "MT318", 0.91, 0),
+            )
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, parse_id, line_number, raw_line_text, parsed_type,
+                     parsed_count, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("note_numeric_target", "parse_multi_note_draft", 2, "3", "unlabeled_numeric_note", 3, 0.5, 1),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_unlabeled_numeric_parse_multi_note_draft",
+                    "parse_multi_note_draft",
+                    "Medium",
+                    "Unlabeled numeric note needs review",
+                    "3",
+                    "Confirm as temporary labels, ignore, or map to mouse IDs.",
+                    "Grouped numeric note review should anchor the numeric line, not the first note line.",
+                    "open",
+                    "2026-05-12T11:21:00Z",
+                ),
+            )
+
+        payload = TestClient(app).get("/api/review-items/review_unlabeled_numeric_parse_multi_note_draft/assistant-draft").json()
+
+        assert payload["draft"]["review_type"] == "unlabeled_numeric_note_review"
+        assert payload["draft"]["resolution_payload"]["note_item_id"] == "note_numeric_target"
     finally:
         db.DB_PATH = old_db_path
 

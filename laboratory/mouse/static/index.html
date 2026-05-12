@@ -5668,15 +5668,15 @@
         legacy_decision: selectedLegacyDecision,
         canonical_entity_type: reviewedExistingStrainId ? "strain" : "",
         canonical_entity_id: reviewedExistingStrainId,
-        correction_entity_type: "review_item",
-        correction_entity_id: button.dataset.reviewId,
-        correction_field_name: "reviewed_value",
-        correction_before_value: button.dataset.currentValue || "",
+        correction_entity_type: container.dataset.assistantCorrectionEntityType || "review_item",
+        correction_entity_id: container.dataset.assistantCorrectionEntityId || button.dataset.reviewId,
+        correction_field_name: container.dataset.assistantCorrectionFieldName || "reviewed_value",
+        correction_before_value: container.dataset.assistantCorrectionBeforeValue || button.dataset.currentValue || "",
         correction_after_value: resolvedValue || "",
         reviewed_strain_name: reviewedStrainName,
         reviewed_gene_symbol: reviewedGeneSymbol,
         reviewed_allele_name: reviewedAlleleName,
-        note_item_id: button.dataset.noteItemId || "",
+        note_item_id: container.dataset.assistantNoteItemId || button.dataset.noteItemId || "",
         note_label_decision: noteLabelDecision?.value || "",
         note_label_mouse_id: container.querySelector(".note-label-mouse-id")?.value || "",
         note_label_count: noteLabelCountValue ? Number(noteLabelCountValue) : null,
@@ -5921,18 +5921,42 @@
     }
 
     function fillReviewResolutionFromAssistantDraft(result) {
+      const draft = result?.draft || {};
       const resolution = result?.draft?.resolution_payload || {};
-      const actions = document.querySelector(".review-actions");
+      const reviewType = draft.review_type || "general_review";
+      const formFillPolicy = draft.form_fill_policy || "draft_value_and_note";
+      const actions = document.querySelector("#reviewDetailPanel .review-actions");
       if (!actions) return;
       const valueInput = actions.querySelector(".review-resolved-value");
       const noteInput = actions.querySelector(".review-resolution-note");
       const decisionInput = actions.querySelector(".review-legacy-decision");
+      const earLabelInput = actions.querySelector(".ear-label-code");
+      const noteLabelDecisionInput = actions.querySelector(".note-label-decision");
+      const noteLabelMouseIdInput = actions.querySelector(".note-label-mouse-id");
+      const noteLabelCountInput = actions.querySelector(".note-label-count");
+      actions.dataset.assistantReviewType = reviewType;
+      actions.dataset.assistantFormFillPolicy = formFillPolicy;
+      actions.dataset.assistantCorrectionEntityType = resolution.correction_entity_type || "review_item";
+      actions.dataset.assistantCorrectionEntityId = resolution.correction_entity_id || "";
+      actions.dataset.assistantCorrectionFieldName = resolution.correction_field_name || "reviewed_value";
+      actions.dataset.assistantCorrectionBeforeValue = resolution.correction_before_value || "";
+      actions.dataset.assistantNoteItemId = resolution.note_item_id || "";
       if (valueInput && resolution.resolved_value !== undefined) valueInput.value = resolution.resolved_value || "";
       if (noteInput) noteInput.value = resolution.resolution_note || "";
       if (decisionInput && resolution.legacy_decision) decisionInput.value = resolution.legacy_decision;
+      if (reviewType === "ear_label_review" || formFillPolicy === "bounded_choice_only") {
+        const selectedEarLabel = resolution.ear_label_code || resolution.resolved_value || "";
+        if (earLabelInput) earLabelInput.value = selectedEarLabel;
+        if (valueInput) valueInput.value = selectedEarLabel;
+      }
+      if (reviewType === "unlabeled_numeric_note_review" || formFillPolicy === "operator_choose_note_label") {
+        if (noteLabelDecisionInput) noteLabelDecisionInput.value = resolution.note_label_decision || "";
+        if (noteLabelMouseIdInput) noteLabelMouseIdInput.value = resolution.note_label_mouse_id || "";
+        if (noteLabelCountInput) noteLabelCountInput.value = resolution.note_label_count ?? "";
+      }
       const message = actions.querySelector(".review-resolution-message");
       if (message) {
-        message.textContent = "Assistant draft copied into the form. Review source evidence before resolving.";
+        message.textContent = `Assistant draft copied into the form (${reviewType.replaceAll("_", " ")}). Review source evidence before resolving.`;
       }
     }
 

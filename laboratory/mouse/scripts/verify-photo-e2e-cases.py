@@ -399,6 +399,45 @@ def build_missing_fixture_summary(
     return summary
 
 
+def results_are_missing_fixture_parses(results: list[dict[str, Any]]) -> bool:
+    if not results:
+        return False
+    return all(
+        result.get("parse_id") is None
+        and len(result.get("failures", [])) == 1
+        and str(result["failures"][0]).startswith("latest parse missing for photo ")
+        for result in results
+    )
+
+
+def build_missing_parse_fixture_summary(
+    *,
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    results: list[dict[str, Any]],
+    require_fixtures: bool = False,
+) -> dict[str, Any]:
+    summary = build_missing_fixture_summary(
+        manifest=manifest,
+        manifest_path=manifest_path,
+        missing_tables=[],
+        require_fixtures=require_fixtures,
+    )
+    missing_photo_ids = [
+        str(result.get("photo_id") or "")
+        for result in results
+        if result.get("photo_id")
+    ]
+    reason = (
+        "Local photo E2E fixture database has the required schema but none of "
+        "the expected photo parse rows."
+    )
+    summary["missing_photo_ids"] = missing_photo_ids
+    summary["skip_reason"] = "" if require_fixtures else reason
+    summary["failure_reason"] = f"{reason} Fixture rows are required for this accuracy gate." if require_fixtures else ""
+    return summary
+
+
 def missing_fixture_exit_code(summary: dict[str, Any]) -> int:
     return 1 if summary.get("status") == "failed" else 0
 
@@ -447,6 +486,26 @@ def main() -> int:
             )
         return missing_fixture_exit_code(summary)
     results, fail_count = verify(manifest, db_path)
+    if fail_count and results_are_missing_fixture_parses(results):
+        summary = build_missing_parse_fixture_summary(
+            manifest=manifest,
+            manifest_path=Path(args.manifest),
+            results=results,
+            require_fixtures=args.require_fixtures,
+        )
+        if args.json:
+            print(json.dumps(summary, indent=2, ensure_ascii=False))
+        elif args.require_fixtures:
+            print(
+                "Photo E2E validation failed: local fixture parse rows are required "
+                f"(missing photo id(s): {', '.join(summary['missing_photo_ids'])})."
+            )
+        else:
+            print(
+                "Photo E2E validation skipped: local fixture parse rows are unavailable "
+                f"(missing photo id(s): {', '.join(summary['missing_photo_ids'])})."
+            )
+        return missing_fixture_exit_code(summary)
     summary = build_summary(
         manifest=manifest,
         manifest_path=Path(args.manifest),
