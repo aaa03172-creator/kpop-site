@@ -45,18 +45,12 @@ runtime code, those sources win.
 | Export blocker navigation | Implemented for blockers with `review_id`. | #131. | Add direct evidence links for blockers that have source photo or note-line evidence but no review item. |
 | Brand and color direction | Semantic token foundation implemented for chips, status pills, selected rows/cards, disabled controls, ready/blocked states, progress, and focus rings. | #111 plus `static/index.html` and `index.html` token aliases. | Extend the same token vocabulary to future row-state chips and evidence badges as those slices land. |
 | Empty/loading/error state | Implemented for read-model panels and high-traffic table empty states. | #111, #137, #140. | Extend the same state-message pattern to lower-priority settings/reference tables when those screens are next touched. |
-| Evidence type badges | Documented but not fully implemented across surfaces. | #111. | Add consistent badges for source photo, OCR text, note line, Excel row, accepted event, export manifest, and validation report. |
+| Evidence type badges | Implemented for Evidence Ledger cards, Focus Review detail source panels, and Export Log artifact cells. | #111 plus evidence badge UI implementation. | Extend badges to lower-priority audit/detail tables when those screens are next touched. |
 | Keyboard and focus pass | Documented. | #111. | Run a focused keyboard traversal pass through upload, review, export blockers, and detail drawers. |
 
 ## Recommended Next Slices
 
-1. Evidence badge pass.
-   - Scope: Evidence Ledger, Review detail, Export log, and source photo panels.
-   - Boundary: raw source, parsed/intermediate result, review item, canonical
-     structured state, and export/view must remain visually separate.
-   - Verification: targeted DOM checks for badge text and source links.
-
-2. Photo-stage progress expansion.
+1. Photo-stage progress expansion.
    - Scope: visible photo-stage progress from source stored through parse,
      review, candidate preparation, accepted/held, and export ready/blocked.
    - Boundary: UI display over raw source, parsed/intermediate result, review
@@ -64,7 +58,7 @@ runtime code, those sources win.
    - Verification: `npm test`, `npm run test:local`, plus browser checks that
      progress labels do not imply canonical acceptance before review.
 
-3. Keyboard and focus pass.
+2. Keyboard and focus pass.
    - Scope: upload, review, export blockers, and detail drawers.
    - Boundary: UI accessibility behavior only.
    - Verification: keyboard traversal check and DOM checks for focus-visible
@@ -76,6 +70,7 @@ runtime code, those sources win.
 | --- | --- | --- |
 | Semantic color token consolidation | Adds shared CSS variables for focus, selected, processing, success, warning, danger, disabled, ready, and blocked states; rewires high-traffic status, progress, review, and export readiness styles to those variables. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and a DOM/CSS check for token-backed selected/blocked/ready/status classes. |
 | Export preview row-state chips | Adds text-backed chips such as `Preview only`, `Ready` or `Blocked`, and source trace indicators to workbook preview rows without changing export schemas or canonical records. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks that preview chips render while final export gating remains enforced. |
+| Evidence badge pass | Adds consistent text-backed badges for source photo, OCR text, note line, review item, export manifest, and validation report evidence in high-traffic review/export surfaces. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for badge text in Evidence Ledger, Focus Review detail, and Export Log. |
 
 ## Verification Commands To Prefer
 

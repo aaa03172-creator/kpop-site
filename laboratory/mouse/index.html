@@ -770,6 +770,28 @@
       color: var(--quiet);
     }
 
+    .evidence-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid var(--selected-line);
+      border-radius: 999px;
+      background: var(--selected-bg);
+      color: var(--accent);
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .evidence-badge::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
     .status {
       display: inline-flex;
       align-items: center;
@@ -3427,6 +3449,10 @@
       return String(text || "").match(/\b[A-Za-z]{0,4}\d+[A-Za-z0-9-]*\b/g) || [];
     }
 
+    function evidenceBadge(label) {
+      return `<span class="evidence-badge">${escapeHtml(label)}</span>`;
+    }
+
     function parsedMatingIds(photo) {
       const countText = String(photo.mouseCount || "");
       const noteText = (photo.notes || []).map((note) => note.raw).join(" | ");
@@ -3995,7 +4021,7 @@
           <td>${escapeHtml(entry.view)}</td>
           <td>${escapeHtml(entry.included)}</td>
           <td>${escapeHtml(entry.blocked)}</td>
-          <td>${escapeHtml(entry.result)}</td>
+          <td>${evidenceBadge("Export manifest")} ${evidenceBadge("Validation report")} ${escapeHtml(entry.result)}</td>
         </tr>
       `).join("");
       document.getElementById("blockedExportRows").innerHTML = blockedItems.map((photo) => `

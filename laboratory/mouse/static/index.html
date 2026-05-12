@@ -2010,6 +2010,61 @@
       font-weight: 800;
       white-space: nowrap;
     }
+    .evidence-badge-list {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .evidence-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid var(--neutral-line);
+      border-radius: 999px;
+      background: var(--neutral-bg);
+      color: var(--muted);
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .evidence-badge::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+    .evidence-badge.source-photo {
+      border-color: var(--ready-line);
+      background: var(--ready-bg);
+      color: var(--verified);
+    }
+    .evidence-badge.ocr-text,
+    .evidence-badge.parsed-value,
+    .evidence-badge.note-line {
+      border-color: var(--warning-line);
+      background: var(--warning-bg);
+      color: var(--warning);
+    }
+    .evidence-badge.excel-row,
+    .evidence-badge.export-manifest,
+    .evidence-badge.validation-report {
+      border-color: var(--selected-line);
+      background: var(--selected-bg);
+      color: var(--accent);
+    }
+    .evidence-badge.review-item {
+      border-color: var(--blocked-line);
+      background: var(--blocked-bg);
+      color: var(--blocked-ink);
+    }
+    .evidence-badge.accepted-event {
+      border-color: var(--success-line);
+      background: var(--success-bg);
+      color: var(--success);
+    }
     .viz-grid {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -3760,6 +3815,27 @@
       `;
     }
 
+    function evidenceBadge(kind, label = "") {
+      const normalized = String(kind || "source").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "source";
+      const textLabel = label || {
+        "source-photo": "Source photo",
+        "ocr-text": "OCR text",
+        "parsed-value": "Parsed value",
+        "note-line": "Note line",
+        "excel-row": "Excel row",
+        "review-item": "Review item",
+        "accepted-event": "Accepted event",
+        "export-manifest": "Export manifest",
+        "validation-report": "Validation report"
+      }[normalized] || kind || "Evidence";
+      return `<span class="evidence-badge ${escapeHtml(normalized)}">${escapeHtml(textLabel)}</span>`;
+    }
+
+    function evidenceBadgeList(items) {
+      const badges = items.filter(Boolean).map((item) => Array.isArray(item) ? evidenceBadge(item[0], item[1]) : evidenceBadge(item));
+      return badges.length ? `<div class="evidence-badge-list">${badges.join("")}</div>` : "";
+    }
+
     function artifactPreviewButton(path, label) {
       if (!path) return `<span class="muted">--</span>`;
       return `<button type="button" class="artifact-preview-button" data-artifact-path="${escapeHtml(path)}">${escapeHtml(label)}</button>`;
@@ -4730,10 +4806,18 @@
         const ocr = item.ocr || {};
         const interpretation = item.ai_interpretation || {};
         const links = item.links || {};
+        const badgeItems = [
+          sourcePhoto.photo_id && "source-photo",
+          ocr.text && "ocr-text",
+          direct.observed_raw_text && "note-line",
+          interpretation.parsed_value && "parsed-value",
+          (links.review_ids || []).length && "review-item"
+        ];
         return `
           <div class="evidence-ledger-card">
             <h3>${escapeHtml(item.evidence_kind || item.photo_evidence_id || "Evidence item")}</h3>
             <p>${escapeHtml(sourcePhoto.original_filename || sourcePhoto.photo_id || "source photo pending")} / ${escapeHtml(item.status || "draft")}</p>
+            ${evidenceBadgeList(badgeItems)}
             <div class="review-meta">
               <span class="chip">Observed ${escapeHtml(direct.observed_raw_text || "--")}</span>
               <span class="chip">OCR ${escapeHtml(ocr.text || "--")}</span>
@@ -5138,9 +5222,17 @@
       const noteAnchor = item.note_item_id
         ? `<div class="review-note-anchor"><strong>Note line anchor</strong><br>${escapeHtml(item.review_note_raw_line || "--")}<br><span class="muted">${escapeHtml([item.review_note_parsed_type, item.review_note_interpreted_status, item.review_note_mouse_display_id || item.review_note_count].filter(Boolean).join(" / ") || "parsed evidence")}</span></div>`
         : `<div class="review-note-anchor"><strong>Note evidence</strong><br>${escapeHtml(item.evidence_preview || "No line-level note anchor for this review item.")}</div>`;
+      const badgeItems = [
+        item.photo_id && "source-photo",
+        item.parse_id && "ocr-text",
+        item.note_item_id && "note-line",
+        item.review_id && "review-item",
+        item.card_snapshot_id && ["excel-row", "Card snapshot"]
+      ];
       return `
         <div class="review-source-preview">
           ${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="Source cage-card photo for selected review">` : ""}
+          ${evidenceBadgeList(badgeItems)}
           <div class="review-source-grid">
             ${sourceCells.map(([label, value]) => `<span>${escapeHtml(label)}<strong>${escapeHtml(value)}</strong></span>`).join("")}
           </div>
@@ -6494,8 +6586,8 @@
           <td>${escapeHtml(item.status)}</td>
           <td>${escapeHtml(item.row_count)}</td>
           <td>${escapeHtml(item.blocked_review_count)}</td>
-          <td>${artifactPreviewButton(item.export_manifest_path, "Manifest")}</td>
-          <td>${artifactPreviewButton(item.validation_report_path || "", "Report")}<span class="muted">${item.validation_report_path ? "" : escapeHtml(item.validation_report_id || "--")}</span></td>
+          <td>${evidenceBadge("export-manifest")}${artifactPreviewButton(item.export_manifest_path, "Manifest")}</td>
+          <td>${evidenceBadge("validation-report")}${artifactPreviewButton(item.validation_report_path || "", "Report")}<span class="muted">${item.validation_report_path ? "" : escapeHtml(item.validation_report_id || "--")}</span></td>
           <td>${escapeHtml(item.state_watermark || "--")}</td>
           <td>${escapeHtml(item.generated_role || "Data / Export Manager")}</td>
           <td>${escapeHtml(item.exported_at)}</td>
