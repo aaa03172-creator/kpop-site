@@ -544,6 +544,13 @@ def focus_review_empty_state() -> dict[str, Any]:
     }
 
 
+def operations_home_empty_state() -> dict[str, Any]:
+    return {
+        "message": "No operations tasks are currently open.",
+        "fabricated_records": False,
+    }
+
+
 def colony_state_empty_state() -> dict[str, Any]:
     return {
         "message": "No accepted active colony records are available yet.",
@@ -1065,6 +1072,259 @@ def upload_batch_release_worklist(conn: Any, upload_batch_id: str) -> list[dict[
             }
         )
     return worklist
+
+
+def operations_task(
+    *,
+    task_id: str,
+    family: str,
+    label: str,
+    status: str,
+    risk_class: str,
+    target_type: str,
+    target_id: str,
+    target_label: str,
+    blocker_reason: str = "",
+    evidence_refs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "family": family,
+        "label": label,
+        "status": status,
+        "risk_class": risk_class,
+        "target_type": target_type,
+        "target_id": target_id,
+        "target_label": target_label,
+        "blocker_reason": blocker_reason,
+        "evidence_refs": evidence_refs or {},
+        "source_layer": "export or view",
+    }
+
+
+def operations_home_grouped_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    family_labels = {
+        "focus_review": "Focus Review",
+        "photo_worklist": "Photo Worklist",
+        "canonical_apply": "Canonical Apply",
+        "genotyping": "Genotyping",
+        "breeding_weaning": "Breeding / Weaning",
+        "export_readiness": "Export Readiness",
+    }
+    family_order = list(family_labels)
+    grouped: list[dict[str, Any]] = []
+    for family in family_order:
+        family_tasks = [task for task in tasks if task["family"] == family]
+        if not family_tasks:
+            continue
+        grouped.append(
+            {
+                "family": family,
+                "label": family_labels[family],
+                "count": len(family_tasks),
+                "tasks": family_tasks,
+            }
+        )
+    return grouped
+
+
+def operations_home_tasks(conn: Any) -> list[dict[str, Any]]:
+    tasks: list[dict[str, Any]] = []
+    batch_rows = conn.execute(
+        """
+        SELECT upload_batch_id
+        FROM upload_batch
+        WHERE status NOT IN ('closed', 'archived')
+        ORDER BY created_at DESC, upload_batch_id
+        LIMIT 25
+        """
+    ).fetchall()
+    for batch in batch_rows:
+        upload_batch_id = batch["upload_batch_id"]
+        for item in upload_batch_release_worklist(conn, upload_batch_id):
+            if item["next_action"] == "ready_to_close":
+                continue
+            risk_class = "blocker" if item["next_action"] == "resolve_reviews" else "action"
+            tasks.append(
+                operations_task(
+                    task_id=f"photo_worklist:{item['photo_id']}:{item['next_action']}",
+                    family="photo_worklist",
+                    label=item["action_target_label"] or item["next_action"].replace("_", " "),
+                    status=item["next_action"],
+                    risk_class=risk_class,
+                    target_type=item["action_target_type"],
+                    target_id=item["action_target_id"],
+                    target_label=item["action_target_label"],
+                    blocker_reason=item["blocker"],
+                    evidence_refs={
+                        "upload_batch_id": upload_batch_id,
+                        "source_photo_id": item["photo_id"],
+                        "review_ids": item.get("review_ids", []),
+                        "candidate_ids": item.get("candidate_ids", []),
+                    },
+                )
+            )
+
+    review_rows = conn.execute(
+        """
+        SELECT review.review_id, review.parse_id, review.severity, review.issue,
+               review.current_value, review.suggested_value, review.review_reason,
+               review.assigned_role, review.assigned_to, review.priority,
+               review.status, review.created_at,
+               parse.source_name, parse.photo_id, parse.raw_payload AS parse_raw_payload,
+               parse.confidence AS parse_confidence, photo.original_filename
+        FROM review_queue review
+        LEFT JOIN parse_result parse ON parse.parse_id = review.parse_id
+        LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
+        WHERE review.status = 'open'
+        ORDER BY review.created_at DESC, review.review_id
+        """
+    ).fetchall()
+    for row in review_rows:
+        payload = dict(row)
+        payload["confidence"] = payload.get("parse_confidence")
+        parse_payload = json_object(payload.pop("parse_raw_payload", "{}"))
+        attention = review_attention_level(payload, parse_payload)
+        if attention["attention_level"] not in {"must_review", "quick_check"}:
+            continue
+        risk_class = "blocker" if attention["attention_level"] == "must_review" else "review"
+        tasks.append(
+            operations_task(
+                task_id=f"focus_review:{payload['review_id']}",
+                family="focus_review",
+                label=payload["issue"] or "Review source evidence",
+                status=attention["attention_level"],
+                risk_class=risk_class,
+                target_type="review",
+                target_id=payload["review_id"],
+                target_label=payload["issue"] or payload["review_id"],
+                blocker_reason=attention["attention_reason"],
+                evidence_refs={
+                    "review_id": payload["review_id"],
+                    "parse_id": payload.get("parse_id") or "",
+                    "source_photo_id": payload.get("photo_id") or "",
+                    "source_photo_filename": payload.get("original_filename") or "",
+                },
+            )
+        )
+
+    candidate_rows = conn.execute(
+        """
+        SELECT candidate.candidate_id, candidate.review_id, candidate.parse_id,
+               candidate.proposed_mouse_display_id, candidate.proposed_strain,
+               candidate.status, candidate.created_at, parse.photo_id, photo.original_filename
+        FROM canonical_candidate candidate
+        JOIN review_queue review ON review.review_id = candidate.review_id
+        LEFT JOIN parse_result parse ON parse.parse_id = candidate.parse_id
+        LEFT JOIN photo_log photo ON photo.photo_id = parse.photo_id
+        WHERE candidate.status = 'draft'
+          AND review.status = 'resolved'
+        ORDER BY candidate.created_at DESC, candidate.candidate_id
+        """
+    ).fetchall()
+    for row in candidate_rows:
+        payload = dict(row)
+        display = payload["proposed_mouse_display_id"] or payload["candidate_id"]
+        tasks.append(
+            operations_task(
+                task_id=f"canonical_apply:{payload['candidate_id']}",
+                family="canonical_apply",
+                label=f"Apply reviewed candidate {display}",
+                status="ready_to_apply",
+                risk_class="operator_confirmed",
+                target_type="canonical_candidate",
+                target_id=payload["candidate_id"],
+                target_label=display,
+                blocker_reason="Review is resolved; preview before applying canonical state.",
+                evidence_refs={
+                    "candidate_id": payload["candidate_id"],
+                    "review_id": payload["review_id"],
+                    "parse_id": payload["parse_id"],
+                    "source_photo_id": payload.get("photo_id") or "",
+                    "source_photo_filename": payload.get("original_filename") or "",
+                },
+            )
+        )
+
+    mouse_rows = conn.execute(
+        """
+        SELECT mouse_id, display_id, raw_strain_text, genotype_status,
+               genotyping_status, next_action, use_category, target_match_status,
+               source_photo_id, source_note_item_id, source_record_id, updated_at
+        FROM mouse_master
+        WHERE status = 'active'
+          AND next_action NOT IN ('', 'keep_for_maintenance')
+        ORDER BY updated_at DESC, display_id COLLATE NOCASE
+        LIMIT 50
+        """
+    ).fetchall()
+    for row in mouse_rows:
+        payload = dict(row)
+        next_action = payload["next_action"] or "review_needed"
+        family = "breeding_weaning" if next_action == "weaning_due" else "genotyping"
+        risk_class = "blocker" if next_action in {"review_result", "review_needed", "weaning_due"} else "action"
+        tasks.append(
+            operations_task(
+                task_id=f"{family}:{payload['mouse_id']}:{next_action}",
+                family=family,
+                label=f"{payload['display_id']} {next_action.replace('_', ' ')}",
+                status=next_action,
+                risk_class=risk_class,
+                target_type="mouse",
+                target_id=payload["mouse_id"],
+                target_label=payload["display_id"],
+                blocker_reason=f"Mouse next action is {next_action}.",
+                evidence_refs={
+                    "mouse_id": payload["mouse_id"],
+                    "source_photo_id": payload.get("source_photo_id") or "",
+                    "source_note_item_id": payload.get("source_note_item_id") or "",
+                    "source_record_id": payload.get("source_record_id") or "",
+                },
+            )
+        )
+
+    blocked_reviews = export_review_blocker_count(conn)
+    if blocked_reviews:
+        blockers = open_review_blockers(conn, limit=5)
+        tasks.append(
+            operations_task(
+                task_id="export_readiness:blocked",
+                family="export_readiness",
+                label="Resolve export blockers",
+                status="export_blocked",
+                risk_class="blocker",
+                target_type="export",
+                target_id="current_export_preview",
+                target_label="Export readiness",
+                blocker_reason=f"{blocked_reviews} focus review blocker(s) prevent final export.",
+                evidence_refs={
+                    "review_ids": [item["review_id"] for item in blockers],
+                    "blocked_review_count": blocked_reviews,
+                },
+            )
+        )
+    return tasks
+
+
+@app.get("/api/ui/operations-home")
+def ui_operations_home() -> dict[str, Any]:
+    with connection() as conn:
+        attention_counts = open_review_attention_counts(conn)
+        tasks = operations_home_tasks(conn)
+    grouped = operations_home_grouped_tasks(tasks)
+    return {
+        "source_layer": "export or view",
+        "page_question": "What needs doing next?",
+        "summary": {
+            "total_tasks": len(tasks),
+            "must_review": int(attention_counts.get("must_review", 0)),
+            "quick_check": int(attention_counts.get("quick_check", 0)),
+            "export_blockers": int(attention_counts.get("must_review", 0)),
+            "families": {group["family"]: group["count"] for group in grouped},
+        },
+        "task_groups": grouped,
+        "empty_state": operations_home_empty_state(),
+    }
 
 
 @app.post("/api/upload-batches")
