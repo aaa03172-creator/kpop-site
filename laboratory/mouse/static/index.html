@@ -5884,9 +5884,32 @@
         ${reviewEvidencePanel(item)}
         <div class="detail-stack">
           <button class="audit-review-item" type="button" data-review-id="${escapeHtml(item.review_id)}">Load Audit Trace</button>
+          <button class="assistant-review-draft" type="button" data-review-id="${escapeHtml(item.review_id)}">Load Assistant Draft</button>
           <p class="muted" id="reviewAuditSummary">Audit trace includes source photo, card snapshot, note lines, corrections, and action log entries.</p>
+          <div class="state-message" data-state-kind="empty" id="assistantReviewDraftPanel">
+            <strong>Assistant draft</strong>
+            <span>Local-only draft appears here after loading. It does not resolve the review or write canonical state.</span>
+          </div>
         </div>
         <div class="detail-stack">${reviewResolutionControls(item)}</div>
+      `;
+    }
+
+    function renderAssistantReviewDraft(result) {
+      const panel = document.getElementById("assistantReviewDraftPanel");
+      if (!panel) return;
+      const draft = result?.draft || {};
+      const resolution = draft.resolution_payload || {};
+      const refs = result?.evidence_refs || {};
+      panel.dataset.stateKind = "ready";
+      panel.innerHTML = `
+        <strong>Assistant draft</strong>
+        <span>${escapeHtml(draft.operator_note || "Review before applying.")}</span>
+        <span>Policy: ${escapeHtml(result?.external_payload_policy || "local_only_until_approved")}</span>
+        <span>Evidence: ${escapeHtml(draft.evidence_summary || "No evidence summary available.")}</span>
+        <span>Draft value: ${escapeHtml(resolution.resolved_value || "--")}</span>
+        <span>Draft note: ${escapeHtml(resolution.resolution_note || "--")}</span>
+        <span>Trace: ${escapeHtml([refs.source_photo_id, refs.parse_id, (refs.note_item_ids || []).join(", ")].filter(Boolean).join(" / ") || "--")}</span>
       `;
     }
 
@@ -5899,6 +5922,17 @@
             `${result.summary.correction_count} correction(s), ${result.summary.action_count} action(s), ` +
             `${result.summary.has_photo ? "photo linked" : "photo pending"}, ` +
             `${result.summary.has_card_snapshot ? "snapshot linked" : "snapshot pending"}.`;
+        });
+      });
+      document.querySelectorAll(".assistant-review-draft").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const panel = document.getElementById("assistantReviewDraftPanel");
+          if (panel) {
+            panel.dataset.stateKind = "loading";
+            panel.innerHTML = `<strong>Assistant draft</strong><span>Loading local evidence draft...</span>`;
+          }
+          const result = await api(`/api/review-items/${encodeURIComponent(button.dataset.reviewId)}/assistant-draft`);
+          renderAssistantReviewDraft(result);
         });
       });
     }

@@ -3958,6 +3958,67 @@ def review_item_audit_view(conn: Any, review_id: str) -> dict[str, Any]:
     }
 
 
+def assistant_review_draft_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
+    review = audit["review"]
+    note_items = audit.get("note_items", [])
+    photo_evidence_items = audit.get("photo_evidence_items", [])
+    evidence_lines = [
+        str(item.get("raw_line_text") or "").strip()
+        for item in note_items
+        if str(item.get("raw_line_text") or "").strip()
+    ]
+    evidence_summary = " | ".join(evidence_lines[:5])
+    if not evidence_summary:
+        evidence_summary = review.get("suggested_value") or review.get("current_value") or review.get("review_reason") or ""
+    suggested_value = str(review.get("suggested_value") or "").strip()
+    current_value = str(review.get("current_value") or "").strip()
+    resolution_note_parts = [
+        "Assistant draft only; operator must compare against source evidence before resolving.",
+        str(review.get("review_reason") or "").strip(),
+    ]
+    if evidence_summary:
+        resolution_note_parts.append(f"Evidence summary: {evidence_summary}")
+    resolution_note = " ".join(part for part in resolution_note_parts if part)
+    return {
+        "source_layer": "review item",
+        "boundary": "review item",
+        "draft_kind": "assistant_review_draft",
+        "external_payload_policy": "local_only_until_approved",
+        "writes_canonical_state": False,
+        "requires_operator_approval": True,
+        "review": {
+            "review_id": review.get("review_id") or "",
+            "parse_id": review.get("parse_id") or "",
+            "status": review.get("status") or "",
+            "issue": review.get("issue") or "",
+            "severity": review.get("severity") or "",
+        },
+        "evidence_refs": {
+            "source_photo_id": review.get("photo_id") or "",
+            "source_photo_filename": review.get("original_filename") or "",
+            "parse_id": review.get("parse_id") or "",
+            "card_snapshot_id": review.get("card_snapshot_id") or "",
+            "note_item_ids": [item.get("note_item_id") for item in note_items if item.get("note_item_id")],
+            "photo_evidence_count": len(photo_evidence_items),
+        },
+        "draft": {
+            "evidence_summary": evidence_summary,
+            "operator_note": "Use this as a local assistant draft. Do not resolve or write canonical state without operator approval.",
+            "resolution_payload": {
+                "resolution_note": resolution_note,
+                "resolved_value": suggested_value or current_value,
+                "legacy_decision": "resolve",
+                "correction_entity_type": "review_item",
+                "correction_entity_id": review.get("review_id") or "",
+                "correction_field_name": "reviewed_value",
+                "correction_before_value": current_value,
+                "correction_after_value": suggested_value or current_value,
+                "correction_source_record_id": None,
+            },
+        },
+    }
+
+
 def create_canonical_candidate_draft(
     conn: Any,
     *,
@@ -9636,6 +9697,13 @@ def ui_evidence_ledger(source_photo_id: str = "", linked_mouse_id: str = "") -> 
 def audit_review_item(review_id: str) -> dict[str, Any]:
     with connection() as conn:
         return review_item_audit_view(conn, review_id)
+
+
+@app.get("/api/review-items/{review_id}/assistant-draft")
+def assistant_draft_review_item(review_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        audit = review_item_audit_view(conn, review_id)
+    return assistant_review_draft_from_audit(audit)
 
 
 @app.post("/api/review-items/{review_id}/resolve")
