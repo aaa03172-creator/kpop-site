@@ -371,6 +371,18 @@
       color: var(--disabled-ink);
       opacity: 0.62;
     }
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 3px solid var(--focus-ring);
+      outline-offset: 3px;
+    }
+    button:disabled:focus-visible {
+      outline-color: var(--disabled-line);
+    }
     input[type="file"] {
       width: 100%;
       margin: 8px 0 12px;
@@ -831,6 +843,7 @@
       color: var(--cue-trace-ink);
     }
     .review-card.selected-card,
+    .review-card:focus-within,
     .review-card:hover {
       border-color: var(--selected-line);
       box-shadow: 0 10px 24px rgba(94, 106, 210, 0.1);
@@ -1059,9 +1072,14 @@
       text-align: left;
       font-size: 12px;
     }
-    .photo-worklist-card.active {
+    .photo-worklist-card.active,
+    .photo-worklist-card[aria-current="true"] {
       border-color: var(--primary);
       background: #eef7f4;
+    }
+    .photo-worklist-card:focus-visible {
+      border-color: var(--selected-line);
+      box-shadow: 0 0 0 3px var(--focus-ring);
     }
     .photo-worklist-card strong,
     .photo-worklist-card span {
@@ -1992,6 +2010,11 @@
     .export-blocker-action {
       justify-self: start;
       margin-top: 4px;
+    }
+    .artifact-preview-button:focus-visible,
+    .export-blocker-action:focus-visible,
+    .open-export-blocker-review:focus-visible {
+      box-shadow: 0 0 0 3px var(--focus-ring);
     }
     .export-detail-grid {
       display: grid;
@@ -3919,7 +3942,7 @@
 
     function artifactPreviewButton(path, label) {
       if (!path) return `<span class="muted">--</span>`;
-      return `<button type="button" class="artifact-preview-button" data-artifact-path="${escapeHtml(path)}">${escapeHtml(label)}</button>`;
+      return `<button type="button" class="artifact-preview-button" data-artifact-path="${escapeHtml(path)}" aria-label="Preview ${escapeHtml(label)} artifact">${escapeHtml(label)}</button>`;
     }
 
     function escapeHtml(value) {
@@ -5271,6 +5294,7 @@
       attachReviewNavigationHandlers();
       document.querySelectorAll("#reviewRows .review-card").forEach((card) => {
         card.classList.toggle("selected-card", card.dataset.reviewId === selectedReviewId);
+        card.setAttribute("aria-current", card.dataset.reviewId === selectedReviewId ? "true" : "false");
       });
     }
 
@@ -5719,6 +5743,7 @@
         `${position} - ${selected?.original_filename || photoId} - ${selected?.next_action || "ready"}`;
       document.querySelectorAll(".photo-worklist-card").forEach((button) => {
         button.classList.toggle("active", button.dataset.photoId === photoId);
+        button.setAttribute("aria-current", button.dataset.photoId === photoId ? "true" : "false");
       });
       fillTranscriptionRecord(selected?.manual_payload || null);
       renderRoiPreview(photoId);
@@ -6682,7 +6707,7 @@
 
     function exportBlockerReviewButton(item) {
       if (!item?.review_id) return `<span class="muted">Open Focus Review</span>`;
-      return `<button class="export-blocker-action open-export-blocker-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Open review</button>`;
+      return `<button class="export-blocker-action open-export-blocker-review" type="button" data-review-id="${escapeHtml(item.review_id)}" aria-label="Open Focus Review item ${escapeHtml(item.review_id)} from export blocker">Open review</button>`;
     }
 
     async function showArtifactPreview(path) {
@@ -6853,7 +6878,7 @@
         </tr>`
       ).join("") || emptyTableRow("No upload batches yet", "Upload cage-card source photos to create a raw source batch before review or canonical mapping.", 7);
       document.getElementById("workbenchPhotoCards").innerHTML = latestPhotos.slice(0, 8).map((photo) => `
-        <button class="photo-worklist-card select-photo-review ${photo.photo_id === selectedTranscriptionPhotoId ? "active" : ""}" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">
+        <button class="photo-worklist-card select-photo-review ${photo.photo_id === selectedTranscriptionPhotoId ? "active" : ""}" type="button" data-photo-id="${escapeHtml(photo.photo_id)}" aria-current="${photo.photo_id === selectedTranscriptionPhotoId ? "true" : "false"}" aria-label="Review source photo ${escapeHtml(photo.original_filename)}; ${escapeHtml(photo.next_action || photo.status || "status pending")}">
           <strong>${escapeHtml(photo.original_filename)}</strong>
           <span>${escapeHtml(photo.batch_label || "Unbatched source")}</span>
           <span>${escapeHtml(photo.next_action || photo.status || "--")}</span>
@@ -6869,7 +6894,7 @@
           <td>${escapeHtml(`${photo.status} / ${photo.next_action} / ${photo.open_review_count || 0} open`)}</td>
           <td>${photoStageProgress(photo, true)}</td>
           <td>${escapeHtml(photo.uploaded_at)}</td>
-          <td><button class="select-photo-review" type="button" data-photo-id="${escapeHtml(photo.photo_id)}">Use</button></td>
+          <td><button class="select-photo-review" type="button" data-photo-id="${escapeHtml(photo.photo_id)}" aria-label="Use source photo ${escapeHtml(photo.original_filename)} for review">Use</button></td>
         </tr>
       `).join("") || emptyTableRow("No photos yet", "Uploaded source photos remain raw evidence and will appear here before review.", 7);
       document.getElementById("transcriptionPhotoId").innerHTML = latestPhotos.map((photo) =>
@@ -6921,7 +6946,7 @@
         const checkTargets = reviewCheckTargetsText(item);
         const attentionClass = `attention-${text(item.attention_level || "quick_check").replaceAll("_", "-")}`;
         return `
-        <article class="review-card ${escapeHtml(attentionClass)} ${item.review_id === selectedReviewId ? "selected-card" : ""}" data-review-id="${escapeHtml(item.review_id)}" data-attention-level="${escapeHtml(item.attention_level || "quick_check")}">
+        <article class="review-card ${escapeHtml(attentionClass)} ${item.review_id === selectedReviewId ? "selected-card" : ""}" data-review-id="${escapeHtml(item.review_id)}" data-attention-level="${escapeHtml(item.attention_level || "quick_check")}" aria-current="${item.review_id === selectedReviewId ? "true" : "false"}">
           <div class="review-card-content">
             <span class="review-card-kind ${escapeHtml(visual.tone)}"><span class="review-card-symbol" aria-hidden="true">${escapeHtml(visual.symbol || "!")}</span>${escapeHtml(visual.label)}</span>
             <h3>${escapeHtml(item.issue)}</h3>
@@ -6941,11 +6966,11 @@
             <div class="review-evidence">${escapeHtml(item.evidence_preview || item.suggested_value || "No evidence preview")}</div>
           </div>
           <div class="review-card-actions">
-            <button class="inspect-review" type="button" data-review-id="${escapeHtml(item.review_id)}">Inspect</button>
+            <button class="inspect-review" type="button" data-review-id="${escapeHtml(item.review_id)}" aria-label="Inspect review item ${escapeHtml(item.review_id)}">Inspect</button>
             ${item.photo_id ? `
               <button class="open-review-card-photo" type="button"
                 data-review-id="${escapeHtml(item.review_id)}"
-                data-photo-id="${escapeHtml(item.photo_id)}">Photo</button>
+                data-photo-id="${escapeHtml(item.photo_id)}" aria-label="Open source photo for review item ${escapeHtml(item.review_id)}">Photo</button>
             ` : ""}
             ${item.status === "open" && item.attention_level === "quick_check" && item.issue !== "Unlabeled numeric note needs review" ? `
               <button class="quick-resolve-review" type="button"
@@ -6966,8 +6991,13 @@
           renderReviewDetail(visibleReviews.find((item) => item.review_id === selectedReviewId));
           attachReviewAuditHandler();
           attachReviewNavigationHandlers();
-          document.querySelectorAll("#reviewRows .review-card").forEach((card) => card.classList.remove("selected-card"));
-          button.closest(".review-card").classList.add("selected-card");
+          document.querySelectorAll("#reviewRows .review-card").forEach((card) => {
+            card.classList.remove("selected-card");
+            card.setAttribute("aria-current", "false");
+          });
+          const selectedCard = button.closest(".review-card");
+          selectedCard.classList.add("selected-card");
+          selectedCard.setAttribute("aria-current", "true");
         });
       });
       document.querySelectorAll(".open-review-card-photo").forEach((button) => {
