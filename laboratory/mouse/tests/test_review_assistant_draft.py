@@ -23,6 +23,8 @@ def test_static_ui_exposes_review_assistant_draft_controls() -> None:
     assert "function fillReviewResolutionFromAssistantDraft" in html
     assert "apply-assistant-review-draft" in html
     assert "Apply Draft To Form" in html
+    assert "Assistant draft unavailable" in html
+    assert "Review source evidence directly; no canonical state was changed." in html
 
     start = html.index("function fillReviewResolutionFromAssistantDraft")
     end = html.index("async function loadAssistantReviewDraft", start)
@@ -32,6 +34,15 @@ def test_static_ui_exposes_review_assistant_draft_controls() -> None:
     assert "Assistant draft copied into the form" in fill_function
     assert "submitReviewResolution" not in fill_function
     assert "api(" not in fill_function
+
+    start = html.index("async function loadAssistantReviewDraft")
+    end = html.index("function attachReviewAuditHandler", start)
+    load_function = html[start:end]
+    assert "try {" in load_function
+    assert "catch (error)" in load_function
+    assert 'panel.dataset.stateKind = "error"' in load_function
+    assert "apiErrorMessage(error)" in load_function
+    assert "return null;" in load_function
 
 
 def test_review_assistant_draft_is_local_read_only_and_traceable(tmp_path: Path) -> None:
