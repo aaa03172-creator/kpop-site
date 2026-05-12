@@ -41,7 +41,7 @@ runtime code, those sources win.
 | --- | --- | --- | --- |
 | Export action feedback | Implemented and guarded, with row-level preview chips, direct evidence links for blockers without review items, and row-level anchors for preview evidence links. | #113, #115, #131 plus export preview row-state chip, direct evidence-link, and row-anchor implementations. | Add anchors for future tables when their backend payloads expose durable IDs. |
 | Upload / extraction progress | Implemented for upload/extraction operation progress and visible photo-stage progress from source stored through export ready/blocked. | #118 plus photo-stage progress UI implementation. | Add later quality/OCR confidence sub-stages if the parse pipeline exposes stable quality signals. |
-| Review status cues | Implemented for Review Queue cards. | #125. | Improve resolved/after-action feedback and keyboard next/previous cues for repeated review work. |
+| Review status cues | Implemented for Review Queue cards and after-action follow-through when a review is resolved. | #125 plus resolved review follow-through implementation. | Keep expanding repeated-review ergonomics when new review actions are introduced. |
 | Export blocker navigation | Implemented for blockers with `review_id`, and for blocker warnings that only expose source photo, note-line, or artifact evidence. | #131 plus direct evidence-link UI implementation. | Extend link targeting if future blocker payloads add stable row-level anchors inside note/evidence tables. |
 | Brand and color direction | Semantic token foundation implemented for chips, status pills, selected rows/cards, disabled controls, ready/blocked states, progress, and focus rings. | #111 plus `static/index.html` and `index.html` token aliases. | Extend the same token vocabulary to future row-state chips and evidence badges as those slices land. |
 | Empty/loading/error state | Implemented for read-model panels, high-traffic table empty states, and lower-priority settings/reference/audit tables. | #111, #137, #140 plus audit/detail table polish. | Extend the same state-message pattern to any newly added tables when those screens are introduced. |
@@ -50,19 +50,19 @@ runtime code, those sources win.
 
 ## Recommended Next Slices
 
-1. Resolved review follow-through.
-   - Scope: after-action feedback for repeated review work after quick confirm,
-     resolve with note, and correction preparation.
-   - Boundary: review-item UI behavior only.
-   - Verification: DOM checks for next-item selection, source evidence context,
-     and unchanged review/audit contracts.
-
-2. Evidence anchor expansion.
+1. Evidence anchor expansion.
    - Scope: add the same anchor contract to future audit/detail rows when those
      payloads expose durable IDs.
    - Boundary: export or view navigation only.
    - Verification: DOM checks that anchors highlight rows without changing
      canonical state.
+
+2. Review completion summaries.
+   - Scope: aggregate session-level review completion summaries by source photo,
+     role, or blocker type after multiple review actions.
+   - Boundary: review-item UI summary behavior only.
+   - Verification: DOM checks that summaries use accepted review action logs
+     and do not imply canonical writes before apply.
 
 ## Current Foundation Slice
 
@@ -76,6 +76,7 @@ runtime code, those sources win.
 | Export blocker evidence links | Adds source photo, parsed note, and artifact preview actions for Export Center blockers that do not have a Focus Review `review_id`, while keeping final export gating unchanged. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and Playwright DOM checks for evidence-link navigation and artifact preview loading. |
 | Audit/detail table polish | Extends structured empty states to lower-priority settings, reference, correction, audit, action log, genotype, parsed evidence, snapshot, and event tables; adds badge-backed audit trace evidence cells. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for structured empty states plus audit trace badge contracts. |
 | Row-level evidence anchors | Adds stable DOM anchors for parsed note evidence, Evidence Ledger cards, and export preview rows; export preview trace links can highlight note or ledger evidence without mutating data. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and Playwright DOM checks for hash navigation, view switching, and anchor targets. |
+| Resolved review follow-through | Adds a live after-action status after review resolution that names the resolved item, next review item, and source-evidence context while keeping the Review Queue filter state intact. | `git diff --check origin/main..HEAD`, `npm test`, `npm run test:local`, and DOM checks for success status, next-item context, and backend guard failure behavior. |
 
 ## Verification Commands To Prefer
 

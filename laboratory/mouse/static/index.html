@@ -740,6 +740,13 @@
       border-color: var(--cue-must-line);
       background: var(--cue-must-bg);
     }
+    .state-message[data-state-kind="success"] {
+      border-color: var(--ready-line);
+      background: var(--ready-bg);
+    }
+    .review-follow-through:empty {
+      display: none;
+    }
     .table-empty-row td {
       background: #fff;
       padding: 10px 6px;
@@ -3299,6 +3306,7 @@
             </div>
           </div>
           <div class="review-queue-summary" id="reviewQueueSummary"></div>
+          <div class="review-follow-through" id="reviewFollowThrough" role="status" aria-live="polite"></div>
           <div class="review-card-list" id="reviewRows" aria-label="Review items"></div>
         </div>
         <aside class="review-detail-panel" id="reviewDetailPanel" aria-label="Selected review detail">
@@ -4250,6 +4258,7 @@
     let reviewSeverityFilter = "all";
     let reviewEvidenceFilter = "all";
     let reviewRoleFilter = "all";
+    let reviewFollowThroughMessage = null;
 
     const viewLabels = {
       photo: {
@@ -5218,6 +5227,43 @@
       return (item?.review_check_targets || []).filter(Boolean).join(" / ");
     }
 
+    function reviewSourceContextText(item) {
+      return [
+        item?.original_filename || item?.source_name || item?.photo_id || item?.parse_id,
+        item?.note_item_id,
+        item?.review_note_raw_line || item?.evidence_preview
+      ].filter(Boolean).join(" / ") || "source evidence pending";
+    }
+
+    function setReviewFollowThroughMessage(resolvedItem, nextItem) {
+      const resolvedLabel = resolvedItem?.issue || resolvedItem?.review_id || "Review item";
+      if (nextItem) {
+        reviewFollowThroughMessage = {
+          title: `Review resolved: ${resolvedLabel}`,
+          detail: `Next: ${nextItem.issue || nextItem.review_id}. Source: ${reviewSourceContextText(nextItem)}.`
+        };
+        return;
+      }
+      reviewFollowThroughMessage = {
+        title: `Review resolved: ${resolvedLabel}`,
+        detail: "No adjacent review item remains in the current filter. Review filters and source evidence stay available."
+      };
+    }
+
+    function renderReviewFollowThroughStatus(visibleReviews) {
+      const panel = document.getElementById("reviewFollowThrough");
+      if (!panel) return;
+      if (!reviewFollowThroughMessage) {
+        panel.innerHTML = "";
+        return;
+      }
+      const selected = visibleReviews.find((item) => item.review_id === selectedReviewId);
+      const detail = selected
+        ? `${reviewFollowThroughMessage.detail} Current detail remains anchored to ${reviewSourceContextText(selected)}.`
+        : reviewFollowThroughMessage.detail;
+      panel.innerHTML = stateMessageHtml("success", reviewFollowThroughMessage.title, detail);
+    }
+
     function reviewPlausibilityFindings(item) {
       return (item?.review_plausibility_findings || [])
         .filter((finding) => finding && finding.field && finding.message)
@@ -5347,6 +5393,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
+        setReviewFollowThroughMessage(item, nextReview);
         selectedReviewId = nextReview?.review_id || "";
         await refresh();
       } catch (error) {
@@ -7091,6 +7138,7 @@
       if (!selectedReviewId || !visibleReviews.some((item) => item.review_id === selectedReviewId)) {
         selectedReviewId = visibleReviews[0]?.review_id || "";
       }
+      renderReviewFollowThroughStatus(visibleReviews);
       const selectedReview = visibleReviews.find((item) => item.review_id === selectedReviewId);
       document.getElementById("reviewRows").innerHTML = visibleReviews.map((item) => {
         const visual = reviewVisual(item);
