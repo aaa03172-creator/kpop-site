@@ -3972,6 +3972,29 @@ def assistant_review_draft_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
         evidence_summary = review.get("suggested_value") or review.get("current_value") or review.get("review_reason") or ""
     suggested_value = str(review.get("suggested_value") or "").strip()
     current_value = str(review.get("current_value") or "").strip()
+    issue = str(review.get("issue") or "").strip()
+    first_note_item_id = str(note_items[0].get("note_item_id") or "") if note_items else ""
+    review_type = "general_review"
+    form_fill_policy = "draft_value_and_note"
+    operator_note = "Use this as a local assistant draft. Do not resolve or write canonical state without operator approval."
+    correction_field_name = "reviewed_value"
+    extra_resolution_fields: dict[str, Any] = {}
+    if issue == "Ear label needs review":
+        review_type = "ear_label_review"
+        form_fill_policy = "bounded_choice_only"
+        operator_note = "Use this bounded ear-label draft only after comparing the source note and photo evidence."
+        correction_field_name = "ear_label_code"
+        extra_resolution_fields["ear_label_code"] = suggested_value
+        extra_resolution_fields["note_item_id"] = first_note_item_id
+    elif issue == "Unlabeled numeric note needs review":
+        review_type = "unlabeled_numeric_note_review"
+        form_fill_policy = "operator_choose_note_label"
+        operator_note = "Assistant can summarize the numeric note, but the operator must choose whether it is a count, mouse ID, reviewed note, or ignored line."
+        correction_field_name = "parsed_label"
+        extra_resolution_fields["note_item_id"] = first_note_item_id
+        extra_resolution_fields["note_label_decision"] = ""
+        extra_resolution_fields["note_label_mouse_id"] = ""
+        extra_resolution_fields["note_label_count"] = None
     resolution_note_parts = [
         "Assistant draft only; operator must compare against source evidence before resolving.",
         str(review.get("review_reason") or "").strip(),
@@ -4002,18 +4025,21 @@ def assistant_review_draft_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
             "photo_evidence_count": len(photo_evidence_items),
         },
         "draft": {
+            "review_type": review_type,
+            "form_fill_policy": form_fill_policy,
             "evidence_summary": evidence_summary,
-            "operator_note": "Use this as a local assistant draft. Do not resolve or write canonical state without operator approval.",
+            "operator_note": operator_note,
             "resolution_payload": {
                 "resolution_note": resolution_note,
                 "resolved_value": suggested_value or current_value,
                 "legacy_decision": "resolve",
                 "correction_entity_type": "review_item",
                 "correction_entity_id": review.get("review_id") or "",
-                "correction_field_name": "reviewed_value",
+                "correction_field_name": correction_field_name,
                 "correction_before_value": current_value,
                 "correction_after_value": suggested_value or current_value,
                 "correction_source_record_id": None,
+                **extra_resolution_fields,
             },
         },
     }

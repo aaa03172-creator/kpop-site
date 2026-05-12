@@ -5908,6 +5908,8 @@
         <strong>Assistant draft</strong>
         <span>${escapeHtml(draft.operator_note || "Review before applying.")}</span>
         <span>Policy: ${escapeHtml(result?.external_payload_policy || "local_only_until_approved")}</span>
+        <span>Review type: ${escapeHtml(draft.review_type || "general_review")}</span>
+        <span>Form policy: ${escapeHtml(draft.form_fill_policy || "draft_value_and_note")}</span>
         <span>Evidence: ${escapeHtml(draft.evidence_summary || "No evidence summary available.")}</span>
         <span>Draft value: ${escapeHtml(resolution.resolved_value || "--")}</span>
         <span>Draft note: ${escapeHtml(resolution.resolution_note || "--")}</span>
