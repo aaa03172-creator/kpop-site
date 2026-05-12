@@ -5940,9 +5940,21 @@
         panel.dataset.stateKind = "loading";
         panel.innerHTML = `<strong>Assistant draft</strong><span>Loading local evidence draft...</span>`;
       }
-      const result = await api(`/api/review-items/${encodeURIComponent(reviewId)}/assistant-draft`);
-      renderAssistantReviewDraft(result);
-      return result;
+      try {
+        const result = await api(`/api/review-items/${encodeURIComponent(reviewId)}/assistant-draft`);
+        renderAssistantReviewDraft(result);
+        return result;
+      } catch (error) {
+        if (panel) {
+          panel.dataset.stateKind = "error";
+          panel.innerHTML = `
+            <strong>Assistant draft unavailable</strong>
+            <span>${escapeHtml(apiErrorMessage(error))}</span>
+            <span>Review source evidence directly; no canonical state was changed.</span>
+          `;
+        }
+        return null;
+      }
     }
 
     function attachReviewAuditHandler() {
