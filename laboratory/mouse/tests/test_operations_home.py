@@ -24,6 +24,7 @@ def test_static_ui_exposes_operations_home_surface() -> None:
     assert "function operationsActionChannelClass" in html
     assert "action_channel_label" in html
     assert "external_payload_policy" in html
+    assert "data-action-channel" in html
 
 
 def test_static_operations_home_target_actions_refresh_selected_views() -> None:
@@ -34,6 +35,7 @@ def test_static_operations_home_target_actions_refresh_selected_views() -> None:
 
     assert 'targetType === "review"' in handler
     assert 'selectedReviewId = targetId;\n            setActiveView("review");\n            await refresh();' in handler
+    assert 'if (button.dataset.actionChannel === "assistant") await loadAssistantReviewDraft(targetId);' in handler
     assert 'setTranscriptionPhoto(targetId);\n            setActiveView("photo");\n            await refresh();' in handler
     assert 'selectedAuditMouseId = targetId;\n            setActiveView("mouse-detail");\n            await refresh();' in handler
 

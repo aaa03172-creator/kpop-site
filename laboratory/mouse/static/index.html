@@ -4706,9 +4706,10 @@
     function operationsTargetButton(task) {
       const targetType = task?.target_type || "";
       const targetId = task?.target_id || "";
+      const actionChannel = task?.action_channel || "human";
       if (!targetType || !targetId) return "";
       const label = targetType === "review"
-        ? "Open review"
+        ? actionChannel === "assistant" ? "Open assistant draft" : "Open review"
         : targetType === "photo"
           ? "Open photo"
           : targetType === "canonical_candidate"
@@ -4718,7 +4719,7 @@
               : targetType === "mouse"
                 ? "Open mouse"
                 : "Open target";
-      return `<button class="operations-target-action" type="button" data-target-type="${escapeHtml(targetType)}" data-target-id="${escapeHtml(targetId)}">${escapeHtml(label)}</button>`;
+      return `<button class="operations-target-action" type="button" data-target-type="${escapeHtml(targetType)}" data-target-id="${escapeHtml(targetId)}" data-action-channel="${escapeHtml(actionChannel)}">${escapeHtml(label)}</button>`;
     }
 
     function renderOperationsHomeReadModel(model) {
@@ -4783,6 +4784,7 @@
             selectedReviewId = targetId;
             setActiveView("review");
             await refresh();
+            if (button.dataset.actionChannel === "assistant") await loadAssistantReviewDraft(targetId);
           } else if (targetType === "photo") {
             if (targetId) setTranscriptionPhoto(targetId);
             setActiveView("photo");
@@ -5932,6 +5934,17 @@
       }
     }
 
+    async function loadAssistantReviewDraft(reviewId) {
+      const panel = document.getElementById("assistantReviewDraftPanel");
+      if (panel) {
+        panel.dataset.stateKind = "loading";
+        panel.innerHTML = `<strong>Assistant draft</strong><span>Loading local evidence draft...</span>`;
+      }
+      const result = await api(`/api/review-items/${encodeURIComponent(reviewId)}/assistant-draft`);
+      renderAssistantReviewDraft(result);
+      return result;
+    }
+
     function attachReviewAuditHandler() {
       document.querySelectorAll(".audit-review-item").forEach((button) => {
         button.addEventListener("click", async () => {
@@ -5945,13 +5958,7 @@
       });
       document.querySelectorAll(".assistant-review-draft").forEach((button) => {
         button.addEventListener("click", async () => {
-          const panel = document.getElementById("assistantReviewDraftPanel");
-          if (panel) {
-            panel.dataset.stateKind = "loading";
-            panel.innerHTML = `<strong>Assistant draft</strong><span>Loading local evidence draft...</span>`;
-          }
-          const result = await api(`/api/review-items/${encodeURIComponent(button.dataset.reviewId)}/assistant-draft`);
-          renderAssistantReviewDraft(result);
+          await loadAssistantReviewDraft(button.dataset.reviewId);
         });
       });
     }

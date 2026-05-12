@@ -18,10 +18,20 @@ def test_static_ui_exposes_review_assistant_draft_controls() -> None:
     assert "/assistant-draft" in html
     assert "assistant-review-draft" in html
     assert "renderAssistantReviewDraft" in html
+    assert "function loadAssistantReviewDraft" in html
     assert "Load Assistant Draft" in html
     assert "function fillReviewResolutionFromAssistantDraft" in html
     assert "apply-assistant-review-draft" in html
     assert "Apply Draft To Form" in html
+
+    start = html.index("function fillReviewResolutionFromAssistantDraft")
+    end = html.index("async function loadAssistantReviewDraft", start)
+    fill_function = html[start:end]
+    assert ".review-resolved-value" in fill_function
+    assert ".review-resolution-note" in fill_function
+    assert "Assistant draft copied into the form" in fill_function
+    assert "submitReviewResolution" not in fill_function
+    assert "api(" not in fill_function
 
 
 def test_review_assistant_draft_is_local_read_only_and_traceable(tmp_path: Path) -> None:
