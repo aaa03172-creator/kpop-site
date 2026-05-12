@@ -2657,6 +2657,9 @@
         <button class="nav-button active" type="button" data-view-target="photo">
           <span class="nav-icon">PH</span><span>Photo Review</span><span class="nav-count" id="navPhotoCount">0</span>
         </button>
+        <button class="nav-button" type="button" data-view-target="operations">
+          <span class="nav-icon">OP</span><span>Operations</span><span class="nav-count" id="navOperationsCount">0</span>
+        </button>
         <button class="nav-button" type="button" data-view-target="review">
           <span class="nav-icon">RV</span><span>Review Queue</span><span class="nav-count" id="navReviewCount">0</span>
         </button>
@@ -2739,6 +2742,21 @@
               <div><strong>Export view</strong><span>Workbook files come after review.</span></div>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
+    <section class="full visual-shell" data-view="operations" aria-label="Operations home">
+      <div class="visual-header">
+        <div>
+          <h2>Operations Home</h2>
+          <p>Today view for review blockers, photo worklist items, canonical apply, genotyping, breeding, and export readiness.</p>
+        </div>
+        <span class="chip">export or view</span>
+      </div>
+      <div class="operations-home-read-model" id="operationsHomeReadModel" aria-live="polite">
+        <div class="state-message" data-state-kind="loading">
+          <strong>Loading operations</strong>
+          <span>Tasks stay as read-only summaries until a reviewed action is selected.</span>
         </div>
       </div>
     </section>
@@ -4326,6 +4344,10 @@
         title: "Export Center",
         subtitle: "Preview output files and keep final exports blocked while Focus Review items remain."
       },
+      operations: {
+        title: "Operations Home",
+        subtitle: "One read-only view of review, photo, candidate, genotype, breeding, and export next actions."
+      },
       records: {
         title: "Candidate Records",
         subtitle: "Inspect current source-backed records, cages, matings, litters, genotyping, and events."
@@ -4352,6 +4374,7 @@
       const heading = section.querySelector("h2")?.textContent.trim() || "";
       if (section.dataset.view) return section.dataset.view;
       if (heading === "Colony Dashboard") return "dashboard";
+      if (heading === "Operations Home") return "operations";
       if (heading === "Mouse Detail") return "mouse-detail";
       if (heading === "Strain Detail") return "strain-detail";
       if (["Upload Source Photo", "Fixture Parse Results", "Manual Photo Transcription", "Photo Inbox"].includes(heading)) return "photo";
@@ -4460,6 +4483,25 @@
           cards: [],
           empty_state: {
             message: "Focus Review unavailable. Use the full review queue below while the read model reloads.",
+            fabricated_records: false
+          }
+        };
+      }
+    }
+
+    async function loadOperationsHomeReadModel() {
+      try {
+        return await api("/api/ui/operations-home");
+      } catch (error) {
+        return {
+          source_layer: "export or view",
+          load_error: true,
+          error_message: apiErrorMessage(error),
+          page_question: "What needs doing next?",
+          summary: { total_tasks: 0, must_review: 0, quick_check: 0, export_blockers: 0, families: {} },
+          task_groups: [],
+          empty_state: {
+            message: "Operations Home unavailable. Use individual review, photo, and export views while the read model reloads.",
             fabricated_records: false
           }
         };
@@ -4645,6 +4687,119 @@
           </div>
         `;
       }).join("")}`;
+    }
+
+    function operationsRiskTone(task) {
+      const risk = String(task?.risk_class || "").toLowerCase();
+      if (risk === "blocker") return "warn";
+      if (risk === "operator_confirmed") return "source";
+      return "trace";
+    }
+
+    function operationsActionChannelClass(task) {
+      const channel = String(task?.action_channel || "human").toLowerCase();
+      if (channel === "api_mcp") return "ready";
+      if (channel === "assistant") return "trace";
+      return "blocked";
+    }
+
+    function operationsTargetButton(task) {
+      const targetType = task?.target_type || "";
+      const targetId = task?.target_id || "";
+      if (!targetType || !targetId) return "";
+      const label = targetType === "review"
+        ? "Open review"
+        : targetType === "photo"
+          ? "Open photo"
+          : targetType === "canonical_candidate"
+            ? "Preview candidate"
+            : targetType === "export"
+              ? "Open export"
+              : targetType === "mouse"
+                ? "Open mouse"
+                : "Open target";
+      return `<button class="operations-target-action" type="button" data-target-type="${escapeHtml(targetType)}" data-target-id="${escapeHtml(targetId)}">${escapeHtml(label)}</button>`;
+    }
+
+    function renderOperationsHomeReadModel(model) {
+      const panel = document.getElementById("operationsHomeReadModel");
+      if (!panel) return;
+      const groups = Array.isArray(model?.task_groups) ? model.task_groups : [];
+      const summary = model?.summary || {};
+      const actionChannels = summary.action_channels || {};
+      const emptyState = model?.empty_state || {};
+      document.getElementById("navOperationsCount").textContent = String(summary.total_tasks || 0);
+      const summaryHtml = `
+        <div class="section-kicker">
+          <div>
+            <h3>Operations Home</h3>
+            <p>${escapeHtml(model?.page_question || "What needs doing next?")}</p>
+          </div>
+          <span class="chip">${escapeHtml(model?.source_layer || "export or view")}</span>
+        </div>
+        <div class="review-queue-summary">
+          <span>Total ${escapeHtml(summary.total_tasks || 0)}</span>
+          <span>Must review ${escapeHtml(summary.must_review || 0)}</span>
+          <span>Quick check ${escapeHtml(summary.quick_check || 0)}</span>
+          <span>Export blockers ${escapeHtml(summary.export_blockers || 0)}</span>
+          <span>Human ${escapeHtml(actionChannels.human || 0)}</span>
+          <span>Assistant ${escapeHtml(actionChannels.assistant || 0)}</span>
+          <span>API/MCP ${escapeHtml(actionChannels.api_mcp || 0)}</span>
+        </div>
+      `;
+      if (!groups.length) {
+        panel.innerHTML = summaryHtml + stateMessageHtml(
+          model?.load_error ? "warning" : "empty",
+          emptyState.message || "No operations tasks are currently open.",
+          model?.load_error ? model.error_message || "Read model unavailable." : "Upload, review, or accept source-backed records to create operational tasks."
+        );
+        return;
+      }
+      panel.innerHTML = summaryHtml + groups.map((group) => `
+        <article class="viz-card">
+          <h3>${escapeHtml(group.label || group.family || "Task group")} <span class="chip">${escapeHtml(group.count || 0)}</span></h3>
+          <div class="operations-task-list">
+            ${(group.tasks || []).map((task) => `
+              <div class="export-blocker-row operations-task ${escapeHtml(operationsRiskTone(task))}">
+                <strong>${escapeHtml(task.label || task.task_id || "Operation task")}</strong>
+                <span>${escapeHtml([task.status, task.risk_class, task.target_label].filter(Boolean).join(" / ") || "--")}</span>
+                <span>${escapeHtml(task.blocker_reason || "Review source evidence before acting.")}</span>
+                <span>${escapeHtml(compactDetails(task.evidence_refs || {}))}</span>
+                <span class="row-state-chip ${escapeHtml(operationsActionChannelClass(task))}">${escapeHtml(task.action_channel_label || task.action_channel || "Human review")}</span>
+                <span>${escapeHtml(task.action_channel_reason || "")}</span>
+                <span>Payload policy: ${escapeHtml(task.external_payload_policy || "local_only_until_approved")}</span>
+                ${operationsTargetButton(task)}
+              </div>
+            `).join("")}
+          </div>
+        </article>
+      `).join("");
+      document.querySelectorAll(".operations-target-action").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const targetType = button.dataset.targetType;
+          const targetId = button.dataset.targetId;
+          if (targetType === "review") {
+            reviewStatusFilter = "all";
+            selectedReviewId = targetId;
+            setActiveView("review");
+            await refresh();
+          } else if (targetType === "photo") {
+            if (targetId) setTranscriptionPhoto(targetId);
+            setActiveView("photo");
+            await refresh();
+          } else if (targetType === "canonical_candidate") {
+            const result = await api(`/api/canonical-candidates/${encodeURIComponent(targetId)}/apply-preview`);
+            renderCanonicalApplyPreview(result);
+            setActiveView("comparison");
+          } else if (targetType === "export") {
+            setActiveView("exports");
+          } else if (targetType === "mouse") {
+            selectedAuditMouseId = targetId;
+            setActiveView("mouse-detail");
+            await refresh();
+          }
+        });
+      });
     }
 
     function renderColonyStateReadModel(model) {
@@ -5729,9 +5884,32 @@
         ${reviewEvidencePanel(item)}
         <div class="detail-stack">
           <button class="audit-review-item" type="button" data-review-id="${escapeHtml(item.review_id)}">Load Audit Trace</button>
+          <button class="assistant-review-draft" type="button" data-review-id="${escapeHtml(item.review_id)}">Load Assistant Draft</button>
           <p class="muted" id="reviewAuditSummary">Audit trace includes source photo, card snapshot, note lines, corrections, and action log entries.</p>
+          <div class="state-message" data-state-kind="empty" id="assistantReviewDraftPanel">
+            <strong>Assistant draft</strong>
+            <span>Local-only draft appears here after loading. It does not resolve the review or write canonical state.</span>
+          </div>
         </div>
         <div class="detail-stack">${reviewResolutionControls(item)}</div>
+      `;
+    }
+
+    function renderAssistantReviewDraft(result) {
+      const panel = document.getElementById("assistantReviewDraftPanel");
+      if (!panel) return;
+      const draft = result?.draft || {};
+      const resolution = draft.resolution_payload || {};
+      const refs = result?.evidence_refs || {};
+      panel.dataset.stateKind = "ready";
+      panel.innerHTML = `
+        <strong>Assistant draft</strong>
+        <span>${escapeHtml(draft.operator_note || "Review before applying.")}</span>
+        <span>Policy: ${escapeHtml(result?.external_payload_policy || "local_only_until_approved")}</span>
+        <span>Evidence: ${escapeHtml(draft.evidence_summary || "No evidence summary available.")}</span>
+        <span>Draft value: ${escapeHtml(resolution.resolved_value || "--")}</span>
+        <span>Draft note: ${escapeHtml(resolution.resolution_note || "--")}</span>
+        <span>Trace: ${escapeHtml([refs.source_photo_id, refs.parse_id, (refs.note_item_ids || []).join(", ")].filter(Boolean).join(" / ") || "--")}</span>
       `;
     }
 
@@ -5744,6 +5922,17 @@
             `${result.summary.correction_count} correction(s), ${result.summary.action_count} action(s), ` +
             `${result.summary.has_photo ? "photo linked" : "photo pending"}, ` +
             `${result.summary.has_card_snapshot ? "snapshot linked" : "snapshot pending"}.`;
+        });
+      });
+      document.querySelectorAll(".assistant-review-draft").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const panel = document.getElementById("assistantReviewDraftPanel");
+          if (panel) {
+            panel.dataset.stateKind = "loading";
+            panel.innerHTML = `<strong>Assistant draft</strong><span>Loading local evidence draft...</span>`;
+          }
+          const result = await api(`/api/review-items/${encodeURIComponent(button.dataset.reviewId)}/assistant-draft`);
+          renderAssistantReviewDraft(result);
         });
       });
     }
@@ -5867,6 +6056,11 @@
 
     function firstMouse(mice) {
       return mice[0] || null;
+    }
+
+    function selectedMouse(mice) {
+      if (!Array.isArray(mice) || !mice.length) return null;
+      return mice.find((mouse) => mouse.mouse_id === selectedAuditMouseId) || firstMouse(mice);
     }
 
     function sourceCoverageScore(mice) {
@@ -6729,7 +6923,7 @@
         ]
       ].map((items) => row(items)).join("");
 
-      const mouse = firstMouse(mice);
+      const mouse = selectedMouse(mice);
       if (!mouse) {
         document.getElementById("detailMouseTitle").textContent = "No mouse detail yet";
         document.getElementById("detailMouseGrid").innerHTML = `
@@ -7074,7 +7268,7 @@
     }
 
     async function refresh() {
-      const [health, assignedStrains, strains, sourceRecords, corrections, actionLog, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, colonyState, colonySchedule, evidenceLedger, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
+      const [health, assignedStrains, strains, sourceRecords, corrections, actionLog, canonicalCandidates, distributionImports, legacyWorkbookImports, evidenceReconciliation, evidenceComparison, photoWorkbench, uploadBatches, photos, reviews, focusReview, operationsHome, colonyState, colonySchedule, evidenceLedger, mice, noteItems, cardSnapshots, mouseEvents, cages, matings, litters, targets, genotypeStatuses, reviewVocabulary, experimentReadiness, genotypingDashboard, labelingRuleSets, preview, exportLog] = await Promise.all([
         api("/api/health"),
         api("/api/assigned-strains"),
         api("/api/strains"),
@@ -7091,6 +7285,7 @@
         api("/api/photos"),
         api("/api/review-items"),
         loadFocusReviewReadModel(),
+        loadOperationsHomeReadModel(),
         loadColonyStateReadModel(),
         loadColonyScheduleReadModel(),
         loadEvidenceLedgerReadModel(),
@@ -7113,10 +7308,11 @@
 
       renderShellStatus({ health, photoWorkbench, photos, reviews, mice, evidenceComparison, preview });
       renderFocusReviewReadModel(focusReview);
+      renderOperationsHomeReadModel(operationsHome);
       renderColonyStateReadModel(colonyState);
       renderColonyScheduleReadModel(colonySchedule);
       renderEvidenceLedgerReadModel(evidenceLedger);
-      const selectedTimelineMouse = firstMouse(mice);
+      const selectedTimelineMouse = selectedMouse(mice);
       renderMousePedigreeReadModel(await loadMousePedigreeReadModel(selectedTimelineMouse?.mouse_id || ""));
       renderMouseTimelineReadModel(await loadMouseTimelineReadModel(selectedTimelineMouse?.mouse_id || ""));
       renderActionLogViewer(actionLog);
