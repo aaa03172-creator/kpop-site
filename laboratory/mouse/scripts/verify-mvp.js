@@ -242,6 +242,16 @@ async function main() {
     "Workbook preview rows should expose text-backed row-state chips without changing export schemas."
   );
   assert(
+    staticHtml.includes("function anchorId(prefix, value)") &&
+      staticHtml.includes("data-evidence-anchor-link") &&
+      staticHtml.includes("function exportEvidenceAnchorLinks(item)") &&
+      staticHtml.includes("function openEvidenceAnchor(targetId, view)") &&
+      staticHtml.includes("anchor-highlight") &&
+      staticHtml.includes('id="${anchorId("note"') &&
+      staticHtml.includes('id="${anchorId("evidence"'),
+    "Evidence rows should expose stable row anchors and non-mutating deep-link helpers for note, ledger, and export preview surfaces."
+  );
+  assert(
     staticHtml.includes("function exportBlockerReviewButton(item)") &&
       staticHtml.includes("open-export-blocker-review") &&
       staticHtml.includes("function exportBlockerEvidenceActions(item)") &&
@@ -756,6 +766,59 @@ async function main() {
       (await staticPage.locator("#actionLogRows .table-empty-row").filter({ hasText: "No actions yet" }).count()) === 1,
     "Static lower-priority settings and audit tables should render structured empty states instead of bare placeholder cells."
   );
+  const evidenceAnchorContract = await staticPage.evaluate(() => {
+    document.getElementById("noteRows").innerHTML = noteEvidenceRow({
+      note_item_id: "note_anchor_static",
+      photo_id: "photo_anchor_static",
+      parse_id: "parse_anchor_static",
+      line_number: 1,
+      raw_line_text: "MT401 R'",
+      parsed_type: "mouse_note",
+      strike_status: "not_struck",
+      interpreted_status: "needs_review",
+      parsed_mouse_display_id: "MT401",
+      parsed_ear_label_code: "R_PRIME",
+      needs_review: true,
+      confidence: 0.72
+    });
+    document.getElementById("exportRows").innerHTML = exportPreviewRow([
+      "C-12", "C57BL/6J", "--", "1", "2026-05-01", "--", "--", "--", "note_anchor_static", "photo photo_static_evidence", "needs review"
+    ], {
+      source_note_item_ids: "note_anchor_static",
+      photo_evidence_id: "pe_static_ear",
+      source_photo_ids: "photo_static_evidence",
+      uncertainty: "needs review"
+    }, false, "separation");
+    const noteLink = document.querySelector("#exportRows [href='#note-note_anchor_static']");
+    const ledgerLink = document.querySelector("#exportRows [href='#evidence-pe_static_ear']");
+    noteLink?.click();
+    const noteRow = document.getElementById("note-note_anchor_static");
+    ledgerLink?.click();
+    const ledgerCard = document.getElementById("evidence-pe_static_ear");
+    return {
+      noteRowExists: Boolean(noteRow),
+      ledgerCardExists: Boolean(ledgerCard),
+      noteLinkText: noteLink?.textContent || "",
+      ledgerLinkText: ledgerLink?.textContent || "",
+      activeView: document.querySelector("#appContent")?.dataset.activeView || "",
+      hash: window.location.hash,
+      noteHighlighted: noteRow?.classList.contains("anchor-highlight") || false,
+      ledgerHighlighted: ledgerCard?.classList.contains("anchor-highlight") || false
+    };
+  });
+  assert(
+    evidenceAnchorContract.noteRowExists &&
+      evidenceAnchorContract.ledgerCardExists &&
+      evidenceAnchorContract.noteLinkText.includes("Note evidence") &&
+      evidenceAnchorContract.ledgerLinkText.includes("Ledger evidence") &&
+      evidenceAnchorContract.activeView === "photo" &&
+      evidenceAnchorContract.hash === "#evidence-pe_static_ear",
+    "Evidence anchor links should target parsed note and ledger rows without changing canonical data."
+  );
+  await staticPage.evaluate(() => {
+    history.replaceState(null, "", window.location.pathname);
+    document.querySelectorAll(".anchor-highlight").forEach((element) => element.classList.remove("anchor-highlight"));
+  });
   assert(
     (await staticPage.locator("#exportBlockerList .open-export-blocker-review").filter({ hasText: "Open review" }).count()) === 1 &&
       (await staticPage.locator("#exportBlockerRows .open-export-blocker-review").filter({ hasText: "Open review" }).count()) === 1,

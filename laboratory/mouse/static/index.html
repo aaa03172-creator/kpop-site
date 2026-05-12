@@ -572,6 +572,33 @@
     tr.selected-row td {
       background: var(--selected-bg);
     }
+    tr:target td,
+    tr.anchor-highlight td {
+      background: var(--selected-bg);
+      box-shadow: inset 3px 0 0 var(--selected-line);
+    }
+    .evidence-ledger-card:target,
+    .evidence-ledger-card.anchor-highlight {
+      border-color: var(--selected-line);
+      box-shadow: 0 0 0 3px var(--focus-ring);
+      scroll-margin-top: 18px;
+    }
+    .evidence-anchor-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 6px;
+    }
+    .evidence-anchor-links a {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--primary-dark);
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 900;
+      text-decoration: none;
+    }
     .mono {
       font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
       font-size: 12px;
@@ -3868,6 +3895,24 @@
       `;
     }
 
+    function anchorId(prefix, value) {
+      const normalized = String(value || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-|-$/g, "");
+      return `${prefix}-${normalized || "pending"}`;
+    }
+
+    function evidenceAnchorLink(label, targetId, view = "records") {
+      return `<a href="#${escapeHtml(targetId)}" data-evidence-anchor-link="true" data-open-view="${escapeHtml(view)}">${escapeHtml(label)}</a>`;
+    }
+
+    function exportEvidenceAnchorLinks(item) {
+      const noteId = firstEvidenceId(item, ["source_note_item_ids", "source_note_item_id", "note_item_id"]);
+      const photoEvidenceId = firstEvidenceId(item, ["photo_evidence_id", "source_photo_id", "source_photo_ids", "photo_id"]);
+      const links = [];
+      if (noteId) links.push(evidenceAnchorLink("Note evidence", anchorId("note", noteId), "records"));
+      if (photoEvidenceId) links.push(evidenceAnchorLink("Ledger evidence", anchorId("evidence", photoEvidenceId), "photo"));
+      return links.length ? `<div class="evidence-anchor-links" aria-label="Row evidence anchors">${links.join("")}</div>` : "";
+    }
+
     function exportPreviewRowStateChips(item, previewReady) {
       const uncertainty = String(item?.uncertainty || "").trim();
       const hasUncertainty = uncertainty && uncertainty !== "--" && !/^none$/i.test(uncertainty);
@@ -3891,10 +3936,11 @@
       `;
     }
 
-    function exportPreviewRow(cells, item, previewReady) {
+    function exportPreviewRow(cells, item, previewReady, rowKind = "export") {
+      const rowAnchor = firstEvidenceId(item, ["export_row_id", "row_id", "source_note_item_ids", "source_photo_ids", "mouse_id", "cage_number", "cage_no"]);
       return `
-        <tr>
-          <td class="row-state-cell">${exportPreviewRowStateChips(item, previewReady)}</td>
+        <tr id="${anchorId(`${rowKind}-row`, rowAnchor)}" data-evidence-anchor="${escapeHtml(rowAnchor || "")}">
+          <td class="row-state-cell">${exportPreviewRowStateChips(item, previewReady)}${exportEvidenceAnchorLinks(item)}</td>
           ${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
         </tr>
       `;
@@ -4266,6 +4312,24 @@
       });
       document.getElementById("viewTitle").textContent = viewLabels[activeView].title;
       document.getElementById("viewSubtitle").textContent = viewLabels[activeView].subtitle;
+    }
+
+    function openEvidenceAnchor(targetId, view) {
+      const inferredView = view || (targetId.startsWith("note-") ? "records" : targetId.startsWith("evidence-") ? "photo" : targetId.includes("-row-") ? "exports" : "");
+      if (inferredView) setActiveView(inferredView);
+      if (targetId.startsWith("note-")) {
+        const section = document.getElementById("records-evidence");
+        section?.querySelector("details")?.setAttribute("open", "");
+      }
+      window.setTimeout(() => {
+        document.querySelectorAll(".anchor-highlight").forEach((element) => element.classList.remove("anchor-highlight"));
+        const target = document.getElementById(targetId);
+        if (!target) return;
+        target.classList.add("anchor-highlight");
+        target.scrollIntoView({ block: "center" });
+        if (target.tabIndex < 0) target.tabIndex = -1;
+        target.focus?.({ preventScroll: true });
+      }, 0);
     }
 
     function searchResultRows(results) {
@@ -4928,7 +4992,7 @@
           (links.review_ids || []).length && "review-item"
         ];
         return `
-          <div class="evidence-ledger-card">
+          <div class="evidence-ledger-card" id="${anchorId("evidence", item.photo_evidence_id || sourcePhoto.photo_id || links.note_item_id || item.evidence_kind)}" data-evidence-anchor="${escapeHtml(item.photo_evidence_id || sourcePhoto.photo_id || links.note_item_id || "")}">
             <h3>${escapeHtml(item.evidence_kind || item.photo_evidence_id || "Evidence item")}</h3>
             <p>${escapeHtml(sourcePhoto.original_filename || sourcePhoto.photo_id || "source photo pending")} / ${escapeHtml(item.status || "draft")}</p>
             ${evidenceBadgeList(badgeItems)}
@@ -6294,11 +6358,12 @@
     function noteEvidenceRow(item) {
       const displayValue = item.display_value || item.raw_line_text || "--";
       const rawNote = item.raw_line_text || "--";
+      const rowAnchor = item.note_item_id || item.source_note_item_id || [item.parse_id, item.line_number].filter(Boolean).join("-");
       const noteValue = displayValue === rawNote
         ? escapeHtml(rawNote)
         : `<strong>${escapeHtml(displayValue)}</strong><br><span class="muted">raw: ${escapeHtml(rawNote)}</span>`;
       return `
-        <tr>
+        <tr id="${anchorId("note", rowAnchor)}" data-evidence-anchor="${escapeHtml(rowAnchor || "")}">
           <td>${noteSourceCell(item)}</td>
           <td>${escapeHtml(item.line_number ?? "--")}</td>
           <td>${noteValue}</td>
@@ -6665,7 +6730,7 @@
           item.source_note_item_ids || "--",
           [item.source_photo_ids && `photo ${item.source_photo_ids}`, item.card_snapshot_ids && `snapshot ${item.card_snapshot_ids}`, item.raw_note_lines && `raw ${item.raw_note_lines}`].filter(Boolean).join(" / ") || "--",
           item.uncertainty || "--"
-        ], item, preview.ready)
+        ], item, preview.ready, "separation")
       ).join("") || emptyTableRow("No separation preview rows yet", "Accepted source-backed separated cage rows will appear here before workbook export.", 12);
       document.getElementById("animalSheetRows").innerHTML = (preview.animal_sheet_rows || []).map((item) =>
         exportPreviewRow([
@@ -6681,7 +6746,7 @@
           item.source || "--",
           [item.source_photo_ids && `photo ${item.source_photo_ids}`, item.card_snapshot_ids && `snapshot ${item.card_snapshot_ids}`, item.raw_note_lines && `raw ${item.raw_note_lines}`].filter(Boolean).join(" / ") || "--",
           item.uncertainty || "--"
-        ], item, preview.ready)
+        ], item, preview.ready, "animal")
       ).join("") || emptyTableRow("No animal sheet preview rows yet", "Accepted source-backed animal rows will appear here before workbook export.", 13);
       document.getElementById("exportBlockerRows").innerHTML = readinessItems.map((item) => `
         <tr>
@@ -7292,6 +7357,7 @@
         ])
       ).join("") || emptyTableRow("No mouse events yet", "Accepted source-backed events will appear here after reviewed apply paths.", 5);
       renderExportReadiness(preview, exportLog);
+      if (window.location.hash) openEvidenceAnchor(window.location.hash.replace(/^#/, ""), "");
     }
 
     document.getElementById("uploadButton").addEventListener("click", async () => {
@@ -7512,6 +7578,15 @@
       const button = event.target.closest(".focus-uncertain-field");
       if (!button) return;
       focusUncertainField(button.dataset.field || "");
+    });
+    document.addEventListener("click", (event) => {
+      const link = event.target.closest("[data-evidence-anchor-link]");
+      if (!link) return;
+      const targetId = (link.getAttribute("href") || "").replace(/^#/, "");
+      if (!targetId) return;
+      event.preventDefault();
+      history.replaceState(null, "", `#${targetId}`);
+      openEvidenceAnchor(targetId, link.dataset.openView || "");
     });
     document.getElementById("photoFitButton").addEventListener("click", () => {
       photoPreviewFitMode = true;
