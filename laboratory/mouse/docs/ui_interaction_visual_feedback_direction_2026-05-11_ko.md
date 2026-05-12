@@ -270,6 +270,10 @@ Evidence Ledger passes when:
 - imported Excel rows are labeled as import/export views;
 - evidence type is scannable before reading the full detail;
 - source photos remain the strongest visual evidence for photo-derived values.
+- evidence badges use text labels such as `Source photo`, `OCR text`,
+  `Note line`, `Review item`, `Export manifest`, and `Validation report`;
+- badge labels are UI cues only and must not be written into canonical records
+  or exported workbook schemas.
 
 Mouse Detail and Colony State pass when:
 

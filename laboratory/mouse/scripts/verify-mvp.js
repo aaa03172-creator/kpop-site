@@ -197,6 +197,17 @@ async function main() {
     "Evidence Ledger UI should consume the read-only read model and separate observed, OCR, and interpreted evidence."
   );
   assert(
+    staticHtml.includes("function evidenceBadge(kind, label = \"\")") &&
+      staticHtml.includes(".evidence-badge.source-photo") &&
+      staticHtml.includes("Source photo") &&
+      staticHtml.includes("OCR text") &&
+      staticHtml.includes("Note line") &&
+      staticHtml.includes("Review item") &&
+      staticHtml.includes("Export manifest") &&
+      staticHtml.includes("Validation report"),
+    "Evidence type badges should be available for source photo, OCR, note line, review, and export artifact evidence."
+  );
+  assert(
     staticHtml.includes("const cropImageUrl = escapeHtml(crop.image_url || \"\")") &&
       staticHtml.includes('src="${cropImageUrl}&t=${Date.now()}"'),
     "ROI crop image URLs should be escaped before insertion into innerHTML attributes."
@@ -651,6 +662,13 @@ async function main() {
   assert(
     (await staticPage.locator("#evidenceLedgerReadModel").filter({ hasText: "Observed MT401 R0" }).filter({ hasText: "Parsed right_circle" }).count()) === 1,
     "Static Evidence Ledger should visibly separate direct observation, OCR, and interpreted parsed value."
+  );
+  assert(
+    (await staticPage.locator("#evidenceLedgerReadModel .evidence-badge", { hasText: "Source photo" }).count()) === 1 &&
+      (await staticPage.locator("#evidenceLedgerReadModel .evidence-badge", { hasText: "OCR text" }).count()) === 1 &&
+      (await staticPage.locator("#evidenceLedgerReadModel .evidence-badge", { hasText: "Note line" }).count()) === 1 &&
+      (await staticPage.locator("#evidenceLedgerReadModel .evidence-badge", { hasText: "Review item" }).count()) === 1,
+    "Static Evidence Ledger should show text-backed evidence type badges."
   );
   assert(
     (await staticPage.locator("#exportBlockerList .open-export-blocker-review").filter({ hasText: "Open review" }).count()) === 1 &&
@@ -1373,6 +1391,11 @@ async function main() {
   assert(
     (await page.locator("#exportLogRows tr").filter({ hasText: "XLSX generated from workbook preview" }).count()) >= 1,
     "XLSX exports were not recorded in the export log."
+  );
+  assert(
+    (await page.locator("#exportLogRows .evidence-badge", { hasText: "Export manifest" }).count()) >= 1 &&
+      (await page.locator("#exportLogRows .evidence-badge", { hasText: "Validation report" }).count()) >= 1,
+    "Export log should label manifest and validation report artifacts with evidence badges."
   );
   const blockedSource = await blockedDetailRows.first().locator("td").first().textContent();
   await blockedDetailRows.first().evaluate((row) => row.click());
