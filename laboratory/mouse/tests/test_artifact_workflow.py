@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 from app import db
 from app import main as app_main
@@ -597,6 +600,16 @@ def test_export_preview_reports_export_view_consistency_checks(tmp_path: Path) -
         preview = app_main.export_preview()
 
         assert preview["source_layer"] == "export or view"
+        assert preview["row_state_policy"] == {
+            "source_layer": "export or view",
+            "source_state_layer": "canonical structured state",
+            "states": ["ready", "blocked_by_review", "stale_after_correction"],
+            "editable": False,
+        }
+        assert preview["preview_rows"][0]["row_state"] == "ready"
+        assert preview["preview_rows"][0]["row_state_reason"] == "Canonical row is ready for Excel export."
+        assert preview["separation_rows"][0]["row_state"] == "ready"
+        assert preview["animal_sheet_rows"] == []
         assert preview["export_consistency"] == {
             "source_layer": "export or view",
             "source_state_layer": "canonical structured state",
@@ -607,6 +620,129 @@ def test_export_preview_reports_export_view_consistency_checks(tmp_path: Path) -
             "separation_rows_have_trace": True,
             "animal_sheet_rows_have_trace": "not_applicable",
             "excel_export_is_view": True,
+            "preview_rows_have_row_state": True,
+            "separation_rows_have_row_state": True,
+            "animal_sheet_rows_have_row_state": "not_applicable",
         }
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_separation_xlsx_renders_trace_sheet_with_row_state_and_source_refs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    monkeypatch.setattr(app_main, "ARTIFACT_ROOT", tmp_path / "mousedb_artifacts")
+    try:
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_xlsx_render",
+                    "xlsx-render-card.jpg",
+                    "data/photos/test/xlsx-render-card.jpg",
+                    "2026-05-09T00:00:00Z",
+                    "accepted",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_xlsx_render",
+                    "photo_xlsx_render",
+                    "manual_photo_transcription",
+                    "{}",
+                    "2026-05-09T00:00:01Z",
+                    "accepted",
+                    96,
+                    0,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, photo_id, parse_id, card_snapshot_id, card_type,
+                     line_number, raw_line_text, parsed_type, interpreted_status,
+                     parsed_mouse_display_id, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "note_xlsx_render",
+                    "photo_xlsx_render",
+                    "parse_xlsx_render",
+                    "card_xlsx_render",
+                    "Separated",
+                    1,
+                    "MT777 R'",
+                    "mouse_item",
+                    "active",
+                    "MT777",
+                    96,
+                    0,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO mouse_master
+                    (mouse_id, display_id, raw_strain_text, sex, dob_raw,
+                     source_note_item_id, current_card_snapshot_id, status,
+                     source_photo_id, last_verified_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "mouse_xlsx_render",
+                    "MT777",
+                    "ApoM Tg/Tg",
+                    "female",
+                    "2026-04-01",
+                    "note_xlsx_render",
+                    "card_xlsx_render",
+                    "active",
+                    "photo_xlsx_render",
+                    "2026-05-09T00:00:02Z",
+                    "2026-05-09T00:00:02Z",
+                    "2026-05-09T00:00:02Z",
+                ),
+            )
+
+        response = TestClient(app_main.app).get("/api/exports/separation.xlsx")
+
+        assert response.status_code == 200
+        assert response.content[:4] == b"PK\x03\x04"
+        workbook = load_workbook(io.BytesIO(response.content), data_only=True)
+        assert "Export_Trace" in workbook.sheetnames
+        trace = workbook["Export_Trace"]
+        headers = [trace.cell(1, column).value for column in range(1, 12)]
+        assert headers == [
+            "Row",
+            "Source note",
+            "Source record",
+            "Boundary",
+            "Export note",
+            "Source photo",
+            "Card snapshot",
+            "Raw note line",
+            "Uncertainty",
+            "Row state",
+            "Row state reason",
+        ]
+        assert trace.cell(2, 2).value == "note_xlsx_render"
+        assert trace.cell(2, 4).value == "export or view"
+        assert trace.cell(2, 6).value == "photo_xlsx_render"
+        assert trace.cell(2, 8).value == "MT777 R'"
+        assert trace.cell(2, 10).value == "ready"
+        assert trace.cell(2, 11).value == "Canonical row is ready for Excel export."
     finally:
         db.DB_PATH = old_db_path
