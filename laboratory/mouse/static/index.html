@@ -6024,6 +6024,11 @@
       return mice[0] || null;
     }
 
+    function selectedMouse(mice) {
+      if (!Array.isArray(mice) || !mice.length) return null;
+      return mice.find((mouse) => mouse.mouse_id === selectedAuditMouseId) || firstMouse(mice);
+    }
+
     function sourceCoverageScore(mice) {
       if (!mice.length) return 0;
       const withEvidence = mice.filter((mouse) => mouse.source_note_item_id || mouse.source_record_id || mouse.source_photo_id).length;
@@ -6884,7 +6889,7 @@
         ]
       ].map((items) => row(items)).join("");
 
-      const mouse = firstMouse(mice);
+      const mouse = selectedMouse(mice);
       if (!mouse) {
         document.getElementById("detailMouseTitle").textContent = "No mouse detail yet";
         document.getElementById("detailMouseGrid").innerHTML = `
@@ -7273,7 +7278,7 @@
       renderColonyStateReadModel(colonyState);
       renderColonyScheduleReadModel(colonySchedule);
       renderEvidenceLedgerReadModel(evidenceLedger);
-      const selectedTimelineMouse = firstMouse(mice);
+      const selectedTimelineMouse = selectedMouse(mice);
       renderMousePedigreeReadModel(await loadMousePedigreeReadModel(selectedTimelineMouse?.mouse_id || ""));
       renderMouseTimelineReadModel(await loadMouseTimelineReadModel(selectedTimelineMouse?.mouse_id || ""));
       renderActionLogViewer(actionLog);

@@ -38,6 +38,16 @@ def test_static_operations_home_target_actions_refresh_selected_views() -> None:
     assert 'selectedAuditMouseId = targetId;\n            setActiveView("mouse-detail");\n            await refresh();' in handler
 
 
+def test_static_mouse_detail_uses_selected_operations_target() -> None:
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+
+    assert "function selectedMouse(mice)" in html
+    assert "const mouse = selectedMouse(mice);" in html
+    assert "const selectedTimelineMouse = selectedMouse(mice);" in html
+    assert "const mouse = firstMouse(mice);" not in html
+    assert "const selectedTimelineMouse = firstMouse(mice);" not in html
+
+
 def test_operations_home_empty_state_is_read_only_view(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:
