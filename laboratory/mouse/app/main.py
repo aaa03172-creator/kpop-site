@@ -11263,11 +11263,17 @@ def build_xlsx(
             "Card snapshot",
             "Raw note line",
             "Uncertainty",
+            "Row state",
+            "Row state reason",
         ]
         sheets.append(
             {
                 "name": "Export_Trace",
-                "xml": xlsx_sheet_xml(trace_headers, trace_rows, [10, 28, 28, 24, 40, 26, 28, 42, 36]),
+                "xml": xlsx_sheet_xml(
+                    trace_headers,
+                    trace_rows,
+                    [10, 28, 28, 24, 40, 26, 28, 42, 36, 18, 42],
+                ),
                 "target": "worksheets/sheet2.xml",
             }
         )
@@ -11356,6 +11362,8 @@ def trace_rows_from_export_rows(rows: list[dict[str, Any]], source_key: str) -> 
                 row.get("card_snapshot_ids", "") or row.get("card_snapshot_id", ""),
                 row.get("raw_note_lines", "") or row.get("raw_note_line", ""),
                 row.get("uncertainty", ""),
+                row.get("row_state", ""),
+                row.get("row_state_reason", ""),
             ]
         )
     return trace_rows
@@ -13023,6 +13031,38 @@ def export_rows_have_trace(rows: list[dict[str, Any]], trace_fields: list[str]) 
     return all(any(str(row.get(field) or "").strip() for field in trace_fields) for row in rows)
 
 
+def export_rows_have_row_state(rows: list[dict[str, Any]]) -> bool | str:
+    if not rows:
+        return "not_applicable"
+    return all(str(row.get("row_state") or "").strip() for row in rows)
+
+
+def export_row_state_policy() -> dict[str, Any]:
+    return {
+        "source_layer": "export or view",
+        "source_state_layer": "canonical structured state",
+        "states": ["ready", "blocked_by_review", "stale_after_correction"],
+        "editable": False,
+    }
+
+
+def export_row_state(blocked_review_items: int, stale_state: dict[str, Any]) -> dict[str, str]:
+    if blocked_review_items:
+        return {
+            "row_state": "blocked_by_review",
+            "row_state_reason": "Focus Review blockers remain before Excel export.",
+        }
+    if stale_state.get("export_stale") and stale_state.get("latest_generated_export_at"):
+        return {
+            "row_state": "stale_after_correction",
+            "row_state_reason": "Accepted state changed after the latest export.",
+        }
+    return {
+        "row_state": "ready",
+        "row_state_reason": "Canonical row is ready for Excel export.",
+    }
+
+
 def export_consistency_checks(
     preview_rows: list[dict[str, Any]],
     separation_rows: list[dict[str, Any]],
@@ -13047,6 +13087,9 @@ def export_consistency_checks(
             ["source_note_item_ids", "source_photo_ids", "card_snapshot_ids", "source_record_id", "source"],
         ),
         "excel_export_is_view": True,
+        "preview_rows_have_row_state": export_rows_have_row_state(preview_rows),
+        "separation_rows_have_row_state": export_rows_have_row_state(separation_rows),
+        "animal_sheet_rows_have_row_state": export_rows_have_row_state(animal_sheet_rows),
     }
 
 
@@ -13125,6 +13168,7 @@ def export_preview() -> dict[str, Any]:
             """
         ).fetchall()
         stale_state = export_staleness(conn)
+        row_state = export_row_state(blocked_reviews, stale_state)
     rows = []
     separation_groups: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for mouse in mice:
@@ -13199,6 +13243,7 @@ def export_preview() -> dict[str, Any]:
                 "card_snapshot_id": card_snapshot_id,
                 "raw_note_line": raw_note_line,
                 "uncertainty": uncertainty,
+                **row_state,
                 "source_evidence": compact_export_values(
                     [
                         mouse["source_note_item_id"] and f"note {mouse['source_note_item_id']}",
@@ -13230,6 +13275,7 @@ def export_preview() -> dict[str, Any]:
                 "card_snapshot_ids": compact_export_values(group["card_snapshot_ids"]),
                 "raw_note_lines": compact_export_values(group["raw_note_lines"], limit=2),
                 "uncertainty": compact_export_values(group["uncertainties"], limit=2),
+                **row_state,
                 "export_note": "Grouped from source-backed mouse records; raw note/photo evidence is on this trace sheet.",
             }
         )
@@ -13272,6 +13318,7 @@ def export_preview() -> dict[str, Any]:
                     "card_snapshot_ids": parent_snapshot_id,
                     "raw_note_lines": note_source.get("raw_line_text") or "",
                     "uncertainty": export_uncertainty_label(parent),
+                    **row_state,
                     "export_note": "Parent row generated from accepted mating state; source note/photo evidence is on this trace sheet.",
                 }
             )
@@ -13295,6 +13342,7 @@ def export_preview() -> dict[str, Any]:
                     "card_snapshot_ids": "",
                     "raw_note_lines": "",
                     "uncertainty": "",
+                    **row_state,
                     "export_note": "Litter row generated from accepted litter state.",
                 }
             )
@@ -13302,6 +13350,7 @@ def export_preview() -> dict[str, Any]:
         "source_layer": "export or view",
         "export_type": "separation_preview",
         "expected_filename": "mouse_records_preview.csv",
+        "row_state_policy": export_row_state_policy(),
         **stale_state,
         "expected_separation_filename": export_filename(
             "separation",
