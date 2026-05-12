@@ -9,6 +9,20 @@ from app import db
 from app.main import app
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_static_ui_exposes_operations_home_surface() -> None:
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+
+    assert 'data-view-target="operations"' in html
+    assert 'data-view="operations"' in html
+    assert 'id="operationsHomeReadModel"' in html
+    assert 'api("/api/ui/operations-home")' in html
+    assert "function renderOperationsHomeReadModel" in html
+    assert "renderOperationsHomeReadModel(operationsHome)" in html
+
+
 def test_operations_home_empty_state_is_read_only_view(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:
