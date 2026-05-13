@@ -201,6 +201,16 @@ The private-photo-safe example harness can be checked without committing real ph
 npm run test:real-photo-pilot
 ```
 
+## Local Pilot Backup And Restore
+
+Use `docs/local_backup_restore_2026-05-13.md` before any real pilot run. The backup script copies the local SQLite database, uploaded photos, exports, and generated artifacts to a timestamped folder outside Git by default:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/backup-local-pilot.ps1 -Label before-first-pilot
+```
+
+Restore refuses to overwrite an existing target unless `-Force` is provided.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
