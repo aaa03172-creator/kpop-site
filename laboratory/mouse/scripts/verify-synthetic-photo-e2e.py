@@ -18,6 +18,30 @@ if str(ROOT) not in sys.path:
 from scripts.generate_synthetic_cage_card_fixtures import generate  # noqa: E402
 
 
+LAYER_BOUNDARIES = {
+    "raw_source": {
+        "boundary": "raw source / test fixture",
+        "canonical": False,
+        "artifact": "generated synthetic JPEG photo",
+    },
+    "parsed_evidence": {
+        "boundary": "parsed or intermediate result",
+        "canonical": False,
+        "artifact": "generated SQLite parse_result rows and raw payloads",
+    },
+    "review_item": {
+        "boundary": "review item",
+        "canonical": False,
+        "artifact": "generated SQLite review_queue rows",
+    },
+    "export_view": {
+        "boundary": "export or view",
+        "canonical": False,
+        "artifact": "no export files are written by this gate",
+    },
+}
+
+
 def remove_tree_with_retries(path: Path, attempts: int = 5) -> None:
     gc.collect()
     for attempt in range(attempts):
@@ -39,6 +63,31 @@ def load_photo_verifier() -> Any:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def apply_strict_gate(summary: dict[str, Any]) -> dict[str, Any]:
+    verification = summary["verification"]
+    verification.setdefault("skipped", 0)
+    strict_failures: list[str] = []
+    if int(verification.get("failed", 0)) > 0:
+        strict_failures.append("photo E2E cases failed")
+    if int(verification.get("skipped", 0)) > 0:
+        strict_failures.append("strict photo E2E gate must not skip cases")
+    missing_tags = (
+        verification.get("confidence_calibration", {})
+        .get("coverage", {})
+        .get("missing_tags", [])
+    )
+    if missing_tags:
+        strict_failures.append(f"missing synthetic coverage tags: {', '.join(missing_tags)}")
+    if summary.get("generated", {}).get("canonical") is not False:
+        strict_failures.append("synthetic fixtures must remain non-canonical")
+    if set(summary.get("layer_boundaries", {})) != set(LAYER_BOUNDARIES):
+        strict_failures.append("strict gate layer boundary metadata is incomplete")
+    verification["status"] = "failed" if strict_failures else "passed"
+    summary["strict_failures"] = strict_failures
+    summary["exit_code"] = 1 if strict_failures else int(summary["exit_code"])
+    return summary
 
 
 def verify(output_dir: Path) -> dict[str, Any]:
@@ -65,13 +114,16 @@ def verify(output_dir: Path) -> dict[str, Any]:
             fail_count=fail_count,
         )
         exit_code = 1 if fail_count else 0
-    return {
+    summary = {
+        "strict_photo_e2e_gate": True,
         "boundary": "review item / test fixture",
         "canonical": False,
+        "layer_boundaries": LAYER_BOUNDARIES,
         "generated": generated,
         "verification": verification,
         "exit_code": exit_code,
     }
+    return apply_strict_gate(summary)
 
 
 def main() -> int:
