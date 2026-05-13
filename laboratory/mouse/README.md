@@ -211,6 +211,10 @@ powershell -ExecutionPolicy Bypass -File scripts/backup-local-pilot.ps1 -Label b
 
 Restore refuses to overwrite an existing target unless `-Force` is provided.
 
+## Pilot Operator Checklist
+
+Use `docs/pilot_operator_checklist_2026-05-13.md` during controlled local pilot sessions. The checklist covers copied-photo setup, assigned strain confirmation, upload, review blockers, source-photo inspection, reviewed candidate apply, export readiness, stop conditions, and post-session backup.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
