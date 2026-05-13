@@ -189,6 +189,12 @@ It does not change runtime behavior, database schema, API contracts, `AGENTS.md`
 npm run test:cage-card-skill-gym
 ```
 
+## Real Photo Pilot Protocol
+
+Use `docs/real_photo_pilot_protocol_2026-05-13.md` before the first real cage-card photo pilot. The first pilot dataset should use 20-30 copied photos, label each copied photo as `separated`, `mating`, `unclear`, or `other`, and record only the expected fields needed to evaluate workflow safety.
+
+Real photos remain `raw source`. Pilot labels are `review item / test fixture`. OCR text, local OCR output, and AI drafts remain `parsed or intermediate result` until reviewed and explicitly applied through the canonical candidate flow.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
