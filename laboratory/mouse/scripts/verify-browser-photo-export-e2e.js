@@ -283,35 +283,37 @@ async function mapComparisonReviewToCandidate(page) {
 
   await inspectReviewByIssue(page, "Photo transcription differs from predecessor Excel");
   const panel = page.locator("#reviewDetailPanel");
-  await panel.locator(".review-resolved-value").fill("draft candidate");
-  await panel.locator(".review-resolution-note").fill(
-    "Browser E2E mapped reviewed photo-vs-Excel evidence into a canonical candidate draft."
-  );
+  const resolvedValue = "draft candidate";
+  const resolutionNote = "Browser E2E mapped reviewed photo-vs-Excel evidence into a canonical candidate draft.";
+  await panel.locator(".review-resolved-value").fill(resolvedValue);
+  await panel.locator(".review-resolution-note").fill(resolutionNote);
   await page.evaluate(() => {
     document.querySelector("#reviewDetailPanel .review-legacy-decision").value = "map_to_canonical_candidate";
   });
-  const mapped = await page.evaluate(async () => {
+  const mapped = await page.evaluate(async ({ resolvedValue, resolutionNote }) => {
     const panel = document.querySelector("#reviewDetailPanel");
     const button = panel.querySelector(".resolve-review");
+    panel.querySelector(".review-resolved-value").value = resolvedValue;
+    panel.querySelector(".review-resolution-note").value = resolutionNote;
     const response = await fetch(`/api/review-items/${encodeURIComponent(button.dataset.reviewId)}/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        resolution_note: panel.querySelector(".review-resolution-note").value,
-        resolved_value: panel.querySelector(".review-resolved-value").value,
+        resolution_note: resolutionNote,
+        resolved_value: resolvedValue,
         legacy_decision: "map_to_canonical_candidate",
         correction_entity_type: "review_item",
         correction_entity_id: button.dataset.reviewId,
         correction_field_name: "reviewed_value",
         correction_before_value: button.dataset.currentValue || "",
-        correction_after_value: panel.querySelector(".review-resolved-value").value,
+        correction_after_value: resolvedValue,
       }),
     });
     if (!response.ok) {
       throw new Error(`${response.status} ${await response.text()}`);
     }
     return response.json();
-  });
+  }, { resolvedValue, resolutionNote });
   assert(mapped.canonical_candidate_id, "Mapping comparison review should create a canonical candidate draft.");
   await page.reload();
   await page.waitForLoadState("networkidle");

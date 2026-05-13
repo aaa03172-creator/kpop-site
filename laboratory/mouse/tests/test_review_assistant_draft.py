@@ -152,6 +152,8 @@ def test_review_assistant_draft_is_local_read_only_and_traceable(tmp_path: Path)
         assert payload["external_payload_policy"] == "local_only_until_approved"
         assert payload["writes_canonical_state"] is False
         assert payload["requires_operator_approval"] is True
+        assert payload["review_type"] == "photo_transcription_review"
+        assert payload["form_fill_policy"] == "draft_value_and_note"
         assert payload["review"]["review_id"] == "review_assistant_draft"
         assert payload["evidence_refs"]["source_photo_id"] == "photo_assistant_draft"
         assert payload["evidence_refs"]["note_item_ids"] == ["note_assistant_draft"]
@@ -162,6 +164,10 @@ def test_review_assistant_draft_is_local_read_only_and_traceable(tmp_path: Path)
         assert payload["draft"]["resolution_payload"]["correction_after_value"] == "Confirm MT901 strain and sex from source photo."
         assert "MT901 R0 male? verify" in payload["draft"]["evidence_summary"]
         assert "operator" in payload["draft"]["operator_note"].lower()
+        assert "source photo" in payload["draft"]["operator_note"].lower()
+        assert "note-line evidence" in payload["draft"]["operator_note"].lower()
+        assert "source photo" in payload["draft"]["resolution_payload"]["resolution_note"].lower()
+        assert "note-line evidence" in payload["draft"]["resolution_payload"]["resolution_note"].lower()
 
         with db.connection() as conn:
             after_actions = conn.execute("SELECT COUNT(*) FROM action_log").fetchone()[0]
@@ -217,12 +223,163 @@ def test_review_assistant_draft_specializes_ear_label_review_payload(tmp_path: P
 
         payload = TestClient(app).get("/api/review-items/review_ear_note_ear_draft/assistant-draft").json()
 
+        assert payload["review_type"] == "ear_label_review"
+        assert payload["form_fill_policy"] == "bounded_choice_only"
         assert payload["draft"]["review_type"] == "ear_label_review"
         assert payload["draft"]["form_fill_policy"] == "bounded_choice_only"
+        assert payload["draft"]["allowed_form_choices"] == [
+            "R_PRIME",
+            "L_PRIME",
+            "R_CIRCLE",
+            "L_CIRCLE",
+            "R_PRIME_L_PRIME",
+            "R_PRIME_L_CIRCLE",
+            "R_CIRCLE_L_PRIME",
+            "R_CIRCLE_L_CIRCLE",
+            "NONE",
+            "UNREADABLE",
+        ]
         assert payload["draft"]["resolution_payload"]["resolved_value"] == "R_PRIME"
         assert payload["draft"]["resolution_payload"]["ear_label_code"] == "R_PRIME"
         assert payload["draft"]["resolution_payload"]["correction_field_name"] == "ear_label_code"
+        assert payload["draft"]["resolution_payload"]["legacy_decision"] == "resolve"
+        assert payload["draft"]["resolution_payload"].get("canonical_entity_type", "") == ""
+        assert payload["draft"]["resolution_payload"].get("canonical_entity_id", "") == ""
         assert "bounded" in payload["draft"]["operator_note"].lower()
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_review_assistant_draft_does_not_turn_ear_label_free_text_into_choice(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("parse_ear_free_text", "manual_photo_transcription", "{}", "2026-05-12T11:05:00Z", "review", 45, 1),
+            )
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, parse_id, raw_line_text, parsed_type,
+                     parsed_ear_label_raw, parsed_ear_label_code, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("note_ear_free_text", "parse_ear_free_text", "318 R? maybe write custom", "mouse_item", "R?", None, 0.45, 1),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_ear_note_ear_free_text",
+                    "parse_ear_free_text",
+                    "Medium",
+                    "Ear label needs review",
+                    "R?",
+                    "Type custom R? after checking",
+                    "Ear label normalization requires a bounded review choice.",
+                    "open",
+                    "2026-05-12T11:06:00Z",
+                ),
+            )
+
+        payload = TestClient(app).get("/api/review-items/review_ear_note_ear_free_text/assistant-draft").json()
+        resolution = payload["draft"]["resolution_payload"]
+
+        assert payload["draft"]["form_fill_policy"] == "bounded_choice_only"
+        assert resolution["resolved_value"] == ""
+        assert resolution["ear_label_code"] == ""
+        assert resolution["correction_after_value"] == ""
+        assert "Type custom" not in json.dumps(resolution)
+        assert "free text" not in payload["draft"]["operator_note"].lower()
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_review_assistant_draft_manual_transcription_mentions_photo_and_note_line_evidence(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_manual_draft",
+                    "manual-card.jpg",
+                    "data/photos/test/manual-card.jpg",
+                    "2026-05-12T11:07:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_manual_draft",
+                    "photo_manual_draft",
+                    "manual_photo_transcription",
+                    "{}",
+                    "2026-05-12T11:08:00Z",
+                    "review",
+                    72,
+                    1,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO card_note_item_log
+                    (note_item_id, parse_id, photo_id, raw_line_text, parsed_type,
+                     parsed_mouse_display_id, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("note_manual_draft", "parse_manual_draft", "photo_manual_draft", "MT712 manual check", "mouse_item", "MT712", 0.72, 1),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_manual_draft",
+                    "parse_manual_draft",
+                    "Medium",
+                    "Manual photo transcription needs review",
+                    "MT712",
+                    "Confirm manual transcription before export.",
+                    "Keep manual transcription reviewable.",
+                    "open",
+                    "2026-05-12T11:09:00Z",
+                ),
+            )
+
+        payload = TestClient(app).get("/api/review-items/review_manual_draft/assistant-draft").json()
+
+        assert payload["review_type"] == "photo_transcription_review"
+        assert "source photo" in payload["draft"]["operator_note"].lower()
+        assert "note-line evidence" in payload["draft"]["operator_note"].lower()
+        assert "source photo" in payload["draft"]["resolution_payload"]["resolution_note"].lower()
+        assert "note-line evidence" in payload["draft"]["resolution_payload"]["resolution_note"].lower()
     finally:
         db.DB_PATH = old_db_path
 
@@ -272,11 +429,23 @@ def test_review_assistant_draft_specializes_unlabeled_numeric_note_payload(tmp_p
 
         payload = TestClient(app).get("/api/review-items/review_unlabeled_numeric_note_numeric_draft/assistant-draft").json()
 
+        assert payload["review_type"] == "unlabeled_numeric_note_review"
+        assert payload["form_fill_policy"] == "operator_choose_note_label"
         assert payload["draft"]["review_type"] == "unlabeled_numeric_note_review"
         assert payload["draft"]["form_fill_policy"] == "operator_choose_note_label"
+        assert payload["draft"]["allowed_form_choices"] == [
+            "count_note",
+            "mouse_item",
+            "reviewed_note",
+            "ignored_note",
+        ]
         assert payload["draft"]["resolution_payload"]["note_item_id"] == "note_numeric_draft"
         assert payload["draft"]["resolution_payload"]["note_label_decision"] == ""
+        assert payload["draft"]["resolution_payload"]["note_label_mouse_id"] == ""
+        assert payload["draft"]["resolution_payload"]["note_label_count"] is None
+        assert payload["draft"]["resolution_payload"]["resolved_value"] == ""
         assert payload["draft"]["resolution_payload"]["correction_field_name"] == "parsed_label"
+        assert "mouse id" in payload["draft"]["operator_note"].lower()
         assert "must choose" in payload["draft"]["operator_note"].lower()
     finally:
         db.DB_PATH = old_db_path
