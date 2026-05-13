@@ -215,6 +215,8 @@ Restore refuses to overwrite an existing target unless `-Force` is provided.
 
 Use `docs/pilot_operator_checklist_2026-05-13.md` during controlled local pilot sessions. The checklist covers copied-photo setup, assigned strain confirmation, upload, review blockers, source-photo inspection, reviewed candidate apply, export readiness, stop conditions, and post-session backup.
 
+For a step-by-step local run from `start.bat` through final XLSX download and post-session inspection, use `docs/manual_pilot_walkthrough_2026-05-13.md`.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
