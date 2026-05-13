@@ -113,11 +113,36 @@ def test_verify_synthetic_photo_e2e_script_runs_generated_jpeg_cases(tmp_path: P
     )
 
     summary = json.loads(completed.stdout)
+    assert summary["strict_photo_e2e_gate"] is True
     assert summary["boundary"] == "review item / test fixture"
     assert summary["canonical"] is False
+    assert summary["layer_boundaries"] == {
+        "raw_source": {
+            "boundary": "raw source / test fixture",
+            "canonical": False,
+            "artifact": "generated synthetic JPEG photo",
+        },
+        "parsed_evidence": {
+            "boundary": "parsed or intermediate result",
+            "canonical": False,
+            "artifact": "generated SQLite parse_result rows and raw payloads",
+        },
+        "review_item": {
+            "boundary": "review item",
+            "canonical": False,
+            "artifact": "generated SQLite review_queue rows",
+        },
+        "export_view": {
+            "boundary": "export or view",
+            "canonical": False,
+            "artifact": "no export files are written by this gate",
+        },
+    }
     assert summary["generated"]["image_count"] == 5
+    assert summary["verification"]["status"] == "passed"
     assert summary["verification"]["passed"] == 5
     assert summary["verification"]["failed"] == 0
+    assert summary["verification"]["skipped"] == 0
     assert summary["verification"]["confidence_calibration"]["coverage"]["missing_tags"] == []
     assert (output_dir / "synthetic_photo_e2e_validation_cases.json").exists()
     assert (output_dir / "synthetic_photo_e2e.sqlite").exists()
@@ -140,7 +165,11 @@ def test_verify_synthetic_photo_e2e_default_run_cleans_disposable_output() -> No
 def test_package_exposes_synthetic_photo_e2e_script() -> None:
     package = json.loads(PACKAGE_PATH.read_text(encoding="utf-8"))
 
+    assert package["scripts"]["test:photo-e2e"] == (
+        "python scripts/verify-synthetic-photo-e2e.py --json"
+    )
+    assert package["scripts"]["test:real-photo-e2e"] == "python scripts/verify-photo-e2e-cases.py"
     assert package["scripts"]["test:synthetic-photo-e2e"] == (
         "python scripts/verify-synthetic-photo-e2e.py --json"
     )
-    assert "npm run test:synthetic-photo-e2e" in package["scripts"]["verify"]
+    assert "npm run test:photo-e2e" in package["scripts"]["verify"]
