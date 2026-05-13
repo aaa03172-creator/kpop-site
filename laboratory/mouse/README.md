@@ -217,6 +217,8 @@ Use `docs/pilot_operator_checklist_2026-05-13.md` during controlled local pilot 
 
 For a step-by-step local run from `start.bat` through final XLSX download and post-session inspection, use `docs/manual_pilot_walkthrough_2026-05-13.md`.
 
+Use `docs/pilot_run_log_template_2026-05-13.md` to record a sanitized dry-run summary under `docs/pilot_runs/` after a synthetic or copied non-production pilot.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
