@@ -3992,11 +3992,48 @@ def assistant_review_target_note_item_id(review: dict[str, Any], note_items: lis
     return str(note_items[0].get("note_item_id") or "") if note_items else ""
 
 
+ASSISTANT_EAR_LABEL_REVIEW_CHOICES = [
+    "R_PRIME",
+    "L_PRIME",
+    "R_CIRCLE",
+    "L_CIRCLE",
+    "R_PRIME_L_PRIME",
+    "R_PRIME_L_CIRCLE",
+    "R_CIRCLE_L_PRIME",
+    "R_CIRCLE_L_CIRCLE",
+    "NONE",
+    "UNREADABLE",
+]
+
+ASSISTANT_NUMERIC_NOTE_REVIEW_CHOICES = [
+    "count_note",
+    "mouse_item",
+    "reviewed_note",
+    "ignored_note",
+]
+
+
+def assistant_bounded_ear_label_code(suggested_value: str, target_note_item: dict[str, Any] | None) -> str:
+    candidates = [
+        suggested_value,
+        str((target_note_item or {}).get("parsed_ear_label_code") or ""),
+    ]
+    for candidate in candidates:
+        code = candidate.strip().upper()
+        if code in ASSISTANT_EAR_LABEL_REVIEW_CHOICES:
+            return code
+    return ""
+
+
 def assistant_review_draft_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
     review = audit["review"]
     note_items = audit.get("note_items", [])
     photo_evidence_items = audit.get("photo_evidence_items", [])
     target_note_item_id = assistant_review_target_note_item_id(review, note_items)
+    target_note_item = next(
+        (item for item in note_items if str(item.get("note_item_id") or "") == target_note_item_id),
+        None,
+    )
     evidence_lines = [
         str(item.get("raw_line_text") or "").strip()
         for item in sorted(note_items, key=lambda item: str(item.get("note_item_id") or "") != target_note_item_id)
@@ -4010,27 +4047,39 @@ def assistant_review_draft_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
     issue = str(review.get("issue") or "").strip()
     review_type = "general_review"
     form_fill_policy = "draft_value_and_note"
+    allowed_form_choices: list[str] = []
     operator_note = "Use this as a local assistant draft. Do not resolve or write canonical state without operator approval."
     correction_field_name = "reviewed_value"
     extra_resolution_fields: dict[str, Any] = {}
+    resolved_value = suggested_value or current_value
     if issue == "Ear label needs review":
         review_type = "ear_label_review"
         form_fill_policy = "bounded_choice_only"
-        operator_note = "Use this bounded ear-label draft only after comparing the source note and photo evidence."
+        allowed_form_choices = ASSISTANT_EAR_LABEL_REVIEW_CHOICES
+        operator_note = "Use this bounded ear-label draft only after comparing the source photo and note-line evidence."
         correction_field_name = "ear_label_code"
-        extra_resolution_fields["ear_label_code"] = suggested_value
+        resolved_value = assistant_bounded_ear_label_code(suggested_value, target_note_item)
+        extra_resolution_fields["ear_label_code"] = resolved_value
         extra_resolution_fields["note_item_id"] = target_note_item_id
     elif issue == "Unlabeled numeric note needs review":
         review_type = "unlabeled_numeric_note_review"
         form_fill_policy = "operator_choose_note_label"
-        operator_note = "Assistant can summarize the numeric note, but the operator must choose whether it is a count, mouse ID, reviewed note, or ignored line."
+        allowed_form_choices = ASSISTANT_NUMERIC_NOTE_REVIEW_CHOICES
+        operator_note = "Assistant can summarize the numeric-only note, but must not treat it as a mouse ID. The operator must choose count_note, mouse_item, reviewed_note, or ignored_note."
         correction_field_name = "parsed_label"
+        resolved_value = ""
         extra_resolution_fields["note_item_id"] = target_note_item_id
         extra_resolution_fields["note_label_decision"] = ""
         extra_resolution_fields["note_label_mouse_id"] = ""
         extra_resolution_fields["note_label_count"] = None
+    elif issue in {"AI-extracted photo transcription needs review", "Manual photo transcription needs review"}:
+        review_type = "photo_transcription_review"
+        operator_note = (
+            "Use this local transcription draft only after checking the source photo and note-line evidence. "
+            "It cannot resolve the review or write canonical state without operator approval."
+        )
     resolution_note_parts = [
-        "Assistant draft only; operator must compare against source evidence before resolving.",
+        "Assistant draft only; operator must compare against source photo and note-line evidence before resolving.",
         str(review.get("review_reason") or "").strip(),
     ]
     if evidence_summary:
@@ -4043,6 +4092,8 @@ def assistant_review_draft_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
         "external_payload_policy": "local_only_until_approved",
         "writes_canonical_state": False,
         "requires_operator_approval": True,
+        "review_type": review_type,
+        "form_fill_policy": form_fill_policy,
         "review": {
             "review_id": review.get("review_id") or "",
             "parse_id": review.get("parse_id") or "",
@@ -4061,17 +4112,20 @@ def assistant_review_draft_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
         "draft": {
             "review_type": review_type,
             "form_fill_policy": form_fill_policy,
+            "allowed_form_choices": allowed_form_choices,
             "evidence_summary": evidence_summary,
             "operator_note": operator_note,
             "resolution_payload": {
                 "resolution_note": resolution_note,
-                "resolved_value": suggested_value or current_value,
+                "resolved_value": resolved_value,
                 "legacy_decision": "resolve",
+                "canonical_entity_type": "",
+                "canonical_entity_id": "",
                 "correction_entity_type": "review_item",
                 "correction_entity_id": review.get("review_id") or "",
                 "correction_field_name": correction_field_name,
                 "correction_before_value": current_value,
-                "correction_after_value": suggested_value or current_value,
+                "correction_after_value": resolved_value,
                 "correction_source_record_id": None,
                 **extra_resolution_fields,
             },
@@ -4486,19 +4540,7 @@ def resolve_ear_label_correction(
     selected_code = payload.ear_label_code.strip().upper()
     if not selected_code:
         return None
-    allowed_codes = {
-        "R_PRIME",
-        "L_PRIME",
-        "R_CIRCLE",
-        "L_CIRCLE",
-        "R_PRIME_L_PRIME",
-        "R_PRIME_L_CIRCLE",
-        "R_CIRCLE_L_PRIME",
-        "R_CIRCLE_L_CIRCLE",
-        "NONE",
-        "UNREADABLE",
-    }
-    if selected_code not in allowed_codes:
+    if selected_code not in ASSISTANT_EAR_LABEL_REVIEW_CHOICES:
         raise HTTPException(status_code=400, detail="ear_label_code is not an allowed review choice.")
 
     note_item_id = review_note_item_id(review_id, payload.note_item_id)
