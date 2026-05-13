@@ -219,6 +219,8 @@ For a step-by-step local run from `start.bat` through final XLSX download and po
 
 Use `docs/pilot_run_log_template_2026-05-13.md` to record a sanitized dry-run summary under `docs/pilot_runs/` after a synthetic or copied non-production pilot.
 
+For the first 5-photo dry run, use `docs/five_photo_dry_run_manifest_guide_2026-05-13.md` to create a private manifest outside Git before launching the app.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
