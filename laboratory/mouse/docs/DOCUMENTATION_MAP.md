@@ -18,6 +18,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | Product intent and adopted requirements | `final_mouse_colony_prd.md` |
 | Agent and implementation guardrails | `AGENTS.md` |
 | CLI usage, setup, tests, and runtime summary | `README.md` |
+| Local pilot baseline and copied-data rule | `docs/pilot_readiness_baseline_2026-05-13.md` |
 | UI/workflow design direction | `design.md` |
 | Developer-only UI reference safety | `docs/ui_references.md` |
 | UI/UX implementation tracking | `docs/ui_ux_implementation_tracker_2026-05-11.md` |
@@ -57,6 +58,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | File | Layer | Use |
 | --- | --- | --- |
 | `mvp_vertical_slice_plan.md` | implementation planning / non-canonical project note | First source photo to review to canonical candidate to export slice. |
+| `docs/pilot_readiness_baseline_2026-05-13.md` | export or view / non-canonical baseline record | Captures the local pilot baseline, verification command set, runtime artifact classification, and copied/synthetic-data rule. |
 | `docs/cage_card_photo_pipeline_implementation_baseline_ko.md` | implementation baseline / non-canonical project documentation | Recommended implementation baseline for cage-card photo processing boundaries, review gates, canonical apply, and export provenance. |
 | `docs/cage_card_photo_pipeline_implementation_audit_2026-05-11.md` | implementation audit / review item | Current implementation audit against the cage-card photo pipeline baseline, with evidence-linking gaps and next slice recommendation. |
 | `docs/cage_card_photo_upload_flow_doublecheck_audit_2026-05-11_ko.md` | implementation audit / review item | Code-level doublecheck of the current photo upload, extraction, review, correction, canonical apply, and export flow boundaries. |

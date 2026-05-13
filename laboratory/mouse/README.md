@@ -11,15 +11,23 @@ Start with `docs/DOCUMENTATION_MAP.md` when deciding which project document to t
 - `AGENTS.md` defines active agent, data-boundary, and Git hygiene rules.
 - `final_mouse_colony_prd.md` is the primary adopted product reference.
 - `README.md` is the setup, command, and verification entry point.
+- `docs/pilot_readiness_baseline_2026-05-13.md` records the non-canonical local pilot baseline, verification commands, and copied/synthetic-data rule.
 - Design, review, and implementation planning notes are supporting context unless explicitly adopted by the PRD.
 - `docs/mouse_db_assistant_integration_review_2026-05-11.md` records how to keep assistant/API/MCP readiness as a design habit while deferring adapter implementation.
 - `docs/ui_references.md` records developer-only UI reference research rules, including Lazyweb safety guidance for fake-data-only design research.
 - When documentation and implementation differ, check committed tests and call out the mismatch before changing behavior.
 
+## Pilot Baseline
+
+The current local pilot readiness baseline is recorded in `docs/pilot_readiness_baseline_2026-05-13.md`.
+
+Use copied or synthetic cage-card photos and copied workbook inputs for the first pilot. Real photos, predecessor Excel rows, OCR text, and AI drafts remain raw source or parsed/intermediate evidence until reviewed and explicitly applied through the canonical candidate flow. Do not treat the local MVP as the lab's only source of truth until the real-photo pilot protocol, harness, backup/restore drill, and operator checklist are complete.
+
 ## Install
 
 ```powershell
 python -m pip install -r requirements.txt
+npm ci
 ```
 
 On this Windows workspace, the project-local virtual environment can be used directly:
@@ -199,11 +207,17 @@ python -m pytest
 The repository also keeps the browser prototype and local FastAPI scaffold checks wired through npm:
 
 ```powershell
+npm ci
 npm test
 npm run test:local
 npm run test:cage-card-skill-gym
 npm run test:python
 npm run verify
 ```
+
+Run `npm ci` before npm-based verification on a fresh checkout or after ignored
+dependency caches such as `node_modules/` have been removed. `npm run verify`
+depends on the local Playwright dev dependency, while photo E2E fixtures are
+generated as disposable local test data and are not committed.
 
 Use `npm run mousedb -- --help` as a convenient wrapper around `python -m mousedb`.
