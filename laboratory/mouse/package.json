@@ -13,6 +13,7 @@
     "test:local": "python scripts/verify-local-app.py",
     "test:photo-e2e": "python scripts/verify-synthetic-photo-e2e.py --json",
     "test:real-photo-e2e": "python scripts/verify-photo-e2e-cases.py",
+    "test:real-photo-pilot": "python scripts/verify-real-photo-pilot.py --manifest config/real_photo_validation_cases.example.json",
     "test:browser-photo-export-e2e": "node scripts/verify-browser-photo-export-e2e.js",
     "test:synthetic-photo-e2e": "python scripts/verify-synthetic-photo-e2e.py --json",
     "test:synthetic-draft-extraction": "python scripts/verify-synthetic-draft-extraction.py --json",

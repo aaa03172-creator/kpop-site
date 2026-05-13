@@ -195,6 +195,12 @@ Use `docs/real_photo_pilot_protocol_2026-05-13.md` before the first real cage-ca
 
 Real photos remain `raw source`. Pilot labels are `review item / test fixture`. OCR text, local OCR output, and AI drafts remain `parsed or intermediate result` until reviewed and explicitly applied through the canonical candidate flow.
 
+The private-photo-safe example harness can be checked without committing real photos:
+
+```powershell
+npm run test:real-photo-pilot
+```
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
