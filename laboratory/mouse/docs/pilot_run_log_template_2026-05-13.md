@@ -53,6 +53,35 @@ Copy this template to `docs/pilot_runs/YYYY-MM-DD-<label>.md` after a synthetic 
 | Exports generated |  |
 | Blocked export attempts |  |
 
+## Sanitized Metrics To Publish
+
+Publish aggregate counts and rates only. Do not include private photo paths, raw card text, raw OCR/AI payloads, generated workbook paths, local database paths, backup paths, or case-level animal-room details.
+
+| Metric | Value |
+| --- | ---: |
+| Manifest cases verified |  |
+| Photos with extraction draft |  |
+| Photos requiring manual transcription |  |
+| Review items corrected |  |
+| Review items accepted without correction |  |
+| Export-blocking items found |  |
+| Export-blocking items resolved |  |
+| XLSX exports generated |  |
+
+## Failure Taxonomy
+
+| Failure label | Count | Sanitized note |
+| --- | ---: | --- |
+| `source_trace_missing` |  |  |
+| `low_confidence_unreviewed` |  |  |
+| `raw_normalized_mixed` |  |  |
+| `mouse_id_or_note_line_error` |  |  |
+| `date_or_count_error` |  |  |
+| `mating_litter_context_error` |  |  |
+| `export_safety_error` |  |  |
+| `privacy_leak` |  |  |
+| `operator_workload_excessive` |  |  |
+
 ## Per-Photo Notes
 
 | Case/photo label | Card type | Review level | Action taken | Evidence trace OK? | Notes |
@@ -70,6 +99,28 @@ Copy this template to `docs/pilot_runs/YYYY-MM-DD-<label>.md` after a synthetic 
 | Canonical apply |  |
 | Export |  |
 | Backup and notes |  |
+
+## Reviewer Workload Criteria
+
+| Criterion | Go threshold | Run value |
+| --- | --- | ---: |
+| Median review time per photo | At or below 4 minutes |  |
+| 90th percentile review time per photo | At or below 8 minutes |  |
+| Manual transcription required | At or below 40% unless intentionally testing unclear cards |  |
+| Reviewer can explain evidence for exported rows | 100% of exported rows |  |
+| Unresolved `must_review` items at export time | 0 |  |
+
+## Accuracy Evaluation Criteria
+
+Use the same private manifest expected fields for local scoring, then publish only aggregate results.
+
+| Field family | Go threshold | Run value |
+| --- | --- | ---: |
+| Mouse IDs and note-line continuity | 95% exact or reviewer-corrected before apply; 0 unreviewed high-risk misses |  |
+| Card type and review routing | 100% of unclear/blocker cases route to review |  |
+| Sex/count and DOB/date handling | 90% correct after review; ambiguous dates stay raw until confirmed |  |
+| Mating/litter context | 90% correct after review with traceable sire/dam/litter notes |  |
+| Export provenance | 100% of exported rows trace to copied photo, note item, or accepted correction |  |
 
 ## Friction Points
 
@@ -115,3 +166,7 @@ python scripts/verify-acceptance-matrix.py
 - No final export while `must_review` blockers remained open:
 - Operator could explain source evidence for exported rows:
 - Backup and restore confidence:
+- Private data containment:
+- 20-30 photo manifest coverage:
+- Accuracy threshold decision:
+- Reviewer workload decision:

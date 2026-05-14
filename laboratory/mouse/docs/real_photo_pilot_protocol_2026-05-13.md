@@ -107,6 +107,20 @@ The example path is illustrative. Real manifests with private local paths should
 - [ ] Confirm the assigned strain scope before running AI extraction or review.
 - [ ] Back up the local database and photo folder before a real pilot run.
 
+## Readiness Criteria
+
+For the 20-30 copied-photo pilot, add a `readiness_criteria` object to the private manifest. The verifier treats these values as `review item / test fixture` evidence, not canonical colony state.
+
+Minimum readiness criteria:
+
+- `photo_count.min=20` and `photo_count.max=30`.
+- `required_card_types` includes `separated`, `mating`, `unclear`, and `other`.
+- `required_review_levels` includes `must_review`, `quick_check`, and `trace_only`.
+- `export_blocking` includes at least one blocking and one non-blocking expectation.
+- `backup_restore` records only labels and booleans: before-backup label, after-backup label, restore-probe label, restore verified, and overwrite-refusal verified.
+
+Do not put backup paths, restore target paths, local database paths, generated workbook paths, or raw copied-photo text in `readiness_criteria`. Use `docs/copied_photo_pilot_go_no_go_2026-05-14.md` for the full go/no-go decision.
+
 ## Completion Criteria
 
 This protocol is ready when:
@@ -114,5 +128,5 @@ This protocol is ready when:
 - The pilot photo set contains 20-30 copied photos.
 - Every photo has a local label record with card type, traceability label, expected review level, and expected export-blocking state.
 - The labels can be used by the real-photo verifier without requiring private photos to be committed.
+- The verifier reports `readiness.status=go` for the private copied-photo pilot manifest.
 - The operator can explain why each expected value is `raw source`, `parsed/intermediate`, `review item`, or `export/view`.
-
