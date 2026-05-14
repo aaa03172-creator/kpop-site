@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from evals.cage_card_skill_gym.run_baseline import evaluate_probe_file, main
+from evals.cage_card_skill_gym.run_baseline import build_report, evaluate_probe_file, main
 
 
 def write_probe(path: Path, **overrides: object) -> None:
@@ -73,3 +73,34 @@ def test_runner_returns_nonzero_when_any_probe_fails(tmp_path: Path, capsys: pyt
 
     assert exit_code == 1
     assert output["summary"] == {"passed": 1, "failed": 1, "total": 2}
+
+
+def test_committed_probe_pack_contains_second_batch_safety_cases() -> None:
+    probes_dir = Path("evals/cage_card_skill_gym/probes")
+    probe_ids = {
+        json.loads(path.read_text(encoding="utf-8"))["probe_id"]
+        for path in probes_dir.glob("*.yaml")
+    }
+
+    assert len(probe_ids) >= 20
+    assert {
+        "batch_upload_partial_failure_preserves_unrelated_photos",
+        "real_photo_manifest_requires_private_safe_coverage",
+        "pilot_export_blocking_mix_requires_control_cases",
+        "backup_restore_evidence_uses_labels_not_paths",
+        "genotype_result_requires_source_evidence",
+        "high_risk_mouse_event_requires_source_evidence",
+        "blocked_export_keeps_manifest_without_workbook",
+        "public_pilot_log_redacts_private_payloads",
+        "assistant_summary_keeps_review_blockers_visible",
+        "rule_masters_prevent_hard_coded_domain_logic",
+    }.issubset(probe_ids)
+
+
+def test_committed_expanded_probe_pack_passes_baseline() -> None:
+    probes_dir = Path("evals/cage_card_skill_gym/probes")
+
+    report = build_report(probes_dir)
+
+    assert report["summary"]["total"] >= 20
+    assert report["summary"]["failed"] == 0
