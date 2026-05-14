@@ -12,6 +12,7 @@ Use this checklist for a controlled local pilot with copied cage-card photos. It
 - [ ] Confirm the copied photo folder is outside Git.
 - [ ] Confirm the pilot photo set follows `docs/real_photo_pilot_protocol_2026-05-13.md`.
 - [ ] Confirm each photo has a local label with card type, traceability label, expected review level, and expected export-blocking state.
+- [ ] Run `python scripts/prepare-copied-pilot-run.py --manifest <private manifest> --run-label <label> --output-log docs/pilot_runs/YYYY-MM-DD-<label>.md` to create a sanitized run log shell before recording private-run results.
 - [ ] Confirm `My Assigned Strains` is up to date before extraction or review.
 - [ ] Run a backup:
 
@@ -26,7 +27,9 @@ powershell -ExecutionPolicy Bypass -File scripts/backup-local-pilot.ps1 -Label b
 
 - [ ] Upload photos in a named batch.
 - [ ] Confirm every uploaded photo appears in Photo Review.
+- [ ] Use the normal local browser UI or standalone Playwright for private file upload/download verification; the Codex in-app Browser control surface does not provide file upload support for this pilot.
 - [ ] Keep original photos as `raw source`, even if blurry or unreadable.
+- [ ] Use `Other / Unknown` for unexpected card formats and keep them trace-only unless source evidence supports canonical mapping.
 - [ ] Use local/manual transcription when the card is unclear.
 - [ ] Use external AI extraction only after explicit approval for that run.
 - [ ] If external AI is approved, send only the selected source photo and minimal assigned-strain scope.
@@ -87,4 +90,3 @@ Stop the pilot session and do not export if any of these occur:
 - Export validation fails or final export is blocked.
 - Any external inference payload feels unsafe or too broad.
 - The operator cannot explain the source evidence for an exported row.
-

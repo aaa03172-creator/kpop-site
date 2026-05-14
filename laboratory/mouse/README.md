@@ -201,6 +201,14 @@ The private-photo-safe example harness can be checked without committing real ph
 npm run test:real-photo-pilot
 ```
 
+For an actual copied-photo pilot manifest, generate a sanitized repeatable run log shell before recording operator results:
+
+```powershell
+npm run pilot:copied-runbook -- --manifest "<private manifest>" --run-label "<label>" --output-log docs/pilot_runs/YYYY-MM-DD-<label>.md
+```
+
+The generated log omits private paths and reminds the operator that `other` manifest cases appear as `Other / Unknown` in the UI. Private upload/download verification should use the normal local browser UI or standalone Playwright because the Codex in-app Browser control surface does not provide file upload support for this pilot.
+
 ## Local Pilot Backup And Restore
 
 Use `docs/local_backup_restore_2026-05-13.md` before any real pilot run. The backup script copies the local SQLite database, uploaded photos, exports, and generated artifacts to a timestamped folder outside Git by default:

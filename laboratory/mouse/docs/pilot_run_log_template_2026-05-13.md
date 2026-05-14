@@ -18,6 +18,8 @@ Copy this template to `docs/pilot_runs/YYYY-MM-DD-<label>.md` after a synthetic 
 | Dataset type | synthetic / copied non-production / copied real pilot |
 | Photo count |  |
 | Manifest used |  |
+| Browser/upload surface | normal browser UI / standalone Playwright / in-app Browser not used for upload |
+| Extraction mode chosen | AI / local OCR / manual extraction decision |
 | Backup before run |  |
 | Backup after run |  |
 
@@ -55,7 +57,7 @@ Copy this template to `docs/pilot_runs/YYYY-MM-DD-<label>.md` after a synthetic 
 
 | Case/photo label | Card type | Review level | Action taken | Evidence trace OK? | Notes |
 | --- | --- | --- | --- | --- | --- |
-|  | separated / mating / unclear / other | must_review / quick_check / trace_only |  | yes / no |  |
+|  | separated / mating / unclear / Other / Unknown | must_review / quick_check / trace_only |  | yes / no |  |
 
 ## Timing
 
@@ -74,6 +76,8 @@ Copy this template to `docs/pilot_runs/YYYY-MM-DD-<label>.md` after a synthetic 
 1. 
 2. 
 3. 
+
+Record whether the in-app Browser control surface was avoided for private file upload. It does not provide file upload support for this copied-photo pilot, so upload/download verification should use the normal local browser UI or standalone Playwright.
 
 ## Evidence Traceability Findings
 
@@ -111,4 +115,3 @@ python scripts/verify-acceptance-matrix.py
 - No final export while `must_review` blockers remained open:
 - Operator could explain source evidence for exported rows:
 - Backup and restore confidence:
-

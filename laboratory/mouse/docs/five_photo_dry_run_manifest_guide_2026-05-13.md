@@ -27,7 +27,7 @@ Do not commit:
 | `pilot_photo_002` | `separated` | `must_review` | `true` | Ambiguous DOB, count mismatch, unclear ear label, or low confidence. |
 | `pilot_photo_003` | `mating` | `must_review` | `true` | Sire/dam or litter note should be reviewed before animal sheet export. |
 | `pilot_photo_004` | `unclear` | `must_review` | `true` | Blurry, cropped, shadowed, or hard-to-read card. |
-| `pilot_photo_005` | `other` | `trace_only` | `false` | Unexpected or unsupported format should not force canonical interpretation. |
+| `pilot_photo_005` | `other` (`Other / Unknown` in the UI) | `trace_only` | `false` | Unexpected or unsupported format should not force canonical interpretation. |
 
 ## Private Folder Layout
 
@@ -194,6 +194,15 @@ If verification fails:
 
 1. Start the app with `start.bat`.
 2. Follow `docs/manual_pilot_walkthrough_2026-05-13.md`.
-3. Record a sanitized run summary using `docs/pilot_run_log_template_2026-05-13.md`.
-4. Do not copy private photo paths or raw real-photo OCR payloads into the committed run log.
+3. Prepare a repeatable sanitized run log shell:
 
+```powershell
+python scripts/prepare-copied-pilot-run.py --manifest "C:\MouseDB-private-pilot\2026-05-13-dry-run\real_photo_pilot_manifest.json" --run-label 5-photo-copied-dry-run --output-log docs/pilot_runs/YYYY-MM-DD-5-photo-copied-dry-run.md
+```
+
+4. Fill the generated log with operator counts, review outcomes, XLSX download results, and backup/restore findings.
+5. Do not copy private photo paths or raw real-photo OCR payloads into the committed run log.
+
+Browser note:
+
+- The Codex in-app Browser control surface does not provide file upload support for this private copied-photo pilot. Use the normal local browser UI or standalone Playwright when the run must upload private copied photos and download XLSX files.
