@@ -176,6 +176,8 @@ class PhotoManualTranscriptionCreate(BaseModel):
     extraction_image_mode: str = ""
     roi_template_type: str = ""
     extraction_regions: list[dict[str, Any]] = Field(default_factory=list)
+    external_approval: dict[str, Any] = Field(default_factory=dict)
+    payload_minimization: str = ""
 
 
 class PhotoAiDraftCreate(BaseModel):
@@ -733,6 +735,66 @@ def create_upload_batch_record(
     }
 
 
+def operator_upload_batch_status(
+    *,
+    status: str,
+    photo_count: int,
+    pending: int,
+    open_reviews: int,
+    open_comparisons: int,
+    comparison_needed: int,
+    candidate_count: int,
+    applied_candidate_count: int,
+) -> dict[str, str]:
+    if status == "closed":
+        return {
+            "label": "Closed",
+            "detail": "This upload batch is closed for operator handoff.",
+            "next_action": "No release action is needed.",
+        }
+    if photo_count == 0:
+        return {
+            "label": "Waiting for photos",
+            "detail": "Upload copied cage-card photos before review can start.",
+            "next_action": "Upload source photos.",
+        }
+    if pending:
+        return {
+            "label": "Needs transcription",
+            "detail": f"{pending} photo(s) still need manual or AI transcription evidence.",
+            "next_action": "Open each pending photo and save transcription evidence.",
+        }
+    if open_reviews or open_comparisons:
+        return {
+            "label": "Needs review resolution",
+            "detail": f"{open_reviews} open review item(s) remain; {open_comparisons} are comparison review(s).",
+            "next_action": "Resolve open review items before export or batch close.",
+        }
+    if comparison_needed:
+        return {
+            "label": "Needs comparison review setup",
+            "detail": f"{comparison_needed} transcribed photo(s) still need comparison review creation.",
+            "next_action": "Create Batch Comparison Reviews.",
+        }
+    if candidate_count == 0:
+        return {
+            "label": "Ready to map candidate",
+            "detail": "All transcriptions and comparison reviews are resolved; map source-backed evidence into a canonical candidate.",
+            "next_action": "Open evidence mapping and map source-backed evidence.",
+        }
+    if applied_candidate_count < candidate_count:
+        return {
+            "label": "Needs candidate apply",
+            "detail": f"{applied_candidate_count} of {candidate_count} canonical candidate(s) have been applied.",
+            "next_action": "Preview and apply remaining canonical candidates.",
+        }
+    return {
+        "label": "Ready to close",
+        "detail": "All photos are transcribed, reviewed, mapped, and applied.",
+        "next_action": "Close Batch.",
+    }
+
+
 def upload_batch_payload(row: Any) -> dict[str, Any]:
     photo_count = int(row["photo_count"] or 0)
     pending = int(row["pending_transcription_count"] or 0)
@@ -764,6 +826,19 @@ def upload_batch_payload(row: Any) -> dict[str, Any]:
     payload["canonical_candidate_count"] = candidate_count
     payload["applied_candidate_count"] = applied_candidate_count
     payload["derived_status"] = derived_status
+    operator_status = operator_upload_batch_status(
+        status=str(row["status"] or ""),
+        photo_count=photo_count,
+        pending=pending,
+        open_reviews=open_reviews,
+        open_comparisons=open_comparisons,
+        comparison_needed=comparison_needed,
+        candidate_count=candidate_count,
+        applied_candidate_count=applied_candidate_count,
+    )
+    payload["operator_status_label"] = operator_status["label"]
+    payload["operator_status_detail"] = operator_status["detail"]
+    payload["operator_next_action"] = operator_status["next_action"]
     payload["boundary"] = "raw source"
     return payload
 
@@ -2743,6 +2818,8 @@ def create_photo_ai_extracted_transcription(photo_id: str, payload: PhotoAiDraft
             extraction_image_mode=extraction["extraction_image_mode"],
             roi_template_type=extraction.get("roi_template_type", ""),
             extraction_regions=extraction.get("extraction_regions", []),
+            external_approval=extraction["external_approval"],
+            payload_minimization=extraction["payload_minimization"],
         ),
     )
     return {
@@ -2750,6 +2827,7 @@ def create_photo_ai_extracted_transcription(photo_id: str, payload: PhotoAiDraft
         "extraction_method": "ai_photo_extraction",
         "external_inference_used": True,
         "payload_minimization": extraction["payload_minimization"],
+        "external_approval": extraction["external_approval"],
         "extraction_image_mode": extraction["extraction_image_mode"],
         "extraction_regions": extraction["extraction_regions"],
         "roi_template_type": extraction.get("roi_template_type", ""),
@@ -8362,6 +8440,8 @@ def create_photo_manual_transcription(photo_id: str, payload: PhotoManualTranscr
             ][:10],
             "extractionImageMode": payload.extraction_image_mode,
             "roiTemplateType": payload.roi_template_type,
+            "externalApproval": payload.external_approval,
+            "payloadMinimization": payload.payload_minimization,
             "extractionRegions": [
                 {
                     "label": str(region.get("label") or ""),

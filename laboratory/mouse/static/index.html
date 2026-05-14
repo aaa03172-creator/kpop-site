@@ -3021,7 +3021,7 @@
           <select id="transcriptionCardType">
             <option value="Separated">Separated</option>
             <option value="Mating">Mating</option>
-            <option value="unknown">Unknown</option>
+            <option value="unknown">Other / Unknown</option>
           </select>
         </label>
         <label>
@@ -3930,6 +3930,7 @@
     let photoPreviewFitMode = true;
     let roiPreviewRequestId = 0;
     let currentAiStatus = { available: false };
+    let latestCanonicalCandidates = [];
     let selectedLabelingRuleSetId = "";
     async function api(path, options) {
       const response = await fetch(path, options);
@@ -5277,6 +5278,11 @@
           <article><strong>${escapeHtml(String(batch.open_review_count || 0))}</strong><span>open reviews</span></article>
           <article><strong>${escapeHtml(`${batch.applied_candidate_count || 0}/${batch.canonical_candidate_count || 0}`)}</strong><span>applied candidates</span></article>
         </div>
+        <div class="state-message" data-state-kind="${preview.ready ? "ok" : "warning"}">
+          <strong>${escapeHtml(batch.operator_status_label || preview.release_status)}</strong>
+          <span>${escapeHtml(batch.operator_status_detail || "")}</span>
+          <span>${escapeHtml(batch.operator_next_action || "")}</span>
+        </div>
         <table>
           <thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead>
           <tbody>
@@ -5308,6 +5314,82 @@
         </table>
         <button class="release-upload-batch" type="button" data-batch-id="${escapeHtml(batch.upload_batch_id)}" ${preview.ready ? "" : "disabled"}>Close Batch</button>
       `;
+    }
+
+    function renderCanonicalCandidateRows(canonicalCandidates) {
+      latestCanonicalCandidates = canonicalCandidates || [];
+      document.getElementById("canonicalCandidateRows").innerHTML = latestCanonicalCandidates.map((candidate) => `
+        <tr data-candidate-id="${escapeHtml(candidate.candidate_id)}">
+          <td>${escapeHtml(candidate.candidate_id)}</td>
+          <td>${escapeHtml(candidate.proposed_mouse_display_id || "--")}</td>
+          <td>${escapeHtml(candidate.proposed_strain || "--")}</td>
+          <td>${escapeHtml(candidate.proposed_dob || "--")}</td>
+          <td>${escapeHtml(candidate.proposed_count || "--")}</td>
+          <td class="canonical-candidate-status">${escapeHtml(candidate.status)}</td>
+          <td>${escapeHtml(candidate.review_id)}</td>
+          <td>${
+            candidate.status === "draft"
+              ? `<button class="preview-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Preview</button>
+                 <button class="apply-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Apply</button>`
+              : candidate.status === "applied"
+                ? `<button class="audit-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Audit</button>
+                   <button class="void-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Void Applied</button>`
+                : `<button class="audit-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Audit</button>`
+          }</td>
+        </tr>
+      `).join("") || emptyTableRow("No canonical candidate drafts yet", "Reviewed source-backed note lines can prepare candidates here before canonical apply.", 8);
+      attachCanonicalCandidateHandlers();
+    }
+
+    function markCanonicalCandidateApplied(result) {
+      latestCanonicalCandidates = latestCanonicalCandidates.map((candidate) =>
+        candidate.candidate_id === result.candidate_id
+          ? { ...candidate, status: result.status || "applied", updated_at: result.applied_at || candidate.updated_at }
+          : candidate
+      );
+      renderCanonicalCandidateRows(latestCanonicalCandidates);
+    }
+
+    function attachCanonicalCandidateHandlers() {
+      document.querySelectorAll(".preview-canonical-candidate").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply-preview`);
+          renderCanonicalApplyPreview(result);
+          const blockers = result.blockers.length ? ` Blockers: ${result.blockers.join("; ")}` : "";
+          document.getElementById("comparisonReviewMessage").textContent =
+            `Preview ${result.candidate_id}: ${result.summary.new_mouse_rows} new mouse row(s), ${result.summary.events} event(s), ${result.summary.duplicate_risks} duplicate risk(s).${blockers}`;
+        });
+      });
+      document.querySelectorAll(".apply-canonical-candidate").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const approved = window.confirm("Apply this candidate to canonical mouse state and create mouse events? Review the apply preview first if anything is uncertain.");
+          if (!approved) return;
+          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply`, { method: "POST" });
+          const appliedStatus = result.status || "applied";
+          markCanonicalCandidateApplied(result);
+          document.getElementById("comparisonReviewMessage").textContent =
+            `Applied ${result.created_mice} mouse record(s) from ${result.candidate_id}; ${result.existing_mice} already existed. Status: ${appliedStatus}.`;
+          await refresh();
+        });
+      });
+      document.querySelectorAll(".audit-canonical-candidate").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/audit`);
+          const blockers = result.blockers.length ? ` Blockers: ${result.blockers.join("; ")}` : "";
+          document.getElementById("comparisonReviewMessage").textContent =
+            `Audit ${result.candidate.candidate_id}: ${result.candidate.status}, ` +
+            `${result.summary.applied_mouse_count} linked mouse record(s), ` +
+            `${result.summary.event_count} event(s), ${result.summary.action_count} action(s).${blockers}`;
+        });
+      });
+      document.querySelectorAll(".void-canonical-candidate").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/void`, { method: "POST" });
+          document.getElementById("comparisonReviewMessage").textContent =
+            `Voided ${result.updated_mice} mouse record(s) from ${result.candidate_id}; ${result.created_events} void event(s) recorded.`;
+          await refresh();
+        });
+      });
     }
 
     function renderReviewVocabulary(vocabulary) {
@@ -5615,6 +5697,19 @@
       return "Quick Check: looks OK; accepted suggested value with raw evidence retained.";
     }
 
+    function canonicalMappingPreflightWarning(item) {
+      if (!item) return "";
+      const noteLineCount = Number(item.note_line_count || 0);
+      const targets = item.review_check_targets || [];
+      if (item.attention_level === "trace_only" || noteLineCount === 0) {
+        return "This review may not create an apply-ready candidate because it has no source-backed mouse note line. Map a source-backed mouse note review instead, or continue only if this is intentionally trace-only.";
+      }
+      if (!targets.some((target) => String(target).toLowerCase().includes("note"))) {
+        return "This review may not create an apply-ready candidate until note-line evidence is checked. Map a source-backed mouse note review instead when the goal is canonical apply.";
+      }
+      return "";
+    }
+
     function reviewResolutionPayload(button, item, allowAutoNote) {
       const container = button.closest(".review-actions");
       if (!container) {
@@ -5660,6 +5755,19 @@
       const selectedLegacyDecision = container.querySelector(".review-legacy-decision").value;
       if (selectedLegacyDecision === "apply_strain_registry_candidate" && (!reviewedStrainName || !reviewedGeneSymbol || !reviewedAlleleName)) {
         (container.querySelector(".reviewed-strain-name") || resolvedValueInput).focus();
+        return null;
+      }
+      const mappingWarning = selectedLegacyDecision === "map_to_canonical_candidate"
+        ? canonicalMappingPreflightWarning(item)
+        : "";
+      if (mappingWarning && container.dataset.canonicalMappingWarningAcknowledged !== button.dataset.reviewId) {
+        const message = container.querySelector(".review-resolution-message");
+        if (message) {
+          message.dataset.warningKind = "canonical-mapping-warning";
+          message.textContent = `${mappingWarning} Click Resolve with note again to map anyway.`;
+          message.classList.add("warn");
+        }
+        container.dataset.canonicalMappingWarningAcknowledged = button.dataset.reviewId;
         return null;
       }
       return {
@@ -5716,6 +5824,31 @@
       }
     }
 
+    function attachReviewResolutionHandlers(root = document) {
+      root.querySelectorAll(".resolve-review").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const item = currentVisibleReviews.find((entry) => entry.review_id === button.dataset.reviewId);
+          await submitReviewResolution(button, item, false);
+        });
+      });
+      root.querySelectorAll(".quick-resolve-review").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const item = currentVisibleReviews.find((entry) => entry.review_id === button.dataset.reviewId);
+          await submitReviewResolution(button, item, true);
+        });
+      });
+      root.querySelectorAll(".prepare-correction-review").forEach((button) => {
+        button.addEventListener("click", () => {
+          const container = button.closest(".review-actions");
+          const valueInput = container.querySelector(".review-resolved-value");
+          const noteInput = container.querySelector(".review-resolution-note");
+          valueInput.focus();
+          if (typeof valueInput.select === "function") valueInput.select();
+          noteInput.placeholder = "Describe the correction before resolving";
+        });
+      });
+    }
+
     function selectedReviewPosition() {
       const index = currentVisibleReviews.findIndex((item) => item.review_id === selectedReviewId);
       return {
@@ -5732,6 +5865,7 @@
       const nextIndex = Math.min(Math.max(currentIndex + offset, 0), currentVisibleReviews.length - 1);
       selectedReviewId = currentVisibleReviews[nextIndex].review_id;
       renderReviewDetail(currentVisibleReviews[nextIndex]);
+      attachReviewResolutionHandlers(document.getElementById("reviewDetailPanel"));
       attachReviewAuditHandler();
       attachReviewNavigationHandlers();
       document.querySelectorAll("#reviewRows .review-card").forEach((card) => {
@@ -7485,7 +7619,7 @@
           <td>${escapeHtml(`${batch.transcribed_photo_count || 0} done / ${batch.pending_transcription_count || 0} pending`)}</td>
           <td>${escapeHtml(`${batch.open_review_count || 0} open / ${batch.resolved_review_count || 0} resolved`)}</td>
           <td>${escapeHtml(`${batch.applied_candidate_count || 0}/${batch.canonical_candidate_count || 0} applied`)}</td>
-          <td>${escapeHtml(batch.derived_status || batch.status || "--")}</td>
+          <td title="${escapeHtml(batch.operator_status_detail || "")}">${escapeHtml(batch.operator_status_label || batch.derived_status || batch.status || "--")}</td>
           <td><button class="preview-upload-batch-release" type="button" data-batch-id="${escapeHtml(batch.upload_batch_id)}">Preview release</button></td>
         </tr>`
       ).join("") || emptyTableRow("No upload batches yet", "Upload cage-card source photos to create a raw source batch before review or canonical mapping.", 7);
@@ -7603,6 +7737,7 @@
         button.addEventListener("click", () => {
           selectedReviewId = button.dataset.reviewId;
           renderReviewDetail(visibleReviews.find((item) => item.review_id === selectedReviewId));
+          attachReviewResolutionHandlers(document.getElementById("reviewDetailPanel"));
           attachReviewAuditHandler();
           attachReviewNavigationHandlers();
           document.querySelectorAll("#reviewRows .review-card").forEach((card) => {
@@ -7621,88 +7756,11 @@
           openReviewSourcePhoto(item);
         });
       });
-      document.querySelectorAll(".resolve-review").forEach((button) => {
-        button.addEventListener("click", async () => {
-          const item = reviews.find((entry) => entry.review_id === button.dataset.reviewId);
-          await submitReviewResolution(button, item, false);
-        });
-      });
-      document.querySelectorAll(".quick-resolve-review").forEach((button) => {
-        button.addEventListener("click", async () => {
-          const item = reviews.find((entry) => entry.review_id === button.dataset.reviewId);
-          await submitReviewResolution(button, item, true);
-        });
-      });
-      document.querySelectorAll(".prepare-correction-review").forEach((button) => {
-        button.addEventListener("click", () => {
-          const container = button.closest(".review-actions");
-          const valueInput = container.querySelector(".review-resolved-value");
-          const noteInput = container.querySelector(".review-resolution-note");
-          valueInput.focus();
-          if (typeof valueInput.select === "function") valueInput.select();
-          noteInput.placeholder = "Describe the correction before resolving";
-        });
-      });
+      attachReviewResolutionHandlers(document);
       document.getElementById("sourceRows").innerHTML = sourceRecords.map((source) =>
         row([source.source_type, source.source_label || "--", source.source_uri || "--", source.imported_at, source.note || "--"])
       ).join("") || emptyTableRow("No source evidence yet", "Raw photos, manual entries, and imported workbook rows will appear here as traceable evidence.", 5);
-      document.getElementById("canonicalCandidateRows").innerHTML = canonicalCandidates.map((candidate) => `
-        <tr>
-          <td>${escapeHtml(candidate.candidate_id)}</td>
-          <td>${escapeHtml(candidate.proposed_mouse_display_id || "--")}</td>
-          <td>${escapeHtml(candidate.proposed_strain || "--")}</td>
-          <td>${escapeHtml(candidate.proposed_dob || "--")}</td>
-          <td>${escapeHtml(candidate.proposed_count || "--")}</td>
-          <td>${escapeHtml(candidate.status)}</td>
-          <td>${escapeHtml(candidate.review_id)}</td>
-          <td>${
-            candidate.status === "draft"
-              ? `<button class="preview-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Preview</button>
-                 <button class="apply-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Apply</button>`
-              : candidate.status === "applied"
-                ? `<button class="audit-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Audit</button>
-                   <button class="void-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Void Applied</button>`
-                : `<button class="audit-canonical-candidate" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">Audit</button>`
-          }</td>
-        </tr>
-      `).join("") || emptyTableRow("No canonical candidate drafts yet", "Reviewed source-backed note lines can prepare candidates here before canonical apply.", 8);
-      document.querySelectorAll(".preview-canonical-candidate").forEach((button) => {
-        button.addEventListener("click", async () => {
-          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply-preview`);
-          renderCanonicalApplyPreview(result);
-          const blockers = result.blockers.length ? ` Blockers: ${result.blockers.join("; ")}` : "";
-          document.getElementById("comparisonReviewMessage").textContent =
-            `Preview ${result.candidate_id}: ${result.summary.new_mouse_rows} new mouse row(s), ${result.summary.events} event(s), ${result.summary.duplicate_risks} duplicate risk(s).${blockers}`;
-        });
-      });
-      document.querySelectorAll(".apply-canonical-candidate").forEach((button) => {
-        button.addEventListener("click", async () => {
-          const approved = window.confirm("Apply this candidate to canonical mouse state and create mouse events? Review the apply preview first if anything is uncertain.");
-          if (!approved) return;
-          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/apply`, { method: "POST" });
-          document.getElementById("comparisonReviewMessage").textContent =
-            `Applied ${result.created_mice} mouse record(s) from ${result.candidate_id}; ${result.existing_mice} already existed.`;
-          await refresh();
-        });
-      });
-      document.querySelectorAll(".audit-canonical-candidate").forEach((button) => {
-        button.addEventListener("click", async () => {
-          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/audit`);
-          const blockers = result.blockers.length ? ` Blockers: ${result.blockers.join("; ")}` : "";
-          document.getElementById("comparisonReviewMessage").textContent =
-            `Audit ${result.candidate.candidate_id}: ${result.candidate.status}, ` +
-            `${result.summary.applied_mouse_count} linked mouse record(s), ` +
-            `${result.summary.event_count} event(s), ${result.summary.action_count} action(s).${blockers}`;
-        });
-      });
-      document.querySelectorAll(".void-canonical-candidate").forEach((button) => {
-        button.addEventListener("click", async () => {
-          const result = await api(`/api/canonical-candidates/${button.dataset.candidateId}/void`, { method: "POST" });
-          document.getElementById("comparisonReviewMessage").textContent =
-            `Voided ${result.updated_mice} mouse record(s) from ${result.candidate_id}; ${result.created_events} void event(s) recorded.`;
-          await refresh();
-        });
-      });
+      renderCanonicalCandidateRows(canonicalCandidates);
       document.getElementById("correctionRows").innerHTML = corrections.map((correction) =>
         row([
           `${correction.entity_type}:${correction.entity_id}`,

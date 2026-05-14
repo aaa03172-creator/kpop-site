@@ -76,6 +76,8 @@ Failure handling:
 
 - If one upload fails, do not re-upload the whole batch blindly. Confirm which photos were stored first.
 - If a source photo is missing or cannot be opened, stop the pilot and fix the copied input folder.
+- The Codex in-app Browser control surface does not provide file upload support for this private copied-photo pilot. Use the normal local browser UI or a standalone Playwright run when the verification step must upload private copied photos.
+- For unexpected card formats, select `Other / Unknown`. Treat these as trace-only until source evidence supports a supported separated or mating workflow.
 
 ## 5. Choose Extraction Mode
 
@@ -202,4 +204,3 @@ Record:
 - any evidence traceability gaps
 
 Do not commit private photos, copied private manifests, generated workbooks, local database files, or backup folders.
-

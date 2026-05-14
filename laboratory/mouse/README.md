@@ -201,6 +201,14 @@ The private-photo-safe example harness can be checked without committing real ph
 npm run test:real-photo-pilot
 ```
 
+For an actual copied-photo pilot manifest, generate a sanitized repeatable run log shell before recording operator results:
+
+```powershell
+npm run pilot:copied-runbook -- --manifest "<private manifest>" --run-label "<label>" --output-log docs/pilot_runs/YYYY-MM-DD-<label>.md
+```
+
+The generated log omits private paths and reminds the operator that `other` manifest cases appear as `Other / Unknown` in the UI. Private upload/download verification should use the normal local browser UI or standalone Playwright because the Codex in-app Browser control surface does not provide file upload support for this pilot.
+
 ## Local Pilot Backup And Restore
 
 Use `docs/local_backup_restore_2026-05-13.md` before any real pilot run. The backup script copies the local SQLite database, uploaded photos, exports, and generated artifacts to a timestamped folder outside Git by default:
@@ -218,6 +226,8 @@ Use `docs/pilot_operator_checklist_2026-05-13.md` during controlled local pilot 
 For a step-by-step local run from `start.bat` through final XLSX download and post-session inspection, use `docs/manual_pilot_walkthrough_2026-05-13.md`.
 
 Use `docs/pilot_run_log_template_2026-05-13.md` to record a sanitized dry-run summary under `docs/pilot_runs/` after a synthetic or copied non-production pilot.
+
+For the first 5-photo dry run, use `docs/five_photo_dry_run_manifest_guide_2026-05-13.md` to create a private manifest outside Git before launching the app.
 
 ## MVP Non-Goals
 
