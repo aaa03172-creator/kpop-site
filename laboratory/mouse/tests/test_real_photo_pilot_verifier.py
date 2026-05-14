@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 
@@ -112,7 +113,7 @@ def test_real_photo_manifest_rejects_missing_photo_path(tmp_path: Path) -> None:
     assert summary["failures"] == [
         {
             "case_id": "missing_photo",
-            "failures": ["source_photo_path does not exist: does-not-exist.jpg"],
+            "failures": ["source_photo_path does not exist: <private source photo path>"],
         }
     ]
 
@@ -225,3 +226,92 @@ def test_private_copied_photo_manifest_reports_no_go_when_readiness_evidence_is_
     assert "pilot photo count must be between 20 and 30; found 1" in failure_text
     assert "backup_restore.after_backup_label is required" in failure_text
     assert "backup_restore.restore_probe_label must be a label, not a local path" in failure_text
+
+
+def test_verifier_cli_redacts_private_source_photo_path_on_missing_photo(tmp_path: Path) -> None:
+    private_manifest_path = tmp_path / "private-manifest.json"
+    private_photo_path = tmp_path / "secret-room" / "pilot_photo_001.jpg"
+    manifest = {
+        "layer": "review item / test fixture",
+        "canonical": False,
+        "source_policy": "Local-only copied-photo pilot labels. Do not commit private paths.",
+        "cases": [
+            {
+                "case_id": "pilot_photo_001",
+                "source_photo_path": str(private_photo_path),
+                "source_photo_filename": "pilot_photo_001.jpg",
+                "card_type": "separated",
+                "traceability_label": "Private pilot / photo 001",
+                "expected_review_level": "quick_check",
+                "expected_export_blocking": False,
+                "expected_fields": {
+                    "raw_strain_text": "raw text",
+                    "mouse_ids_or_note_lines": ["note line"],
+                    "sex_count": "M 1",
+                    "dob": "unclear",
+                    "mating_or_litter_note": "",
+                    "expected_review_blockers": [],
+                },
+            }
+        ],
+    }
+    private_manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = subprocess.run(
+        ["python", str(SCRIPT_PATH), "--manifest", str(private_manifest_path)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    summary = json.loads(result.stdout)
+    encoded = json.dumps(summary, ensure_ascii=False)
+    assert "private manifest path omitted" in encoded
+    assert "source_photo_path does not exist: <private source photo path>" in encoded
+    assert str(private_manifest_path) not in encoded
+    assert str(private_photo_path) not in encoded
+    assert "secret-room" not in encoded
+
+
+def test_verifier_cli_redacts_private_manifest_path_on_load_error(tmp_path: Path) -> None:
+    private_manifest_path = tmp_path / "secret-room" / "broken-private-manifest.json"
+    private_manifest_path.parent.mkdir()
+    private_manifest_path.write_text("{", encoding="utf-8")
+
+    result = subprocess.run(
+        ["python", str(SCRIPT_PATH), "--manifest", str(private_manifest_path)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    summary = json.loads(result.stdout)
+    encoded = json.dumps(summary, ensure_ascii=False)
+    assert summary["manifest"] == "private manifest path omitted"
+    assert summary["manifest_filename"] == "broken-private-manifest.json"
+    assert str(private_manifest_path) not in encoded
+    assert "secret-room" not in encoded
+
+
+def test_verifier_cli_redacts_private_manifest_path_when_manifest_is_missing(tmp_path: Path) -> None:
+    private_manifest_path = tmp_path / "secret-room" / "missing-private-manifest.json"
+
+    result = subprocess.run(
+        ["python", str(SCRIPT_PATH), "--manifest", str(private_manifest_path)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    summary = json.loads(result.stdout)
+    encoded = json.dumps(summary, ensure_ascii=False)
+    assert summary["manifest"] == "private manifest path omitted"
+    assert summary["manifest_filename"] == "missing-private-manifest.json"
+    assert str(private_manifest_path) not in encoded
+    assert "secret-room" not in encoded
