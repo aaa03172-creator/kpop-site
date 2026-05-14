@@ -62,6 +62,27 @@ def test_static_ui_exposes_review_assistant_draft_controls() -> None:
     assert "return null;" in load_function
 
 
+def test_static_ui_warns_before_mapping_trace_only_candidate_and_refreshes_after_apply() -> None:
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+
+    assert "function canonicalMappingPreflightWarning" in html
+    assert "may not create an apply-ready candidate" in html
+    assert "Map a source-backed mouse note review instead" in html
+
+    start = html.index("function reviewResolutionPayload")
+    end = html.index("async function submitReviewResolution", start)
+    payload_function = html[start:end]
+    assert "canonicalMappingPreflightWarning(item)" in payload_function
+    assert "canonical-mapping-warning" in payload_function
+
+    start = html.index('document.querySelectorAll(".apply-canonical-candidate")')
+    end = html.index('document.querySelectorAll(".audit-canonical-candidate")', start)
+    apply_handler = html[start:end]
+    assert "markCanonicalCandidateApplied(result)" in apply_handler
+    assert "result.status" in apply_handler
+    assert "applied" in apply_handler
+
+
 def test_review_assistant_draft_is_local_read_only_and_traceable(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:
