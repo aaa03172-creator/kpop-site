@@ -1,0 +1,381 @@
+{
+  "layer": "review item / test fixture",
+  "canonical": false,
+  "source_policy": "Example-only copied-photo readiness labels using public placeholder assets. Do not commit private photos, private source paths, raw copied-photo text, OCR/AI payloads, or pilot exports.",
+  "recommended_card_types": ["separated", "mating", "unclear", "other"],
+  "readiness_criteria": {
+    "photo_count": {"min": 20, "max": 30},
+    "required_card_types": ["separated", "mating", "unclear", "other"],
+    "required_review_levels": ["must_review", "quick_check", "trace_only"],
+    "export_blocking": {"minimum_blocking": 1, "minimum_non_blocking": 1},
+    "backup_restore": {
+      "before_backup_label": "before-20-photo-readiness-example",
+      "after_backup_label": "after-20-photo-readiness-example",
+      "restore_probe_label": "restore-probe-20-photo-readiness-example",
+      "restore_verified": true,
+      "overwrite_refusal_verified": true
+    }
+  },
+  "cases": [
+    {
+      "case_id": "pilot_photo_001",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_001.jpg",
+      "card_type": "separated",
+      "traceability_label": "20-photo readiness example / photo 001",
+      "expected_review_level": "quick_check",
+      "expected_export_blocking": false,
+      "expected_fields": {
+        "raw_strain_text": "synthetic separated strain text",
+        "mouse_ids_or_note_lines": ["SYN001 right ear"],
+        "sex_count": "M 2",
+        "dob": "synthetic clear date",
+        "mating_or_litter_note": "",
+        "expected_review_blockers": []
+      }
+    },
+    {
+      "case_id": "pilot_photo_002",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_002.jpg",
+      "card_type": "separated",
+      "traceability_label": "20-photo readiness example / photo 002",
+      "expected_review_level": "must_review",
+      "expected_export_blocking": true,
+      "expected_fields": {
+        "raw_strain_text": "synthetic separated unclear strain text",
+        "mouse_ids_or_note_lines": ["SYN002 unclear ear"],
+        "sex_count": "F 3",
+        "dob": "unclear",
+        "mating_or_litter_note": "",
+        "expected_review_blockers": ["ambiguous_date"]
+      }
+    },
+    {
+      "case_id": "pilot_photo_003",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_003.jpg",
+      "card_type": "separated",
+      "traceability_label": "20-photo readiness example / photo 003",
+      "expected_review_level": "quick_check",
+      "expected_export_blocking": false,
+      "expected_fields": {
+        "raw_strain_text": "synthetic separated strain text",
+        "mouse_ids_or_note_lines": ["SYN003 left ear"],
+        "sex_count": "M 1",
+        "dob": "synthetic clear date",
+        "mating_or_litter_note": "",
+        "expected_review_blockers": []
+      }
+    },
+    {
+      "case_id": "pilot_photo_004",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_004.jpg",
+      "card_type": "separated",
+      "traceability_label": "20-photo readiness example / photo 004",
+      "expected_review_level": "must_review",
+      "expected_export_blocking": true,
+      "expected_fields": {
+        "raw_strain_text": "synthetic separated strain text",
+        "mouse_ids_or_note_lines": ["SYN004 struck note"],
+        "sex_count": "F 2",
+        "dob": "synthetic ambiguous date",
+        "mating_or_litter_note": "",
+        "expected_review_blockers": ["unclear_ear_label"]
+      }
+    },
+    {
+      "case_id": "pilot_photo_005",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_005.jpg",
+      "card_type": "separated",
+      "traceability_label": "20-photo readiness example / photo 005",
+      "expected_review_level": "quick_check",
+      "expected_export_blocking": false,
+      "expected_fields": {
+        "raw_strain_text": "synthetic separated strain text",
+        "mouse_ids_or_note_lines": ["SYN005 right ear"],
+        "sex_count": "M 4",
+        "dob": "synthetic clear date",
+        "mating_or_litter_note": "",
+        "expected_review_blockers": []
+      }
+    },
+    {
+      "case_id": "pilot_photo_006",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_006.jpg",
+      "card_type": "separated",
+      "traceability_label": "20-photo readiness example / photo 006",
+      "expected_review_level": "must_review",
+      "expected_export_blocking": true,
+      "expected_fields": {
+        "raw_strain_text": "synthetic separated strain text",
+        "mouse_ids_or_note_lines": ["SYN006 duplicate-active example"],
+        "sex_count": "F 1",
+        "dob": "synthetic clear date",
+        "mating_or_litter_note": "",
+        "expected_review_blockers": ["duplicate_active_mouse"]
+      }
+    },
+    {
+      "case_id": "pilot_photo_007",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_007.jpg",
+      "card_type": "separated",
+      "traceability_label": "20-photo readiness example / photo 007",
+      "expected_review_level": "quick_check",
+      "expected_export_blocking": false,
+      "expected_fields": {
+        "raw_strain_text": "synthetic separated strain text",
+        "mouse_ids_or_note_lines": ["SYN007 note line"],
+        "sex_count": "M 3",
+        "dob": "synthetic clear date",
+        "mating_or_litter_note": "",
+        "expected_review_blockers": []
+      }
+    },
+    {
+      "case_id": "pilot_photo_008",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_008.jpg",
+      "card_type": "separated",
+      "traceability_label": "20-photo readiness example / photo 008",
+      "expected_review_level": "must_review",
+      "expected_export_blocking": true,
+      "expected_fields": {
+        "raw_strain_text": "synthetic separated strain text",
+        "mouse_ids_or_note_lines": ["SYN008 count mismatch"],
+        "sex_count": "unclear",
+        "dob": "synthetic clear date",
+        "mating_or_litter_note": "",
+        "expected_review_blockers": ["count_mismatch"]
+      }
+    },
+    {
+      "case_id": "pilot_photo_009",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_009.jpg",
+      "card_type": "mating",
+      "traceability_label": "20-photo readiness example / photo 009",
+      "expected_review_level": "must_review",
+      "expected_export_blocking": true,
+      "expected_fields": {
+        "raw_strain_text": "synthetic mating strain text",
+        "mouse_ids_or_note_lines": ["synthetic sire x dam note"],
+        "sex_count": "parents",
+        "dob": "unclear",
+        "mating_or_litter_note": "synthetic litter note",
+        "expected_review_blockers": ["mating_litter_note_review"]
+      }
+    },
+    {
+      "case_id": "pilot_photo_010",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_010.jpg",
+      "card_type": "mating",
+      "traceability_label": "20-photo readiness example / photo 010",
+      "expected_review_level": "quick_check",
+      "expected_export_blocking": false,
+      "expected_fields": {
+        "raw_strain_text": "synthetic mating strain text",
+        "mouse_ids_or_note_lines": ["synthetic parent note"],
+        "sex_count": "parents",
+        "dob": "synthetic clear date",
+        "mating_or_litter_note": "synthetic mating note",
+        "expected_review_blockers": []
+      }
+    },
+    {
+      "case_id": "pilot_photo_011",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_011.jpg",
+      "card_type": "mating",
+      "traceability_label": "20-photo readiness example / photo 011",
+      "expected_review_level": "must_review",
+      "expected_export_blocking": true,
+      "expected_fields": {
+        "raw_strain_text": "synthetic mating strain text",
+        "mouse_ids_or_note_lines": ["synthetic dam note"],
+        "sex_count": "parents",
+        "dob": "synthetic ambiguous date",
+        "mating_or_litter_note": "synthetic pup count note",
+        "expected_review_blockers": ["mating_litter_note_review"]
+      }
+    },
+    {
+      "case_id": "pilot_photo_012",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_012.jpg",
+      "card_type": "mating",
+      "traceability_label": "20-photo readiness example / photo 012",
+      "expected_review_level": "quick_check",
+      "expected_export_blocking": false,
+      "expected_fields": {
+        "raw_strain_text": "synthetic mating strain text",
+        "mouse_ids_or_note_lines": ["synthetic sire note"],
+        "sex_count": "parents",
+        "dob": "synthetic clear date",
+        "mating_or_litter_note": "synthetic litter note",
+        "expected_review_blockers": []
+      }
+    },
+    {
+      "case_id": "pilot_photo_013",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_013.jpg",
+      "card_type": "mating",
+      "traceability_label": "20-photo readiness example / photo 013",
+      "expected_review_level": "must_review",
+      "expected_export_blocking": true,
+      "expected_fields": {
+        "raw_strain_text": "synthetic mating strain text",
+        "mouse_ids_or_note_lines": ["synthetic parent mismatch note"],
+        "sex_count": "parents",
+        "dob": "unclear",
+        "mating_or_litter_note": "synthetic ambiguous litter note",
+        "expected_review_blockers": ["mating_litter_note_review"]
+      }
+    },
+    {
+      "case_id": "pilot_photo_014",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_014.jpg",
+      "card_type": "mating",
+      "traceability_label": "20-photo readiness example / photo 014",
+      "expected_review_level": "quick_check",
+      "expected_export_blocking": false,
+      "expected_fields": {
+        "raw_strain_text": "synthetic mating strain text",
+        "mouse_ids_or_note_lines": ["synthetic parent note"],
+        "sex_count": "parents",
+        "dob": "synthetic clear date",
+        "mating_or_litter_note": "synthetic mating note",
+        "expected_review_blockers": []
+      }
+    },
+    {
+      "case_id": "pilot_photo_015",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_015.jpg",
+      "card_type": "mating",
+      "traceability_label": "20-photo readiness example / photo 015",
+      "expected_review_level": "must_review",
+      "expected_export_blocking": true,
+      "expected_fields": {
+        "raw_strain_text": "synthetic mating strain text",
+        "mouse_ids_or_note_lines": ["synthetic litter review note"],
+        "sex_count": "parents",
+        "dob": "synthetic clear date",
+        "mating_or_litter_note": "synthetic litter note",
+        "expected_review_blockers": ["mating_litter_note_review"]
+      }
+    },
+    {
+      "case_id": "pilot_photo_016",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_016.jpg",
+      "card_type": "unclear",
+      "traceability_label": "20-photo readiness example / photo 016",
+      "expected_review_level": "must_review",
+      "expected_export_blocking": true,
+      "expected_fields": {
+        "raw_strain_text": "unclear",
+        "mouse_ids_or_note_lines": ["synthetic unreadable note"],
+        "sex_count": "unclear",
+        "dob": "unclear",
+        "mating_or_litter_note": "not visible",
+        "expected_review_blockers": ["low_confidence", "manual_transcription_required"]
+      }
+    },
+    {
+      "case_id": "pilot_photo_017",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_017.jpg",
+      "card_type": "unclear",
+      "traceability_label": "20-photo readiness example / photo 017",
+      "expected_review_level": "must_review",
+      "expected_export_blocking": true,
+      "expected_fields": {
+        "raw_strain_text": "unclear",
+        "mouse_ids_or_note_lines": ["synthetic cropped note"],
+        "sex_count": "unclear",
+        "dob": "unclear",
+        "mating_or_litter_note": "not visible",
+        "expected_review_blockers": ["low_confidence"]
+      }
+    },
+    {
+      "case_id": "pilot_photo_018",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_018.jpg",
+      "card_type": "unclear",
+      "traceability_label": "20-photo readiness example / photo 018",
+      "expected_review_level": "quick_check",
+      "expected_export_blocking": false,
+      "expected_fields": {
+        "raw_strain_text": "synthetic partially readable text",
+        "mouse_ids_or_note_lines": ["synthetic partial note"],
+        "sex_count": "unclear",
+        "dob": "unclear",
+        "mating_or_litter_note": "not visible",
+        "expected_review_blockers": []
+      }
+    },
+    {
+      "case_id": "pilot_photo_019",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_019.jpg",
+      "card_type": "other",
+      "traceability_label": "20-photo readiness example / photo 019",
+      "expected_review_level": "trace_only",
+      "expected_export_blocking": false,
+      "expected_fields": {
+        "raw_strain_text": "synthetic unsupported format",
+        "mouse_ids_or_note_lines": [],
+        "sex_count": "not applicable",
+        "dob": "",
+        "mating_or_litter_note": "",
+        "expected_review_blockers": []
+      }
+    },
+    {
+      "case_id": "pilot_photo_020",
+      "example_only": true,
+      "source_photo_path": "static/assets/cage-card-evidence-art.png",
+      "source_photo_filename": "pilot_photo_020.jpg",
+      "card_type": "other",
+      "traceability_label": "20-photo readiness example / photo 020",
+      "expected_review_level": "trace_only",
+      "expected_export_blocking": false,
+      "expected_fields": {
+        "raw_strain_text": "synthetic other card type",
+        "mouse_ids_or_note_lines": [],
+        "sex_count": "not applicable",
+        "dob": "",
+        "mating_or_litter_note": "",
+        "expected_review_blockers": []
+      }
+    }
+  ]
+}

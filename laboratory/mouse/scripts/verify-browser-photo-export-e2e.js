@@ -68,6 +68,7 @@ wb.save(sys.argv[1])
 
 function startServer(dataDir, port) {
   const code = `
+import json
 import os
 from pathlib import Path
 from app import db
@@ -77,8 +78,65 @@ db.DATA_DIR = data_dir
 db.DB_PATH = data_dir / "mouse_lims.sqlite"
 db.init_db()
 
+from app import main as app_main
+
+class FakeResponse:
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {
+            "output_text": json.dumps({
+                "card_type": "Separated",
+                "raw_strain": "ApoM Tg/Tg",
+                "matched_strain": "ApoM Tg/Tg",
+                "sex_raw": "female",
+                "id_raw": "MT",
+                "dob_raw": "25.10.20-28",
+                "dob_normalized": "",
+                "mating_date_raw": "",
+                "mating_date_normalized": "",
+                "lmo_raw": "",
+                "mouse_count": "2 total",
+                "notes": [
+                    {"raw": "MT321 R'", "meaning": "mouse_item", "strike": "none", "confidence": 92},
+                    {"raw": "MT322 L'", "meaning": "mouse_item", "strike": "none", "confidence": 91},
+                    {"raw": "1 2 3", "meaning": "unlabeled_numeric_note", "strike": "none", "confidence": 72}
+                ],
+                "raw_visible_text_lines": [
+                    "ApoM Tg/Tg",
+                    "Sex female / 2 total",
+                    "I.D MT",
+                    "D.O.B 25.10.20-28",
+                    "MT321 R'",
+                    "MT322 L'",
+                    "1 2 3"
+                ],
+                "symbol_confusions": [],
+                "confidence": 88,
+                "uncertain_fields": ["dob_normalized"],
+                "reviewer_note": "Synthetic browser E2E fake AI response; operator must review the raw photo."
+            }, ensure_ascii=False)
+        }
+
+class FakeClient:
+    def __init__(self, timeout):
+        self.timeout = timeout
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return None
+
+    def post(self, url, *, headers, json):
+        return FakeResponse()
+
+app_main.current_openai_api_key = lambda: "browser-e2e-test-key"
+app_main.httpx.Client = FakeClient
+
 import uvicorn
-uvicorn.run("app.main:app", host="127.0.0.1", port=int(os.environ["MOUSE_E2E_PORT"]), log_level="warning")
+uvicorn.run(app_main.app, host="127.0.0.1", port=int(os.environ["MOUSE_E2E_PORT"]), log_level="warning")
 `;
   return spawn(PYTHON, ["-c", code], {
     cwd: ROOT,
@@ -86,7 +144,7 @@ uvicorn.run("app.main:app", host="127.0.0.1", port=int(os.environ["MOUSE_E2E_POR
       ...process.env,
       MOUSE_E2E_DATA_DIR: dataDir,
       MOUSE_E2E_PORT: String(port),
-      OPENAI_API_KEY: "",
+      OPENAI_API_KEY: "browser-e2e-test-key",
       OPENAI_PARSE_ASSIST_MODEL: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -118,6 +176,16 @@ async function waitForValue(page, callback, timeout = 15000) {
     await page.waitForTimeout(200);
   }
   throw new Error(`Timed out waiting for browser state. Last value: ${JSON.stringify(value)}`);
+}
+
+async function fillAndVerify(locator, value, description) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await locator.fill(value);
+    if ((await locator.inputValue()) === value) {
+      return;
+    }
+  }
+  throw new Error(`${description} did not retain the expected value.`);
 }
 
 async function setView(page, view) {
@@ -283,36 +351,51 @@ async function mapComparisonReviewToCandidate(page) {
 
   await inspectReviewByIssue(page, "Photo transcription differs from predecessor Excel");
   const panel = page.locator("#reviewDetailPanel");
-  await panel.locator(".review-resolved-value").fill("draft candidate");
-  await panel.locator(".review-resolution-note").fill(
-    "Browser E2E mapped reviewed photo-vs-Excel evidence into a canonical candidate draft."
+  await fillAndVerify(panel.locator(".review-resolved-value"), "draft candidate", "Comparison review resolved value");
+  await fillAndVerify(
+    panel.locator(".review-resolution-note"),
+    "Browser E2E mapped reviewed photo-vs-Excel evidence into a canonical candidate draft.",
+    "Comparison review note"
   );
-  await page.evaluate(() => {
-    document.querySelector("#reviewDetailPanel .review-legacy-decision").value = "map_to_canonical_candidate";
-  });
-  const mapped = await page.evaluate(async () => {
-    const panel = document.querySelector("#reviewDetailPanel");
-    const button = panel.querySelector(".resolve-review");
-    const response = await fetch(`/api/review-items/${encodeURIComponent(button.dataset.reviewId)}/resolve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        resolution_note: panel.querySelector(".review-resolution-note").value,
-        resolved_value: panel.querySelector(".review-resolved-value").value,
-        legacy_decision: "map_to_canonical_candidate",
-        correction_entity_type: "review_item",
-        correction_entity_id: button.dataset.reviewId,
-        correction_field_name: "reviewed_value",
-        correction_before_value: button.dataset.currentValue || "",
-        correction_after_value: panel.querySelector(".review-resolved-value").value,
-      }),
-    });
-    if (!response.ok) {
-      throw new Error(`${response.status} ${await response.text()}`);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await panel.locator(".review-legacy-decision").selectOption("map_to_canonical_candidate");
+    if ((await panel.locator(".review-legacy-decision").inputValue()) === "map_to_canonical_candidate") {
+      break;
     }
-    return response.json();
-  });
-  assert(mapped.canonical_candidate_id, "Mapping comparison review should create a canonical candidate draft.");
+    await page.waitForTimeout(100);
+  }
+  await fillAndVerify(panel.locator(".review-resolved-value"), "draft candidate", "Comparison review resolved value");
+  await fillAndVerify(
+    panel.locator(".review-resolution-note"),
+    "Browser E2E mapped reviewed photo-vs-Excel evidence into a canonical candidate draft.",
+    "Comparison review note"
+  );
+  assert(
+    (await panel.locator(".review-resolution-note").inputValue()).trim().length > 0,
+    "Comparison review note should be filled before mapping to a canonical candidate."
+  );
+  assert(
+    (await panel.locator(".review-legacy-decision").inputValue()) === "map_to_canonical_candidate",
+    "Comparison review decision should be set to map_to_canonical_candidate."
+  );
+  await panel.locator(".resolve-review").click();
+  await waitForText(
+    page,
+    "#reviewDetailPanel .review-resolution-message",
+    "may not create an apply-ready candidate"
+  );
+  assert(
+    (await panel.locator(".review-resolution-message").getAttribute("data-warning-kind")) === "canonical-mapping-warning",
+    "Mapping a candidate from weak note-line evidence should warn before creating a draft."
+  );
+  await panel.locator(".resolve-review").click();
+  const mapped = await waitForValue(page, () => fetch("/api/canonical-candidates")
+    .then((response) => response.json())
+    .then((candidates) => candidates.find((candidate) => candidate.status === "draft") || null));
+  assert(
+    mapped.candidate_id,
+    `Mapping comparison review should create a canonical candidate draft: ${JSON.stringify(mapped)}`
+  );
   await page.reload();
   await page.waitForLoadState("networkidle");
   await waitForValue(page, () => fetch("/api/canonical-candidates")
@@ -399,6 +482,11 @@ async function downloadFinalExports(page) {
   await page.locator("#exportSeparationXlsxButton").click();
   const workbook = await workbookDownload;
   assert(workbook.suggestedFilename().endsWith(".xlsx"), "Separation export should produce an XLSX file.");
+
+  const animalWorkbookDownload = page.waitForEvent("download");
+  await page.locator("#exportAnimalSheetXlsxButton").click();
+  const animalWorkbook = await animalWorkbookDownload;
+  assert(animalWorkbook.suggestedFilename().endsWith(".xlsx"), "Animal sheet export should produce an XLSX file.");
   await waitForText(page, "#exportDownloadMessage", "Downloaded");
 }
 
@@ -479,27 +567,48 @@ async function run() {
       `Legacy workbook import failed: ${legacyImportResponse.status()} ${legacyImportBody}`
     );
     await waitForText(page, "#legacyWorkbookMessage", "Imported");
+    await page.fill("#assignedStrainName", "ApoM Tg/Tg");
+    await page.fill("#assignedStrainAliases", "ApoM");
+    const assignedStrainResponsePromise = page.waitForResponse((response) =>
+      response.url().endsWith("/api/assigned-strains") &&
+      response.request().method() === "POST"
+    );
+    await page.locator("#assignedStrainButton").click();
+    const assignedStrainResponse = await assignedStrainResponsePromise;
+    const assignedStrainBody = await assignedStrainResponse.text();
+    assert(
+      assignedStrainResponse.ok(),
+      `Assigned strain scope creation failed: ${assignedStrainResponse.status()} ${assignedStrainBody}`
+    );
+    await waitForText(page, "#assignedStrainMessage", "Added ApoM Tg/Tg");
 
     await setView(page, "photo");
+    await waitForText(page, "#aiDraftMessage", "AI extraction ready");
     const photoPath = path.join(ROOT, "static", "assets", "cage-card-evidence-art.png");
     await page.setInputFiles("#photoFile", photoPath);
     await page.locator("#uploadButton").click();
-    await waitForText(page, "#uploadMessage", "Stored");
+    await waitForText(page, "#uploadMessage", "saved 1 extracted review transcription");
     await waitForValue(page, () => {
       const select = document.querySelector("#transcriptionPhotoId");
       return select && select.value && !select.textContent.includes("No photos uploaded");
     });
-
-    await page.selectOption("#transcriptionCardType", "Separated");
-    await page.fill("#transcriptionRawStrain", "ApoM Tg/Tg");
-    await page.fill("#transcriptionSexRaw", "female");
-    await page.selectOption("#transcriptionSexNormalized", "female");
-    await page.fill("#transcriptionIdRaw", "MT");
-    await page.fill("#transcriptionDobRaw", "25.10.20-28");
-    await page.fill("#transcriptionMouseCount", "2 total");
-    await page.fill("#transcriptionNotes", "MT321 R'\nMT322 L'\n1 2 3");
-    await page.locator("#transcriptionButton").click();
-    await waitForText(page, "#transcriptionMessage", "Saved transcription");
+    const aiExtractionEvidence = await waitForValue(page, () =>
+      fetch("/api/photo-review-workbench")
+        .then((response) => response.json())
+        .then((workbench) => {
+          const row = (workbench.rows || []).find((item) => item.manual_source_name === "ai_photo_extraction");
+          if (!row) return null;
+          const payload = row.manual_payload || {};
+          if (!payload.externalApproval?.approved_external_inference) return null;
+          return {
+            parse_id: row.manual_parse_id,
+            extraction_method: payload.extractionMethod,
+            external_approval: payload.externalApproval,
+            payload_minimization: payload.payloadMinimization,
+            manual_source_name: row.manual_source_name,
+          };
+        })
+    );
 
     const sourceNoteReview = await resolveSourceNoteReview(page);
     await mapComparisonReviewToCandidate(page);
@@ -528,12 +637,15 @@ async function run() {
     console.log(JSON.stringify({
       status: "passed",
       url: baseUrl,
+      extraction_method: aiExtractionEvidence.extraction_method,
+      external_approval: aiExtractionEvidence.external_approval,
+      payload_minimization: aiExtractionEvidence.payload_minimization,
       source_note_review: sourceNoteReview,
       auxiliary_reviews_resolved: auxiliaryResolved,
       ignored_roi_response_count: failedResponses.length - relevantFailedResponses.length,
       data_boundary: {
         photo_upload: "raw source",
-        manual_transcription: "parsed or intermediate result",
+        ai_extraction: "parsed or intermediate result",
         review_resolution: "review item",
         candidate_apply: "canonical structured state",
         export_download: "export or view",

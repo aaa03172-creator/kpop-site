@@ -11,15 +11,23 @@ Start with `docs/DOCUMENTATION_MAP.md` when deciding which project document to t
 - `AGENTS.md` defines active agent, data-boundary, and Git hygiene rules.
 - `final_mouse_colony_prd.md` is the primary adopted product reference.
 - `README.md` is the setup, command, and verification entry point.
+- `docs/pilot_readiness_baseline_2026-05-13.md` records the non-canonical local pilot baseline, verification commands, and copied/synthetic-data rule.
 - Design, review, and implementation planning notes are supporting context unless explicitly adopted by the PRD.
 - `docs/mouse_db_assistant_integration_review_2026-05-11.md` records how to keep assistant/API/MCP readiness as a design habit while deferring adapter implementation.
 - `docs/ui_references.md` records developer-only UI reference research rules, including Lazyweb safety guidance for fake-data-only design research.
 - When documentation and implementation differ, check committed tests and call out the mismatch before changing behavior.
 
+## Pilot Baseline
+
+The current local pilot readiness baseline is recorded in `docs/pilot_readiness_baseline_2026-05-13.md`.
+
+Use copied or synthetic cage-card photos and copied workbook inputs for the first pilot. Real photos, predecessor Excel rows, OCR text, and AI drafts remain raw source or parsed/intermediate evidence until reviewed and explicitly applied through the canonical candidate flow. Do not treat the local MVP as the lab's only source of truth until the real-photo pilot protocol, harness, backup/restore drill, and operator checklist are complete.
+
 ## Install
 
 ```powershell
 python -m pip install -r requirements.txt
+npm ci
 ```
 
 On this Windows workspace, the project-local virtual environment can be used directly:
@@ -181,6 +189,46 @@ It does not change runtime behavior, database schema, API contracts, `AGENTS.md`
 npm run test:cage-card-skill-gym
 ```
 
+## Real Photo Pilot Protocol
+
+Use `docs/real_photo_pilot_protocol_2026-05-13.md` before the first real cage-card photo pilot. The first pilot dataset should use 20-30 copied photos, label each copied photo as `separated`, `mating`, `unclear`, or `other`, and record only the expected fields needed to evaluate workflow safety.
+
+Real photos remain `raw source`. Pilot labels are `review item / test fixture`. OCR text, local OCR output, and AI drafts remain `parsed or intermediate result` until reviewed and explicitly applied through the canonical candidate flow.
+
+The private-photo-safe example harness can be checked without committing real photos:
+
+```powershell
+npm run test:real-photo-pilot
+```
+
+For an actual copied-photo pilot manifest, generate a sanitized repeatable run log shell before recording operator results:
+
+```powershell
+npm run pilot:copied-runbook -- --manifest "<private manifest>" --run-label "<label>" --output-log docs/pilot_runs/YYYY-MM-DD-<label>.md
+```
+
+The generated log omits private paths and reminds the operator that `other` manifest cases appear as `Other / Unknown` in the UI. Private upload/download verification should use the normal local browser UI or standalone Playwright because the Codex in-app Browser control surface does not provide file upload support for this pilot.
+
+## Local Pilot Backup And Restore
+
+Use `docs/local_backup_restore_2026-05-13.md` before any real pilot run. The backup script copies the local SQLite database, uploaded photos, exports, and generated artifacts to a timestamped folder outside Git by default:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/backup-local-pilot.ps1 -Label before-first-pilot
+```
+
+Restore refuses to overwrite an existing target unless `-Force` is provided.
+
+## Pilot Operator Checklist
+
+Use `docs/pilot_operator_checklist_2026-05-13.md` during controlled local pilot sessions. The checklist covers copied-photo setup, assigned strain confirmation, upload, review blockers, source-photo inspection, reviewed candidate apply, export readiness, stop conditions, and post-session backup.
+
+For a step-by-step local run from `start.bat` through final XLSX download and post-session inspection, use `docs/manual_pilot_walkthrough_2026-05-13.md`.
+
+Use `docs/pilot_run_log_template_2026-05-13.md` to record a sanitized dry-run summary under `docs/pilot_runs/` after a synthetic or copied non-production pilot.
+
+For the first 5-photo dry run, use `docs/five_photo_dry_run_manifest_guide_2026-05-13.md` to create a private manifest outside Git before launching the app.
+
 ## MVP Non-Goals
 
 - No large web UI in this CLI package.
@@ -199,11 +247,17 @@ python -m pytest
 The repository also keeps the browser prototype and local FastAPI scaffold checks wired through npm:
 
 ```powershell
+npm ci
 npm test
 npm run test:local
 npm run test:cage-card-skill-gym
 npm run test:python
 npm run verify
 ```
+
+Run `npm ci` before npm-based verification on a fresh checkout or after ignored
+dependency caches such as `node_modules/` have been removed. `npm run verify`
+depends on the local Playwright dev dependency, while photo E2E fixtures are
+generated as disposable local test data and are not committed.
 
 Use `npm run mousedb -- --help` as a convenient wrapper around `python -m mousedb`.
