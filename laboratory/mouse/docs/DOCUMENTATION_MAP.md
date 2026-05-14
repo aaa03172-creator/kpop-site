@@ -46,6 +46,8 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | `docs/ui_references.md` | design guidance / non-canonical reference policy | Developer-only UI reference research rules, including Lazyweb fake-data-only usage and local MCP/token safety. |
 | `docs/ui_interaction_visual_feedback_direction_2026-05-11_ko.md` | design guidance / non-canonical product documentation | Interaction, visual feedback, progress, icon/chip, and state-cue guidance for reducing text-heavy UI without weakening evidence-first boundaries. |
 | `docs/ui_ux_implementation_tracker_2026-05-11.md` | design guidance / non-canonical project tracking documentation | Tracks merged UI/UX implementation slices, verification evidence, remaining gaps, and recommended next slices. |
+| `docs/ui_ux_review_2026-05-13_ko.md` | review item / non-canonical UI review documentation | Current rendered UI/UX review across workflow, evidence, review fatigue, export safety, accessibility, privacy, and documentation-alignment perspectives. |
+| `docs/ui_ux_revision_plan_2026-05-13_ko.md` | implementation planning / non-canonical UI plan | Scoped follow-up plan for fixing review counters, Review Queue hierarchy, internal ID exposure, export download hierarchy, source-photo missing states, AI copy, and mobile ergonomics. |
 | `mouse_strain_colony_system_design_ko.md` | design guidance / non-canonical project document | Broader strain registry and colony tracking design. |
 | `reference_adoption_notes.md` | design guidance / non-canonical reference adoption note | External references filtered for this project. |
 | `mouse_open_source_research_adoption_ko.md` | design guidance / non-canonical reference adoption note | Open-source mouse colony research adoption notes. |
