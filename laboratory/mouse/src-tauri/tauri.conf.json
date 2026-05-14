@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MouseDB",
+  "version": "1.0.0",
+  "identifier": "org.mousedb.desktop",
+  "build": {
+    "beforeDevCommand": "python -m uvicorn app.main:app --host 127.0.0.1 --port 8765",
+    "devUrl": "http://127.0.0.1:8765",
+    "frontendDist": "http://127.0.0.1:8765"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MouseDB",
+        "label": "main",
+        "width": 1440,
+        "height": 960,
+        "minWidth": 1100,
+        "minHeight": 760
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "externalBin": ["binaries/mousedb-server"],
+    "windows": {
+      "wix": {
+        "language": "en-US"
+      }
+    }
+  }
+}

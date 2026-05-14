@@ -8,6 +8,10 @@ tmp-image-cleanup-*.png
 data/
 mousedb_artifacts/
 .venv/
+build/
+dist/
+src-tauri/binaries/
+src-tauri/target/
 .env
 .env.*
 !.env.example

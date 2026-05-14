@@ -1,0 +1,17 @@
+[package]
+name = "mousedb-desktop"
+version = "1.0.0"
+description = "MouseDB desktop shell"
+authors = ["MouseDB"]
+edition = "2021"
+
+[lib]
+name = "mousedb_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.1", features = [] }
+tauri-plugin-shell = "2.3.5"

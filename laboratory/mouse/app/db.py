@@ -1,14 +1,24 @@
 ﻿from __future__ import annotations
 
 import sqlite3
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = ROOT / "data"
-DB_PATH = DATA_DIR / "mouse_lims.sqlite"
+
+
+def configured_path(env_name: str, fallback: Path) -> Path:
+    configured = os.environ.get(env_name)
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return fallback
+
+
+DATA_DIR = configured_path("MOUSEDB_DATA_DIR", ROOT / "data")
+DB_PATH = configured_path("MOUSEDB_DB_PATH", DATA_DIR / "mouse_lims.sqlite")
 
 
 EAR_LABEL_MASTER_SEEDS = [
@@ -158,7 +168,9 @@ REVIEW_PRIORITY_MASTER_SEEDS = [
 
 
 def ensure_data_dirs() -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "photos").mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "legacy_workbooks").mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "exports").mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "roi").mkdir(parents=True, exist_ok=True)
 

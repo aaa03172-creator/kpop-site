@@ -37,6 +37,33 @@ On this Windows workspace, the project-local virtual environment can be used dir
 .venv\Scripts\python.exe -m mousedb --help
 ```
 
+## Desktop Shell
+
+The desktop path is a Tauri v2 shell around the existing FastAPI/static MouseDB app. Tauri starts a PyInstaller sidecar named `mousedb-server`, waits for `/api/health`, and opens the local UI at `http://127.0.0.1:8765`.
+
+Desktop runtime files are stored outside the application bundle under the OS app data directory. Raw photos stay under `data/photos/`, predecessor workbook uploads under `data/legacy_workbooks/`, accepted local state under `data/mouse_lims.sqlite`, exports under `data/exports/`, ROI previews under `data/roi/`, and generated artifacts under `mousedb_artifacts/`.
+
+Validate the desktop scaffold without Rust:
+
+```powershell
+npm run test:desktop-config
+```
+
+Build the Python sidecar for the current Rust target triple:
+
+```powershell
+npm run build:desktop-sidecar
+```
+
+Run or build the Tauri shell after installing Rust/Cargo and the Tauri Windows prerequisites:
+
+```powershell
+npm run tauri:dev
+npm run tauri:build
+```
+
+`npm run tauri:build` first runs `npm run build:desktop-sidecar`, then builds the Windows installer. Generated folders such as `build/`, `dist/`, `src-tauri/binaries/`, and `src-tauri/target/` are local build artifacts and are ignored by Git.
+
 ## Database
 
 By default MouseDB stores SQLite data at `data/mousedb.sqlite`.

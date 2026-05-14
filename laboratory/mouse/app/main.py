@@ -39,7 +39,7 @@ from scripts.parse_legacy_workbooks import parse_workbook
 STATIC_DIR = ROOT / "static"
 FIXTURE_PATH = ROOT / "fixtures" / "sample_parse_results.json"
 ROI_PRESET_PATH = ROOT / "config" / "roi_presets.json"
-ARTIFACT_ROOT = ROOT / "mousedb_artifacts"
+ARTIFACT_ROOT = Path(os.environ.get("MOUSEDB_ARTIFACT_ROOT", ROOT / "mousedb_artifacts")).expanduser().resolve()
 RUNTIME_OPENAI_API_KEY = ""
 ROI_CACHE_LOCK = threading.RLock()
 
