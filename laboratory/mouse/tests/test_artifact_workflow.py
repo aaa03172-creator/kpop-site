@@ -668,6 +668,45 @@ def test_export_preview_ui_consumes_backend_row_state_contract() -> None:
     assert "stale_after_correction" in row_state_function
 
 
+def test_static_export_center_prioritizes_final_gate_and_download_hierarchy() -> None:
+    static_html = Path("static/index.html").read_text(encoding="utf-8")
+
+    export_center_index = static_html.index("<h2>Export Center</h2>")
+    search_export_index = static_html.index("<h2>Search & CSV Export</h2>")
+    assert export_center_index < search_export_index
+
+    start = static_html.rindex('<section class="full" data-view="exports">', 0, export_center_index)
+    end = static_html.index("</section>", export_center_index)
+    export_center = static_html[start:end]
+
+    assert 'class="export-gate-banner"' in export_center
+    assert "Preview / search" in export_center
+    assert "Worklists" in export_center
+    assert "Final lab files" in export_center
+    assert "Preview-only" in export_center
+    assert "Worklist" in export_center
+    assert "Final lab file" in export_center
+    assert export_center.index('id="exportReadinessCard"') < export_center.index('id="exportMouseCsvButton"')
+    assert export_center.index('id="exportReadinessCard"') < export_center.index('id="exportGenotypingCsvButton"')
+    assert export_center.index("Final lab files") < export_center.index('id="exportReadyMouseCsvButton"')
+
+
+def test_static_export_final_lab_files_copy_tracks_gate_state() -> None:
+    static_html = Path("static/index.html").read_text(encoding="utf-8")
+
+    assert 'id="exportFinalLabFilesGroup"' in static_html
+    assert 'id="exportFinalLabFilesCopy"' in static_html
+    start = static_html.index("function setFinalExportActionState")
+    setter = static_html[start : static_html.index("function renderExportReadiness", start)]
+
+    assert "exportFinalLabFilesCopy" in setter
+    assert "Final lab file downloads are ready" in setter
+    assert "Final lab file downloads stay disabled" in setter
+    assert "exportFinalLabFilesGroup" in setter
+    assert 'classList.toggle("ready", ready)' in setter
+    assert 'classList.toggle("blocked", !ready)' in setter
+
+
 def test_separation_xlsx_renders_trace_sheet_with_row_state_and_source_refs(
     tmp_path: Path,
     monkeypatch,

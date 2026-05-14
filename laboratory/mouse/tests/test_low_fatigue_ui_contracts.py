@@ -226,6 +226,200 @@ def test_focus_review_excludes_hidden_default_fixture_reviews(tmp_path: Path) ->
         db.DB_PATH = old_db_path
 
 
+def test_export_preview_separates_operator_workload_from_hidden_reviews(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_hidden_fixture",
+                    None,
+                    "fixtures/sample_parse_results.json",
+                    json.dumps({"confidence": 95, "rawStrain": "Fixture"}, ensure_ascii=False),
+                    "2026-05-13T10:00:00Z",
+                    "review",
+                    95,
+                    1,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_operator_review",
+                    None,
+                    "manual_photo_transcription",
+                    json.dumps({"confidence": 80, "rawStrain": "C57BL/6J"}, ensure_ascii=False),
+                    "2026-05-13T10:01:00Z",
+                    "review",
+                    80,
+                    1,
+                ),
+            )
+            rows = [
+                (
+                    "review_hidden_fixture",
+                    "parse_hidden_fixture",
+                    "Medium",
+                    "Fixture review",
+                    "fixture",
+                    "fixture",
+                    "Fixture/sample records stay out of operator workload.",
+                    "open",
+                    "2026-05-13T10:02:00Z",
+                ),
+                (
+                    "review_operator_blocker",
+                    "parse_operator_review",
+                    "High",
+                    "Duplicate active mouse",
+                    "MT319 active in another cage-card snapshot",
+                    "Resolve duplicate before export.",
+                    "Duplicate active mouse blocks final export.",
+                    "open",
+                    "2026-05-13T10:03:00Z",
+                ),
+                (
+                    "review_operator_quick",
+                    "parse_operator_review",
+                    "Medium",
+                    "Unlabeled numeric note needs review",
+                    "7",
+                    "Confirm numeric note meaning.",
+                    "Numeric note can be grouped as a quick check.",
+                    "open",
+                    "2026-05-13T10:04:00Z",
+                ),
+            ]
+            conn.executemany(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value,
+                     suggested_value, review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+        client = TestClient(app)
+
+        response = client.get("/api/export-preview")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["open_review_items"] == 3
+        assert payload["open_review_attention_counts"] == {
+            "must_review": 1,
+            "quick_check": 1,
+            "trace_only": 0,
+            "hidden_default": 1,
+        }
+        assert payload["review_workload"] == {
+            "operator_workload_count": 2,
+            "must_review_count": 1,
+            "quick_check_count": 1,
+            "open_review_total": 3,
+            "hidden_diagnostic_count": 1,
+            "trace_only_count": 0,
+        }
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_static_shell_status_uses_operator_workload_counter() -> None:
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    start = html.index("function renderShellStatus")
+    shell_status = html[start : html.index("function firstMouse", start)]
+
+    assert 'id="topOpenReviews">0 review tasks</span>' in html
+    assert '<strong id="heroOpenReviews">0</strong><span>review tasks</span>' in html
+    assert "operatorWorkloadCount" in shell_status
+    assert 'navReviewCount").textContent = String(operatorWorkloadCount)' in shell_status
+    assert 'navDashboardCount").textContent = String(operatorWorkloadCount)' in shell_status
+    assert 'heroOpenReviews").textContent = String(operatorWorkloadCount)' in shell_status
+    assert "review tasks" in shell_status
+
+
+def test_static_review_queue_prioritizes_focus_review_before_configuration() -> None:
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    review_section_start = html.index('<section class="full" data-view="review">')
+    review_section_end = html.index('<section class="full collapsible-section" data-view="review records">')
+    review_section = html[review_section_start:review_section_end]
+
+    assert review_section.index('class="review-workbench"') < review_section.index("Review persona master")
+    assert review_section.index('class="review-workbench"') < review_section.index("Review priority master")
+    assert "<summary>" in review_section
+    assert "Review configuration" in review_section
+
+
+def test_static_source_photo_missing_state_names_raw_evidence_failure() -> None:
+    html = Path("static/index.html").read_text(encoding="utf-8")
+
+    assert "function sourcePhotoUnavailableHtml" in html
+    assert "function handleSourcePhotoLoadError" in html
+    assert "Source photo unavailable" in html
+    assert "Raw photo record is preserved" in html
+    assert "acceptance/export should stay blocked" in html
+    assert 'class="source-photo-missing-state"' in html
+    assert 'id="transcriptionPhotoMissingState"' in html
+
+    review_start = html.index("function reviewSourceEvidencePanel")
+    review_panel = html[review_start : html.index("function reviewEvidencePanel", review_start)]
+    assert 'onerror="handleSourcePhotoLoadError(event)"' in review_panel
+    assert "sourcePhotoUnavailableHtml" in review_panel
+    assert 'data-source-photo-state="${item.image_url ? "available" : "unavailable"}"' in review_panel
+
+    preview_start = html.index("function updateTranscriptionPhotoPreview")
+    preview_function = html[preview_start : html.index("function pendingPhotoQueue", preview_start)]
+    assert "transcriptionPhotoMissingState" in preview_function
+    assert "handleSourcePhotoLoadError" in html
+    assert "stateWrapper.hidden = false" in html
+    assert "Open missing photo record" in html
+    assert "button.dataset.photoId === photoId" in html
+    assert 'frame.dataset.sourcePhotoState = "available"' in preview_function
+    assert 'frame.dataset.sourcePhotoState = "empty"' in preview_function
+
+
+def test_static_pilot_mobile_ergonomics_stack_critical_rows() -> None:
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    media_start = html.index("@media (max-width: 900px)")
+    mobile_css = html[media_start : html.index("</style>", media_start)]
+    upload_start = html.index('id="uploadBatchRows"')
+    upload_render = html[upload_start : html.index('document.getElementById("workbenchPhotoCards")', upload_start)]
+    export_start = html.index('id="exportBlockerRows"')
+    export_render = html[export_start : html.index('document.querySelectorAll(".open-export-blocker-review")', export_start)]
+    focus_start = html.index("function renderFocusReviewReadModel")
+    focus_render = html[focus_start : html.index("function operationsRiskTone", focus_start)]
+
+    assert 'class="pilot-critical-table upload-batch-mobile-table"' in html
+    assert 'class="pilot-critical-table export-blocker-mobile-table"' in html
+    assert "pilot-critical-table thead" in mobile_css
+    assert ".export-table-wrap .pilot-critical-table" in mobile_css
+    assert 'content: attr(data-mobile-label)' in mobile_css
+    assert ".pilot-critical-table td" in mobile_css
+    assert ".pilot-critical-table button" in mobile_css
+    assert "grid-template-columns: minmax(88px, 0.38fr) minmax(0, 1fr)" in mobile_css
+
+    for label in ["Batch", "Photos", "Transcription", "Reviews", "Mapping", "Status", "Action"]:
+        assert f'data-mobile-label="{label}"' in upload_render
+
+    for label in ["Blocker", "Severity", "Check", "Suggested", "Reason", "Action"]:
+        assert f'data-mobile-label="{label}"' in export_render
+
+    assert 'class="focus-review-card pilot-critical-card"' in focus_render
+    assert "pilot-critical-card" in mobile_css
+    assert "overflow-wrap: anywhere" in mobile_css
+
+
 def test_focus_review_action_hint_does_not_mark_unknown_quick_check_safe(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:

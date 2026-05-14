@@ -40,6 +40,26 @@ def test_static_operations_home_target_actions_refresh_selected_views() -> None:
     assert 'selectedAuditMouseId = targetId;\n            setActiveView("mouse-detail");\n            await refresh();' in handler
 
 
+def test_static_operations_home_hides_raw_ids_in_operator_copy() -> None:
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    start = html.index("function renderOperationsHomeReadModel")
+    end = html.index("function renderColonyStateReadModel", start)
+    renderer = html[start:end]
+    row_start = renderer.index('class="export-blocker-row operations-task')
+
+    assert "operationsEvidenceSummary(task)" in renderer
+    debug_start = renderer.index("operations-debug-details", row_start)
+    visible_copy = renderer[row_start:debug_start]
+    debug_copy = renderer[debug_start:]
+
+    assert "compactDetails(task.evidence_refs || {})" not in visible_copy
+    assert "Debug details" in debug_copy
+    assert "compactDetails(task.evidence_refs || {})" in debug_copy
+    assert "review_id:" not in visible_copy
+    assert "parse_id:" not in visible_copy
+    assert "source_photo_id:" not in visible_copy
+
+
 def test_static_mouse_detail_uses_selected_operations_target() -> None:
     html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 

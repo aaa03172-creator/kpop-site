@@ -5,10 +5,52 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from app import db
 from app import main as app_main
 from app.main import ROOT, PhotoAiDraftCreate, ai_transcription_image_content, request_ai_transcription_draft
+
+
+def test_static_ai_status_copy_requires_approval_and_local_only_policy() -> None:
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    shell_start = html.index("function renderShellStatus")
+    shell_end = html.index("function firstMouse", shell_start)
+    shell_status = html[shell_start:shell_end]
+
+    assert "function aiDraftStatusLabel" in html
+    assert "function aiPayloadPolicyCopy" in html
+    assert "function aiExternalApprovalMessage" in html
+    assert "AI draft: approval required" in html
+    assert "AI unavailable: local-only" in html
+    assert "No external request is sent until you approve this action." in html
+    assert "Payload minimized: selected source photo plus active assigned strain names only." in html
+    assert "Drafts stay reviewable; operator approval is still required." in html
+    assert "aiPayloadPolicyCopy(aiStatus)" in shell_status
+    assert "aiDraftStatusLabel(aiStatus)" in shell_status
+    assert "local + AI draft ready" not in shell_status
+
+
+def test_health_ai_draft_status_keeps_approval_required_when_provider_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_main, "RUNTIME_OPENAI_API_KEY", "")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    client = TestClient(app_main.app)
+
+    unavailable = client.get("/api/health").json()["ai_draft"]
+
+    assert unavailable["available"] is False
+    assert unavailable["approval_required"] is True
+    assert unavailable["key_source"] == "missing"
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    available = client.get("/api/health").json()["ai_draft"]
+
+    assert available["available"] is True
+    assert available["approval_required"] is True
+    assert available["key_source"] == "environment"
 
 
 def test_ai_image_content_does_not_send_unreadable_full_photo_fallback(tmp_path: Path) -> None:

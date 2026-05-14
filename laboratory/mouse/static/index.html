@@ -1044,6 +1044,31 @@
     .review-source-preview img:not([src]) {
       display: none;
     }
+    .source-photo-missing-state {
+      display: grid;
+      gap: 4px;
+      border: 1px solid var(--warning-line);
+      border-radius: 7px;
+      background: var(--warning-bg);
+      color: var(--warning);
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .source-photo-missing-state[hidden] {
+      display: none;
+    }
+    .source-photo-missing-state strong {
+      color: var(--warning);
+      font-size: 13px;
+    }
+    .review-source-preview[data-source-photo-state="unavailable"] img,
+    .photo-preview-frame[data-source-photo-state="unavailable"] img {
+      display: none;
+    }
+    .photo-preview-frame[data-source-photo-state="unavailable"] {
+      background: var(--warning-bg);
+    }
     .review-source-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1211,6 +1236,11 @@
     .photo-queue-bar .muted {
       font-size: 12px;
       font-weight: 700;
+    }
+    .ai-payload-policy {
+      flex-basis: 100%;
+      margin: 0;
+      line-height: 1.45;
     }
     .section-kicker {
       display: grid;
@@ -1955,6 +1985,51 @@
       gap: 12px;
       align-items: stretch;
     }
+    .export-gate-banner {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+      gap: 12px;
+      align-items: stretch;
+      margin: 12px 0;
+    }
+    .export-gate-copy,
+    .export-action-group,
+    .export-search-results {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px;
+      min-width: 0;
+    }
+    .export-action-hierarchy {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 12px 0;
+      align-items: stretch;
+    }
+    .export-action-group {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .export-action-group p,
+    .export-gate-copy p,
+    .export-search-results p {
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .export-action-group.final-lab-files.blocked {
+      border-color: var(--blocked-line);
+      background: var(--blocked-bg);
+    }
+    .export-action-group.final-lab-files.ready {
+      border-color: var(--ready-line);
+      background: var(--ready-bg);
+    }
+    .export-search-results {
+      margin: 12px 0;
+    }
     .readiness-status-card,
     .export-action-panel,
     .export-file-panel,
@@ -2024,9 +2099,12 @@
       background: #fff;
     }
     .export-action-panel h3,
+    .export-gate-copy h3,
+    .export-action-group h3,
     .export-file-panel h3,
     .export-blocker-panel h3,
-    .export-preview-panel h3 {
+    .export-preview-panel h3,
+    .export-search-results h2 {
       margin: 0 0 8px;
       font-size: 14px;
     }
@@ -2087,6 +2165,18 @@
       font-size: 12px;
       line-height: 1.35;
       overflow-wrap: anywhere;
+    }
+    .operations-debug-details {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .operations-debug-details summary {
+      cursor: pointer;
+      font-weight: 800;
+    }
+    .operations-debug-details span {
+      display: block;
+      margin-top: 4px;
     }
     .export-blocker-action {
       justify-self: start;
@@ -2518,7 +2608,9 @@
       .comparison-list-panel table { min-width: 720px; }
       .export-readiness-head,
       .export-readiness-grid,
-      .export-action-panel {
+      .export-action-panel,
+      .export-gate-banner,
+      .export-action-hierarchy {
         grid-template-columns: 1fr;
       }
       .export-action-buttons {
@@ -2526,6 +2618,79 @@
       }
       .export-action-buttons button {
         width: 100%;
+      }
+      .pilot-critical-table {
+        border-collapse: separate;
+        border-spacing: 0;
+        width: 100%;
+      }
+      .export-table-wrap .pilot-critical-table {
+        min-width: 0;
+      }
+      .pilot-critical-table thead {
+        display: none;
+      }
+      .pilot-critical-table tbody {
+        display: grid;
+        gap: 10px;
+      }
+      .pilot-critical-table tr {
+        display: block;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 8px 10px;
+      }
+      .pilot-critical-table td {
+        display: grid;
+        grid-template-columns: minmax(88px, 0.38fr) minmax(0, 1fr);
+        gap: 8px;
+        border-bottom: 1px solid var(--line);
+        padding: 7px 0;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .pilot-critical-table td::before {
+        content: attr(data-mobile-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        overflow-wrap: anywhere;
+      }
+      .pilot-critical-table td:last-child {
+        border-bottom: 0;
+      }
+      .pilot-critical-table td > * {
+        min-width: 0;
+        max-width: 100%;
+      }
+      .pilot-critical-table button {
+        width: 100%;
+      }
+      .pilot-critical-table .table-empty-row td {
+        display: block;
+      }
+      .pilot-critical-table .table-empty-row td::before {
+        content: "";
+        display: none;
+      }
+      .pilot-critical-card {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+      }
+      .pilot-critical-card h3,
+      .pilot-critical-card p,
+      .pilot-critical-card .chip {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        white-space: normal;
+      }
+      .pilot-critical-card .review-meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
       }
       .readiness-metrics {
         grid-template-columns: 1fr;
@@ -2698,7 +2863,7 @@
         </div>
         <div class="topbar-actions">
           <input class="topbar-search" id="topbarSearch" type="text" placeholder="Search mouse, strain, review, source">
-          <span class="status" id="topOpenReviews">0 open reviews</span>
+          <span class="status" id="topOpenReviews">0 review tasks</span>
           <span class="status warn" id="topExportStatus">Export checking</span>
           <span class="status" id="health">Checking...</span>
         </div>
@@ -2720,7 +2885,7 @@
           <div class="hero-metrics">
             <div class="hero-metric"><strong id="heroPhotoCount">0</strong><span>raw photos</span></div>
             <div class="hero-metric"><strong id="heroPendingPhotos">0</strong><span>need action</span></div>
-            <div class="hero-metric"><strong id="heroOpenReviews">0</strong><span>open reviews</span></div>
+            <div class="hero-metric"><strong id="heroOpenReviews">0</strong><span>review tasks</span></div>
           </div>
         </div>
         <div class="hero-illustration" aria-label="Cage-card review illustration">
@@ -2951,7 +3116,7 @@
       </div>
       <h3>Upload batches</h3>
       <p class="muted">Each photo set is tracked as a raw source batch before review or canonical mapping.</p>
-      <table>
+      <table class="pilot-critical-table upload-batch-mobile-table">
         <thead><tr><th>Batch</th><th>Photos</th><th>Transcription</th><th>Reviews</th><th>Mapping</th><th>Status</th><th>Action</th></tr></thead>
         <tbody id="uploadBatchRows"></tbody>
       </table>
@@ -2983,6 +3148,7 @@
         <button id="aiDraftButton" type="button">Create AI Draft</button>
         <button id="aiExtractButton" type="button">Extract & Save Review</button>
         <span class="muted" id="photoQueueSummary">No photo queue loaded.</span>
+        <p class="muted ai-payload-policy" id="aiPayloadPolicyCopy">AI unavailable: local-only. No external request is sent until you approve this action.</p>
       </div>
       <div class="photo-review-layout">
         <aside class="photo-worklist" aria-label="Photo worklist">
@@ -3001,6 +3167,7 @@
           </div>
           <div class="photo-preview-frame" id="transcriptionPhotoPreviewFrame">
             <img id="transcriptionPhotoPreview" class="photo-preview-image" alt="Selected cage card photo preview">
+            <div id="transcriptionPhotoMissingState" hidden></div>
           </div>
           <p class="muted" id="transcriptionPhotoPreviewCaption">Select a source photo to review the raw cage-card evidence.</p>
           <div class="photo-evidence-meta" id="transcriptionPhotoEvidenceMeta"></div>
@@ -3261,23 +3428,127 @@
     </section>
 
     <section class="full" data-view="exports">
-      <h2>Search & CSV Export</h2>
-      <p>Search across mouse IDs, strains, genotyping fields, review issues, and source evidence.</p>
-      <div class="form-grid">
-        <label>
-          Search
-          <input id="searchQuery" type="text" placeholder="M0231, PV-Cre, genotyping pending, source label">
-        </label>
-        <button id="searchButton" type="button">Search</button>
-        <button id="exportMouseCsvButton" type="button">Download Mouse CSV</button>
-        <button id="exportGenotypingCsvButton" type="button">Download Genotyping Worklist</button>
+      <h2>Export Center</h2>
+      <div class="export-gate-banner" aria-label="Final export gate">
+        <article class="readiness-status-card blocked" id="exportReadinessCard">
+          <div class="readiness-title">
+            <div>
+              <strong id="exportReadinessState">Checking export readiness</strong>
+              <span>export or view</span>
+            </div>
+            <span class="status warn" id="exportReadinessBadge">checking</span>
+          </div>
+          <p id="exportPreview"></p>
+          <div class="readiness-metrics" id="exportReadinessMetrics"></div>
+        </article>
+        <div class="export-gate-copy">
+          <h3>Final export gate</h3>
+          <p id="exportActionSummary">Resolve Focus Review blockers before generating final lab files.</p>
+          <p class="export-disabled-reason" id="exportDisabledReason">Checking export blockers before final downloads.</p>
+          <p class="muted" id="exportDownloadMessage"></p>
+        </div>
       </div>
-      <p class="muted" id="exportDownloadMessage"></p>
-      <p class="muted" id="searchSummary">No active search.</p>
-      <table>
-        <thead><tr><th>Layer</th><th>ID</th><th>Primary</th><th>Detail</th></tr></thead>
-        <tbody id="searchRows"></tbody>
-      </table>
+      <div class="export-action-hierarchy" aria-label="Export download hierarchy">
+        <article class="export-action-group preview-search">
+          <div>
+            <h3>Preview / search</h3>
+            <p>Preview-only CSV for search, filtering, and spot checks. This is not a final lab file.</p>
+          </div>
+          <label>
+            Search
+            <input id="searchQuery" type="text" placeholder="M0231, PV-Cre, genotyping pending, source label">
+          </label>
+          <div class="export-action-buttons">
+            <button id="searchButton" type="button">Search</button>
+            <button id="exportMouseCsvButton" type="button">Download Preview CSV</button>
+          </div>
+        </article>
+        <article class="export-action-group worklists">
+          <div>
+            <h3>Worklists</h3>
+            <p>Worklist downloads support lab follow-up and do not release the final colony workbook.</p>
+          </div>
+          <div class="export-action-buttons">
+            <button id="exportGenotypingCsvButton" type="button">Download Genotyping Worklist</button>
+          </div>
+        </article>
+        <article class="export-action-group final-lab-files blocked" id="exportFinalLabFilesGroup">
+          <div>
+            <h3>Final lab files</h3>
+            <p id="exportFinalLabFilesCopy">Final lab file downloads stay disabled until Focus Review blockers are clear and source-backed rows exist.</p>
+          </div>
+          <div class="export-action-buttons">
+            <button id="exportReadyMouseCsvButton" type="button">Download Ready CSV</button>
+            <button id="exportSeparationXlsxButton" type="button">Download Separation XLSX</button>
+            <button id="exportAnimalSheetXlsxButton" type="button">Download Animal Sheet XLSX</button>
+          </div>
+        </article>
+      </div>
+      <section class="export-search-results" aria-label="Search and CSV preview results">
+        <h2>Search & CSV Export</h2>
+        <p>Search across mouse IDs, strains, genotyping fields, review issues, and source evidence.</p>
+        <p class="muted" id="searchSummary">No active search.</p>
+        <table>
+          <thead><tr><th>Layer</th><th>ID</th><th>Primary</th><th>Detail</th></tr></thead>
+          <tbody id="searchRows"></tbody>
+        </table>
+      </section>
+      <div class="export-readiness" aria-label="Export readiness details">
+        <div class="export-readiness-grid">
+          <article class="export-file-panel">
+            <h3>Expected workbook files</h3>
+            <p class="muted" id="exportFilenames"></p>
+            <div class="export-file-list" id="exportExpectedFiles"></div>
+          </article>
+          <article class="export-blocker-panel">
+            <h3>Focus Review blockers</h3>
+            <p class="muted" id="exportBlockerSummary">Review items that can change exported mouse or workbook values stay blocking.</p>
+            <div class="export-blocker-list" id="exportBlockerList"></div>
+          </article>
+        </div>
+        <div class="export-detail-grid">
+          <article class="export-preview-panel">
+            <h3>Separation workbook preview</h3>
+            <div class="export-table-wrap">
+              <table>
+                <thead><tr><th>Preview state</th><th>Cage number</th><th>Strain</th><th>Genotype</th><th>Total</th><th>DOB</th><th>WT</th><th>Tg</th><th>Sampling point</th><th>Source note</th><th>Evidence</th><th>Uncertainty</th></tr></thead>
+                <tbody id="exportRows"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="export-preview-panel">
+            <h3>Animal sheet preview</h3>
+            <div class="export-table-wrap">
+              <table>
+                <thead><tr><th>Preview state</th><th>Cage No.</th><th>Strain</th><th>Sex</th><th>I.D</th><th>genotype</th><th>DOB</th><th>Mating date</th><th>Pubs</th><th>Status</th><th>Source</th><th>Evidence</th><th>Uncertainty</th></tr></thead>
+                <tbody id="animalSheetRows"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="export-preview-panel">
+            <h3>Blocker table</h3>
+            <div class="export-table-wrap">
+              <table class="pilot-critical-table export-blocker-mobile-table">
+                <thead><tr><th>Blocker</th><th>Severity</th><th>Check</th><th>Suggested</th><th>Reason</th><th>Action</th></tr></thead>
+                <tbody id="exportBlockerRows"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="export-preview-panel">
+            <h3>Export log</h3>
+            <div class="export-table-wrap">
+              <table>
+                <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Rows</th><th>Blocked</th><th>Manifest</th><th>Validation</th><th>State</th><th>Persona</th><th>Generated</th><th>Filter</th></tr></thead>
+                <tbody id="exportLogRows"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="export-preview-panel">
+            <h3>Artifact preview</h3>
+            <pre id="artifactPreviewJson">No artifact selected</pre>
+          </article>
+        </div>
+      </div>
     </section>
 
     <section data-view="records">
@@ -3344,24 +3615,6 @@
           </select>
         </label>
       </div>
-      <div class="split-grid">
-        <div>
-          <h3>Review persona master</h3>
-          <p class="muted">Configured review roles define who should own each kind of source-evidence decision.</p>
-          <table>
-            <thead><tr><th>Persona</th><th>Default priority</th><th>Responsibility</th></tr></thead>
-            <tbody id="reviewRoleRows"></tbody>
-          </table>
-        </div>
-        <div>
-          <h3>Review priority master</h3>
-          <p class="muted">Priority meanings stay explicit so export blockers, genotype conflicts, and cleanup reviews do not blur together.</p>
-          <table>
-            <thead><tr><th>Priority</th><th>Rank</th><th>Export hint</th><th>Expectation</th></tr></thead>
-            <tbody id="reviewPriorityRows"></tbody>
-          </table>
-        </div>
-      </div>
       <div class="review-workbench">
         <div class="review-list-panel">
           <div class="focus-review-read-model" id="focusReviewReadModel" aria-live="polite">
@@ -3381,6 +3634,33 @@
           <p class="muted">Select a review item to inspect source evidence and resolve it with a note.</p>
         </aside>
       </div>
+      <details class="review-configuration">
+        <summary>
+          <div>
+            <h3>Review configuration</h3>
+            <p>Role and priority masters are available for reference without pushing active review work down the page.</p>
+          </div>
+          <span class="summary-action">Show masters</span>
+        </summary>
+        <div class="split-grid">
+          <div>
+            <h3>Review persona master</h3>
+            <p class="muted">Configured review roles define who should own each kind of source-evidence decision.</p>
+            <table>
+              <thead><tr><th>Persona</th><th>Default priority</th><th>Responsibility</th></tr></thead>
+              <tbody id="reviewRoleRows"></tbody>
+            </table>
+          </div>
+          <div>
+            <h3>Review priority master</h3>
+            <p class="muted">Priority meanings stay explicit so export blockers, genotype conflicts, and cleanup reviews do not blur together.</p>
+            <table>
+              <thead><tr><th>Priority</th><th>Rank</th><th>Export hint</th><th>Expectation</th></tr></thead>
+              <tbody id="reviewPriorityRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </details>
     </section>
 
     <section class="full collapsible-section" data-view="review records">
@@ -3810,114 +4090,6 @@
       </details>
     </section>
 
-    <section class="full" data-view="exports">
-      <h2>Export Center</h2>
-      <div class="visual-guide">
-        <div class="visual-board export-visual-board" aria-label="Export readiness illustration">
-          <div class="visual-board-item visual-board-arrow">
-            <img src="/static/assets/review-marker-art.png" alt="">
-            <span>Blockers</span>
-          </div>
-          <div class="visual-board-item visual-board-arrow">
-            <img src="/static/assets/cage-ivc-art.png" alt="">
-            <span>Colony rows</span>
-          </div>
-          <div class="visual-board-item">
-            <img src="/static/assets/workbook-export-art.png" alt="">
-            <span>Export</span>
-          </div>
-        </div>
-        <div class="visual-guide-panel">
-          <h3>Release only reviewed files</h3>
-          <ul class="visual-guide-list">
-            <li><span>1</span><strong>Check open blockers before final files are generated.</strong></li>
-            <li><span>2</span><strong>Preview workbook rows with their source evidence.</strong></li>
-            <li><span>3</span><strong>Export CSV or Excel only when the review gate is clear.</strong></li>
-          </ul>
-        </div>
-      </div>
-      <div class="export-readiness" aria-label="Export readiness panel">
-        <div class="export-readiness-head">
-          <article class="readiness-status-card blocked" id="exportReadinessCard">
-            <div class="readiness-title">
-              <div>
-                <strong id="exportReadinessState">Checking export readiness</strong>
-                <span>export or view</span>
-              </div>
-              <span class="status warn" id="exportReadinessBadge">checking</span>
-            </div>
-            <p id="exportPreview"></p>
-            <div class="readiness-metrics" id="exportReadinessMetrics"></div>
-          </article>
-          <article class="export-action-panel">
-            <div>
-              <h3>Final export actions</h3>
-              <p id="exportActionSummary">Resolve Focus Review blockers before generating final lab files.</p>
-            </div>
-            <div class="export-action-buttons">
-              <button id="exportReadyMouseCsvButton" type="button">Download Ready CSV</button>
-              <button id="exportSeparationXlsxButton" type="button">Download Separation XLSX</button>
-              <button id="exportAnimalSheetXlsxButton" type="button">Download Animal Sheet XLSX</button>
-            </div>
-            <p class="export-disabled-reason" id="exportDisabledReason">Checking export blockers before final downloads.</p>
-          </article>
-        </div>
-        <div class="export-readiness-grid">
-          <article class="export-file-panel">
-            <h3>Expected workbook files</h3>
-            <p class="muted" id="exportFilenames"></p>
-            <div class="export-file-list" id="exportExpectedFiles"></div>
-          </article>
-          <article class="export-blocker-panel">
-            <h3>Focus Review blockers</h3>
-            <p class="muted" id="exportBlockerSummary">Review items that can change exported mouse or workbook values stay blocking.</p>
-            <div class="export-blocker-list" id="exportBlockerList"></div>
-          </article>
-        </div>
-        <div class="export-detail-grid">
-          <article class="export-preview-panel">
-            <h3>Separation workbook preview</h3>
-            <div class="export-table-wrap">
-              <table>
-                <thead><tr><th>Preview state</th><th>Cage number</th><th>Strain</th><th>Genotype</th><th>Total</th><th>DOB</th><th>WT</th><th>Tg</th><th>Sampling point</th><th>Source note</th><th>Evidence</th><th>Uncertainty</th></tr></thead>
-                <tbody id="exportRows"></tbody>
-              </table>
-            </div>
-          </article>
-          <article class="export-preview-panel">
-            <h3>Animal sheet preview</h3>
-            <div class="export-table-wrap">
-              <table>
-                <thead><tr><th>Preview state</th><th>Cage No.</th><th>Strain</th><th>Sex</th><th>I.D</th><th>genotype</th><th>DOB</th><th>Mating date</th><th>Pubs</th><th>Status</th><th>Source</th><th>Evidence</th><th>Uncertainty</th></tr></thead>
-                <tbody id="animalSheetRows"></tbody>
-              </table>
-            </div>
-          </article>
-          <article class="export-preview-panel">
-            <h3>Blocker table</h3>
-            <div class="export-table-wrap">
-              <table>
-                <thead><tr><th>Blocker</th><th>Severity</th><th>Check</th><th>Suggested</th><th>Reason</th><th>Action</th></tr></thead>
-                <tbody id="exportBlockerRows"></tbody>
-              </table>
-            </div>
-          </article>
-          <article class="export-preview-panel">
-            <h3>Export log</h3>
-            <div class="export-table-wrap">
-              <table>
-                <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Rows</th><th>Blocked</th><th>Manifest</th><th>Validation</th><th>State</th><th>Persona</th><th>Generated</th><th>Filter</th></tr></thead>
-                <tbody id="exportLogRows"></tbody>
-              </table>
-            </div>
-          </article>
-          <article class="export-preview-panel">
-            <h3>Artifact preview</h3>
-            <pre id="artifactPreviewJson">No artifact selected</pre>
-          </article>
-        </div>
-      </div>
-    </section>
       </main>
     </div>
   </div>
@@ -4669,7 +4841,7 @@
           .map((item) => item.action_hint || {})
           .filter((hint) => hint && hint.primary_label);
         return `
-          <div class="focus-review-card">
+          <div class="focus-review-card pilot-critical-card">
             <h3>${escapeHtml(sourcePhoto.filename || card.parse_id || "Source pending")}</h3>
             <p>${escapeHtml(`${card.review_count || reviewItems.length} review items / ${mouseRows.length} mouse rows`)}</p>
             <div class="review-meta">
@@ -4702,6 +4874,22 @@
       if (channel === "api_mcp") return "ready";
       if (channel === "assistant") return "trace";
       return "blocked";
+    }
+
+    function operationsEvidenceSummary(task) {
+      const refs = task?.evidence_refs || {};
+      const parts = [];
+      const targetLabel = task?.target_label || "";
+      const sourcePhotoName = refs.source_photo_filename || refs.original_filename || refs.photo_filename || "";
+      const evidenceText = refs.evidence_preview || refs.source_note_text || refs.raw_note_line || "";
+      if (targetLabel) parts.push(`Target: ${targetLabel}`);
+      if (task?.family === "focus_review") parts.push(`Review type: ${task?.label || "Review item"}`);
+      if (sourcePhotoName) parts.push(`Source photo: ${sourcePhotoName}`);
+      else if (refs.source_photo_id || task?.target_type === "photo") parts.push("Source photo: linked");
+      if (evidenceText) parts.push(`Evidence: ${evidenceText}`);
+      else if (Array.isArray(refs.review_ids) && refs.review_ids.length) parts.push(`Review items linked: ${refs.review_ids.length}`);
+      else if (refs.review_id) parts.push("Review evidence linked");
+      return parts.filter(Boolean).join(" / ") || "Source evidence summary pending";
     }
 
     function operationsTargetButton(task) {
@@ -4766,7 +4954,11 @@
                 <strong>${escapeHtml(task.label || task.task_id || "Operation task")}</strong>
                 <span>${escapeHtml([task.status, task.risk_class, task.target_label].filter(Boolean).join(" / ") || "--")}</span>
                 <span>${escapeHtml(task.blocker_reason || "Review source evidence before acting.")}</span>
-                <span>${escapeHtml(compactDetails(task.evidence_refs || {}))}</span>
+                <span>${escapeHtml(operationsEvidenceSummary(task))}</span>
+                <details class="operations-debug-details">
+                  <summary>Debug details</summary>
+                  <span>${escapeHtml(compactDetails(task.evidence_refs || {}))}</span>
+                </details>
                 <span class="row-state-chip ${escapeHtml(operationsActionChannelClass(task))}">${escapeHtml(task.action_channel_label || task.action_channel || "Human review")}</span>
                 <span>${escapeHtml(task.action_channel_reason || "")}</span>
                 <span>Payload policy: ${escapeHtml(task.external_payload_policy || "local_only_until_approved")}</span>
@@ -5882,6 +6074,49 @@
         "Source photo opened from Focus Review. Raw photo and extracted evidence remain traceable.";
     }
 
+    function sourcePhotoUnavailableHtml(filename = "", photoId = "", hidden = false) {
+      const label = filename || photoId || "source photo metadata";
+      return `
+        <div class="source-photo-missing-state" role="status" data-source-photo-state="unavailable" ${hidden ? "hidden" : ""}>
+          <strong>Source photo unavailable</strong>
+          <span>${escapeHtml(label)} could not be shown in this preview.</span>
+          <span>Raw photo record is preserved; this is a display or file-availability problem, not permission to overwrite evidence.</span>
+          <span>Review can continue from note-line/OCR evidence, but acceptance/export should stay blocked until the photo is restored or alternate evidence is approved.</span>
+        </div>
+      `;
+    }
+
+    function handleSourcePhotoLoadError(event) {
+      const image = event?.target;
+      const container = image?.closest?.(".review-source-preview, .photo-preview-frame");
+      if (!image || !container) return;
+      image.onerror = null;
+      image.hidden = true;
+      container.dataset.sourcePhotoState = "unavailable";
+      const state = container.querySelector(".source-photo-missing-state");
+      if (state) {
+        state.hidden = false;
+        const stateWrapper = state.closest("#transcriptionPhotoMissingState");
+        if (stateWrapper) stateWrapper.hidden = false;
+      }
+      const photoId = image.dataset.sourcePhotoId || "";
+      if (photoId) {
+        document.querySelectorAll(".open-review-source-photo").forEach((button) => {
+          if (button.dataset.photoId === photoId) {
+            button.textContent = "Open missing photo record";
+            button.title = "The image file is unavailable; this opens the raw photo record state.";
+          }
+        });
+      }
+      const captionTarget = image.dataset.missingCaptionTarget;
+      if (captionTarget) {
+        const caption = document.getElementById(captionTarget);
+        if (caption) {
+          caption.textContent = "Source photo unavailable. Raw photo record is preserved; review can continue from note-line/OCR evidence, but acceptance/export should stay blocked until restored or alternate evidence is approved.";
+        }
+      }
+    }
+
     function reviewSourceEvidencePanel(item) {
       const summary = item.review_note_summary || {};
       const noteSummary = [
@@ -5911,8 +6146,9 @@
         item.card_snapshot_id && ["excel-row", "Card snapshot"]
       ];
       return `
-        <div class="review-source-preview">
-          ${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="Source cage-card photo for selected review">` : ""}
+        <div class="review-source-preview" data-source-photo-state="${item.image_url ? "available" : "unavailable"}">
+          ${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="Source cage-card photo for selected review" data-source-photo-filename="${escapeHtml(item.original_filename || "")}" data-source-photo-id="${escapeHtml(item.photo_id || "")}" onerror="handleSourcePhotoLoadError(event)">` : ""}
+          ${sourcePhotoUnavailableHtml(item.original_filename || "", item.photo_id || "", Boolean(item.image_url))}
           ${evidenceBadgeList(badgeItems)}
           <div class="review-source-grid">
             ${sourceCells.map(([label, value]) => `<span>${escapeHtml(label)}<strong>${escapeHtml(value)}</strong></span>`).join("")}
@@ -6231,25 +6467,61 @@
       return Array.from(new Set(items.map((item) => String(item || "").trim()).filter(Boolean)));
     }
 
+    function aiDraftStatusLabel(aiStatus = {}) {
+      if (!aiStatus.available) return "AI unavailable: local-only";
+      if (aiStatus.approval_required) return "AI draft: approval required";
+      return "AI draft available";
+    }
+
+    function aiPayloadPolicyCopy(aiStatus = {}) {
+      const approvalCopy = "No external request is sent until you approve this action.";
+      const payloadCopy = "Payload minimized: selected source photo plus active assigned strain names only.";
+      const reviewCopy = "Drafts stay reviewable; operator approval is still required.";
+      if (!aiStatus.available) {
+        return `${aiDraftStatusLabel(aiStatus)}. ${approvalCopy} ${payloadCopy} Manual transcription remains available.`;
+      }
+      return `${aiDraftStatusLabel(aiStatus)}. ${approvalCopy} ${payloadCopy} ${reviewCopy}`;
+    }
+
+    function aiExternalApprovalMessage(actionLabel, sourcePhotoCopy = "this selected source photo") {
+      return [
+        `${actionLabel} by sending ${sourcePhotoCopy} plus active assigned strain names to the external inference service?`,
+        "Payload minimized: selected source photo plus active assigned strain names only.",
+        "No external request is sent until you approve this action.",
+        "Drafts stay reviewable; operator approval is still required."
+      ].join("\n\n");
+    }
+
     function renderShellStatus({ health, photoWorkbench, photos, reviews, mice, evidenceComparison, preview }) {
-      const openReviewCount = reviews.filter((item) => item.status === "open").length;
+      const attentionCounts = reviewAttentionCounts(reviews);
+      const reviewWorkload = preview.review_workload || {};
+      const openReviewTotal = Number(reviewWorkload.open_review_total ?? reviews.filter((item) => item.status === "open").length);
+      const operatorWorkloadCount = Number(
+        reviewWorkload.operator_workload_count
+        ?? ((attentionCounts.must_review || 0) + (attentionCounts.quick_check || 0))
+      );
       const pendingPhotoCount = photoWorkbench.pending_transcription_count || 0;
       const comparisons = evidenceComparison.comparisons || [];
       const comparisonReviewCount = comparisons.filter((item) => item.review_required || item.review_status === "open").length;
       document.getElementById("navPhotoCount").textContent = String(pendingPhotoCount || photos.length);
-      document.getElementById("navReviewCount").textContent = String(openReviewCount);
+      document.getElementById("navReviewCount").textContent = String(operatorWorkloadCount);
       document.getElementById("navComparisonCount").textContent = String(comparisonReviewCount);
       document.getElementById("navExportCount").textContent = preview.ready ? "ready" : String(preview.blocked_review_items || 0);
       document.getElementById("navMouseCount").textContent = String(mice.length);
-      document.getElementById("navDashboardCount").textContent = String(openReviewCount);
+      document.getElementById("navDashboardCount").textContent = String(operatorWorkloadCount);
       document.getElementById("heroPhotoCount").textContent = String(photos.length);
       document.getElementById("heroPendingPhotos").textContent = String(pendingPhotoCount);
-      document.getElementById("heroOpenReviews").textContent = String(openReviewCount);
-      document.getElementById("topOpenReviews").textContent = `${openReviewCount} open reviews`;
+      document.getElementById("heroOpenReviews").textContent = String(operatorWorkloadCount);
+      document.getElementById("topOpenReviews").textContent = `${operatorWorkloadCount} review tasks`;
+      document.getElementById("topOpenReviews").title = `${openReviewTotal} open review item(s), including trace or hidden diagnostics.`;
       document.getElementById("topExportStatus").textContent = preview.ready ? "Export ready" : `${preview.blocked_review_items || 0} export blockers`;
       document.getElementById("topExportStatus").classList.toggle("warn", !preview.ready);
       const aiStatus = health.ai_draft || {};
-      document.getElementById("health").textContent = aiStatus.available ? "local + AI draft ready" : "local-only";
+      const healthChip = document.getElementById("health");
+      healthChip.textContent = aiDraftStatusLabel(aiStatus);
+      healthChip.title = aiPayloadPolicyCopy(aiStatus);
+      healthChip.classList.toggle("warn", !aiStatus.available || Boolean(aiStatus.approval_required));
+      document.getElementById("aiPayloadPolicyCopy").textContent = aiPayloadPolicyCopy(aiStatus);
     }
 
     function firstMouse(mice) {
@@ -6392,17 +6664,30 @@
 
     function updateTranscriptionPhotoPreview(photos) {
       const select = document.getElementById("transcriptionPhotoId");
+      const frame = document.getElementById("transcriptionPhotoPreviewFrame");
       const image = document.getElementById("transcriptionPhotoPreview");
       const caption = document.getElementById("transcriptionPhotoPreviewCaption");
+      const missingState = document.getElementById("transcriptionPhotoMissingState");
       selectedTranscriptionPhotoId = select.value || selectedTranscriptionPhotoId;
       const photo = photos.find((item) => item.photo_id === select.value);
       if (!photo) {
         image.removeAttribute("src");
+        image.hidden = true;
+        frame.dataset.sourcePhotoState = "empty";
+        missingState.hidden = true;
+        missingState.innerHTML = "";
         caption.textContent = "Select a source photo to review the raw cage-card evidence.";
         renderPhotoEvidenceMeta(null);
         clearRoiPreview();
         return;
       }
+      frame.dataset.sourcePhotoState = "available";
+      image.hidden = false;
+      image.onerror = handleSourcePhotoLoadError;
+      image.dataset.missingCaptionTarget = "transcriptionPhotoPreviewCaption";
+      image.dataset.sourcePhotoId = photo.photo_id || "";
+      missingState.innerHTML = sourcePhotoUnavailableHtml(photo.original_filename || "", photo.photo_id || "", false);
+      missingState.hidden = true;
       image.src = `/api/photos/${encodeURIComponent(photo.photo_id)}/image`;
       caption.textContent =
         `${photo.original_filename || photo.photo_id} is raw source evidence; preview controls change only this display.`;
@@ -7248,6 +7533,12 @@
       reason.textContent = reasonText;
       reason.classList.toggle("ready", ready);
       reason.setAttribute("role", "status");
+      const finalLabFilesGroup = document.getElementById("exportFinalLabFilesGroup");
+      finalLabFilesGroup.classList.toggle("ready", ready);
+      finalLabFilesGroup.classList.toggle("blocked", !ready);
+      document.getElementById("exportFinalLabFilesCopy").textContent = ready
+        ? "Final lab file downloads are ready and will be recorded in the export log."
+        : "Final lab file downloads stay disabled until Focus Review blockers are clear and source-backed rows exist.";
       ["exportReadyMouseCsvButton", "exportSeparationXlsxButton", "exportAnimalSheetXlsxButton"].forEach((id) => {
         const button = document.getElementById(id);
         button.disabled = !ready;
@@ -7353,12 +7644,12 @@
       ).join("") || emptyTableRow("No animal sheet preview rows yet", "Accepted source-backed animal rows will appear here before workbook export.", 13);
       document.getElementById("exportBlockerRows").innerHTML = readinessItems.map((item) => `
         <tr>
-          <td>${escapeHtml(item.issue || "Review blocker")}</td>
-          <td>${escapeHtml(item.severity || "--")}</td>
-          <td>${escapeHtml(reviewCheckTargetsText(item) || "--")}</td>
-          <td>${escapeHtml(item.suggested_value || "--")}</td>
-          <td>${escapeHtml(item.review_reason || item.display_id || item.parse_id || "--")}</td>
-          <td>${exportBlockerReviewButton(item)}</td>
+          <td data-mobile-label="Blocker">${escapeHtml(item.issue || "Review blocker")}</td>
+          <td data-mobile-label="Severity">${escapeHtml(item.severity || "--")}</td>
+          <td data-mobile-label="Check">${escapeHtml(reviewCheckTargetsText(item) || "--")}</td>
+          <td data-mobile-label="Suggested">${escapeHtml(item.suggested_value || "--")}</td>
+          <td data-mobile-label="Reason">${escapeHtml(item.review_reason || item.display_id || item.parse_id || "--")}</td>
+          <td data-mobile-label="Action">${exportBlockerReviewButton(item)}</td>
         </tr>
       `).join("") || emptyTableRow("No Focus Review blockers", "Final export blockers and readiness warnings will appear here when review can change exported values.", 6);
       document.querySelectorAll(".open-export-blocker-review").forEach((button) => {
@@ -7614,13 +7905,13 @@
       latestPhotos = photoWorkbench.rows || [];
       document.getElementById("uploadBatchRows").innerHTML = (uploadBatches.rows || photoWorkbench.batches || []).map((batch) =>
         `<tr>
-          <td>${escapeHtml(batch.batch_label || batch.upload_batch_id)}</td>
-          <td>${escapeHtml(`${batch.photo_count || 0}/${batch.expected_photo_count || 0}`)}</td>
-          <td>${escapeHtml(`${batch.transcribed_photo_count || 0} done / ${batch.pending_transcription_count || 0} pending`)}</td>
-          <td>${escapeHtml(`${batch.open_review_count || 0} open / ${batch.resolved_review_count || 0} resolved`)}</td>
-          <td>${escapeHtml(`${batch.applied_candidate_count || 0}/${batch.canonical_candidate_count || 0} applied`)}</td>
-          <td title="${escapeHtml(batch.operator_status_detail || "")}">${escapeHtml(batch.operator_status_label || batch.derived_status || batch.status || "--")}</td>
-          <td><button class="preview-upload-batch-release" type="button" data-batch-id="${escapeHtml(batch.upload_batch_id)}">Preview release</button></td>
+          <td data-mobile-label="Batch">${escapeHtml(batch.batch_label || batch.upload_batch_id)}</td>
+          <td data-mobile-label="Photos">${escapeHtml(`${batch.photo_count || 0}/${batch.expected_photo_count || 0}`)}</td>
+          <td data-mobile-label="Transcription">${escapeHtml(`${batch.transcribed_photo_count || 0} done / ${batch.pending_transcription_count || 0} pending`)}</td>
+          <td data-mobile-label="Reviews">${escapeHtml(`${batch.open_review_count || 0} open / ${batch.resolved_review_count || 0} resolved`)}</td>
+          <td data-mobile-label="Mapping">${escapeHtml(`${batch.applied_candidate_count || 0}/${batch.canonical_candidate_count || 0} applied`)}</td>
+          <td data-mobile-label="Status" title="${escapeHtml(batch.operator_status_detail || "")}">${escapeHtml(batch.operator_status_label || batch.derived_status || batch.status || "--")}</td>
+          <td data-mobile-label="Action"><button class="preview-upload-batch-release" type="button" data-batch-id="${escapeHtml(batch.upload_batch_id)}">Preview release</button></td>
         </tr>`
       ).join("") || emptyTableRow("No upload batches yet", "Upload cage-card source photos to create a raw source batch before review or canonical mapping.", 7);
       document.getElementById("workbenchPhotoCards").innerHTML = latestPhotos.slice(0, 8).map((photo) => `
@@ -7962,7 +8253,7 @@
           return;
         }
         const extractionApproved = window.confirm(
-          `Send ${uploaded} selected uploaded photo(s) plus active assigned strain names to the external inference service and save extracted values as review evidence?`
+          aiExternalApprovalMessage("Extract and save review evidence", `${uploaded} selected uploaded source photo(s)`)
         );
         if (!extractionApproved) {
           setExtractionProgress({
@@ -8151,7 +8442,7 @@
         return;
       }
       const approved = window.confirm(
-        "Create an AI draft by sending only this selected source photo and active assigned strain names to the external inference service?"
+        aiExternalApprovalMessage("Create an AI draft")
       );
       if (!approved) {
         message.textContent = "AI draft cancelled; no external inference request was sent.";
@@ -8181,7 +8472,7 @@
         return;
       }
       const approved = window.confirm(
-        "Extract cage-card values and save them as reviewable parsed evidence by sending only this selected source photo and active assigned strain names to the external inference service?"
+        aiExternalApprovalMessage("Extract cage-card values and save reviewable parsed evidence")
       );
       if (!approved) {
         message.textContent = "AI extraction cancelled; no external inference request was sent.";

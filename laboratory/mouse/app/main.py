@@ -12233,6 +12233,21 @@ def open_review_attention_counts(conn: Any) -> dict[str, int]:
     return counts
 
 
+def review_workload_counter_contract(attention_counts: dict[str, int], open_review_total: int) -> dict[str, int]:
+    must_review = int(attention_counts.get("must_review", 0))
+    quick_check = int(attention_counts.get("quick_check", 0))
+    trace_only = int(attention_counts.get("trace_only", 0))
+    hidden_default = int(attention_counts.get("hidden_default", 0))
+    return {
+        "operator_workload_count": must_review + quick_check,
+        "must_review_count": must_review,
+        "quick_check_count": quick_check,
+        "open_review_total": int(open_review_total),
+        "hidden_diagnostic_count": hidden_default,
+        "trace_only_count": trace_only,
+    }
+
+
 def open_review_blockers(conn: Any, limit: int = 10) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
@@ -13622,6 +13637,7 @@ def export_preview() -> dict[str, Any]:
             "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'open'"
         ).fetchone()["count"]
         review_attention_counts = open_review_attention_counts(conn)
+        review_workload = review_workload_counter_contract(review_attention_counts, open_reviews)
         blocked_reviews = review_attention_counts.get("must_review", 0)
         genotype_blocker_rows = genotype_export_blockers(conn)
         genotype_blocker_count = len(genotype_blocker_rows)
@@ -13868,6 +13884,7 @@ def export_preview() -> dict[str, Any]:
         "blocked_review_items": blocked_reviews,
         "open_review_items": open_reviews,
         "open_review_attention_counts": review_attention_counts,
+        "review_workload": review_workload,
         "genotype_blocker_items": genotype_blocker_count,
         "experiment_ready": genotype_blocker_count == 0 and bool(rows),
         "ready": blocked_reviews == 0 and bool(rows),

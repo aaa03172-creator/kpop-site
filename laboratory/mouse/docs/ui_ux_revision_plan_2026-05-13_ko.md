@@ -22,6 +22,60 @@ The UI revision is successful when:
 7. Pilot-critical mobile views remain readable without forcing horizontal scrolling
    for the main decision path.
 
+## Implementation Status - 2026-05-14
+
+Status: completed for Slices 1-7 in the current working tree.
+
+This document remains a non-canonical implementation plan. The executable
+contract is the current source plus tests.
+
+Completed slices:
+
+1. Slice 1 - Review Workload Counter Contract:
+   - `/api/export-preview` exposes `review_workload`.
+   - topbar and primary navigation use operator workload counts instead of
+     hidden diagnostic review totals.
+2. Slice 2 - Review Queue First-Viewport Reorder:
+   - Focus Review work appears before review role and priority masters.
+   - review configuration masters are still available below active work.
+3. Slice 3 - Operator Copy Without Raw Internal IDs:
+   - Operations Home normal copy uses evidence summaries.
+   - raw evidence refs remain available inside a debug disclosure.
+4. Slice 4 - Export Center Download Hierarchy:
+   - Export Center leads with the final export gate.
+   - preview/search, worklists, and final lab files are visually separated.
+5. Slice 5 - Source Photo Missing-State UI:
+   - missing or failed source photos render an explicit evidence state.
+   - raw photo record preservation and export blocking expectations are named.
+6. Slice 6 - External AI Readiness Copy:
+   - topbar distinguishes `AI unavailable: local-only` from
+     `AI draft: approval required`.
+   - extraction actions include approval and minimized-payload copy.
+7. Slice 7 - Pilot Mobile Ergonomics:
+   - upload batches and export blocker rows stack at the mobile breakpoint.
+   - Focus Review cards protect primary labels from clipping.
+   - low-priority audit/config tables can still use horizontal scroll.
+
+Current task source scope:
+
+- `app/main.py`
+- `static/index.html`
+- `tests/test_ai_payload_minimization.py`
+- `tests/test_artifact_workflow.py`
+- `tests/test_low_fatigue_ui_contracts.py`
+- `tests/test_operations_home.py`
+- `docs/ui_ux_revision_plan_2026-05-13_ko.md`
+- `docs/DOCUMENTATION_MAP.md`
+
+Verification recorded for this completion pass:
+
+- `python -m pytest tests/test_low_fatigue_ui_contracts.py tests/test_artifact_workflow.py tests/test_operations_home.py tests/test_ai_payload_minimization.py -q`
+- `npm test`
+- `npm run test:local`
+- `git diff --check`
+- Browser validation at `390 x 844` and `1280 x 720` for pilot-critical mobile
+  rows and desktop table continuity.
+
 ## Slice 1 - Review Workload Counter Contract
 
 Boundary classification:
