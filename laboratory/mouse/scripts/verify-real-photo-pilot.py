@@ -49,6 +49,19 @@ def empty_text(value: Any) -> bool:
     return not isinstance(value, str) or not value.strip()
 
 
+def redacted_manifest_error(exc: Exception, manifest_path: Path) -> str:
+    text = str(exc)
+    replacements = {
+        str(manifest_path),
+        manifest_path.as_posix(),
+        repr(str(manifest_path)).strip("'"),
+    }
+    for replacement in replacements:
+        if replacement:
+            text = text.replace(replacement, "<private manifest path>")
+    return text
+
+
 def validate_case(case: Any, manifest_path: Path) -> tuple[dict[str, Any], list[str]]:
     failures: list[str] = []
     if not isinstance(case, dict):
@@ -63,7 +76,7 @@ def validate_case(case: Any, manifest_path: Path) -> tuple[dict[str, Any], list[
     if empty_text(source_photo_path):
         failures.append("source_photo_path is required")
     elif not resolved_photo_path or not resolved_photo_path.exists():
-        failures.append(f"source_photo_path does not exist: {source_photo_path}")
+        failures.append("source_photo_path does not exist: <private source photo path>")
 
     if empty_text(case.get("traceability_label")):
         failures.append("traceability_label is required")
@@ -326,9 +339,10 @@ def main() -> int:
     except Exception as exc:
         summary = {
             "status": "failed",
-            "manifest": str(manifest_path),
+            "manifest": "private manifest path omitted",
+            "manifest_filename": manifest_path.name,
             "failed": 1,
-            "failures": [{"case_id": "", "failures": [str(exc)]}],
+            "failures": [{"case_id": "", "failures": [redacted_manifest_error(exc, manifest_path)]}],
         }
 
     print(json.dumps(summary, indent=2, ensure_ascii=False))
