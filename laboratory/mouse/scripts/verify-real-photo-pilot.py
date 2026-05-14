@@ -18,6 +18,7 @@ REQUIRED_EXPECTED_FIELDS = {
     "mating_or_litter_note",
     "expected_review_blockers",
 }
+READINESS_BOUNDARY = "review item / pilot readiness check"
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -98,13 +99,151 @@ def validate_case(case: Any, manifest_path: Path) -> tuple[dict[str, Any], list[
         "expected_review_level": review_level,
         "expected_export_blocking": bool(case.get("expected_export_blocking")) if "expected_export_blocking" in case else False,
         "source_photo_exists": bool(resolved_photo_path and resolved_photo_path.exists()),
-        "source_photo_path": str(resolved_photo_path) if resolved_photo_path else "",
         "example_only": bool(case.get("example_only")),
     }, failures
 
 
 def increment(counts: dict[str, int], key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
+
+
+def int_setting(value: Any, default: int) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return default
+
+
+def list_setting(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def label_looks_like_path(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    return any(marker in value for marker in (":", "/", "\\"))
+
+
+def build_check(status: str, **values: Any) -> dict[str, Any]:
+    return {"status": status, **values}
+
+
+def missing_in_required_order(required: list[str], counts: dict[str, int]) -> list[str]:
+    return [item for item in required if item not in counts]
+
+
+def validate_readiness(
+    manifest: dict[str, Any],
+    *,
+    case_count: int,
+    card_type_counts: dict[str, int],
+    review_level_counts: dict[str, int],
+    export_blocking_counts: dict[str, int],
+) -> tuple[dict[str, Any], list[str]]:
+    criteria = manifest.get("readiness_criteria")
+    if not isinstance(criteria, dict):
+        return {
+            "boundary": READINESS_BOUNDARY,
+            "status": "skipped",
+            "checks": {},
+        }, []
+
+    failures: list[str] = []
+    checks: dict[str, dict[str, Any]] = {}
+
+    photo_count = criteria.get("photo_count")
+    if not isinstance(photo_count, dict):
+        photo_count = {}
+    min_count = int_setting(photo_count.get("min"), 20)
+    max_count = int_setting(photo_count.get("max"), 30)
+    photo_count_passed = min_count <= case_count <= max_count
+    if not photo_count_passed:
+        failures.append(f"pilot photo count must be between {min_count} and {max_count}; found {case_count}")
+    checks["photo_count"] = build_check(
+        "passed" if photo_count_passed else "failed",
+        expected={"min": min_count, "max": max_count},
+        actual=case_count,
+    )
+
+    required_card_types = list_setting(criteria.get("required_card_types"))
+    missing_card_types = missing_in_required_order(required_card_types, card_type_counts)
+    if missing_card_types:
+        failures.append(f"missing required card types: {', '.join(missing_card_types)}")
+    checks["card_type_coverage"] = build_check(
+        "passed" if not missing_card_types else "failed",
+        required=required_card_types,
+        missing=missing_card_types,
+    )
+
+    required_review_levels = list_setting(criteria.get("required_review_levels"))
+    missing_review_levels = missing_in_required_order(required_review_levels, review_level_counts)
+    if missing_review_levels:
+        failures.append(f"missing required review levels: {', '.join(missing_review_levels)}")
+    checks["review_level_coverage"] = build_check(
+        "passed" if not missing_review_levels else "failed",
+        required=required_review_levels,
+        missing=missing_review_levels,
+    )
+
+    export_blocking = criteria.get("export_blocking")
+    if not isinstance(export_blocking, dict):
+        export_blocking = {}
+    minimum_blocking = int_setting(export_blocking.get("minimum_blocking"), 1)
+    minimum_non_blocking = int_setting(export_blocking.get("minimum_non_blocking"), 1)
+    export_blocking_passed = (
+        export_blocking_counts["blocking"] >= minimum_blocking
+        and export_blocking_counts["non_blocking"] >= minimum_non_blocking
+    )
+    if not export_blocking_passed:
+        failures.append(
+            "export blocking expectations require at least "
+            f"{minimum_blocking} blocking and {minimum_non_blocking} non-blocking cases"
+        )
+    checks["export_blocking_expectations"] = build_check(
+        "passed" if export_blocking_passed else "failed",
+        minimum_blocking=minimum_blocking,
+        minimum_non_blocking=minimum_non_blocking,
+        actual=export_blocking_counts,
+    )
+
+    backup_restore = criteria.get("backup_restore")
+    if not isinstance(backup_restore, dict):
+        backup_restore = {}
+    before_label = str(backup_restore.get("before_backup_label") or "").strip()
+    after_label = str(backup_restore.get("after_backup_label") or "").strip()
+    restore_label = str(backup_restore.get("restore_probe_label") or "").strip()
+    restore_verified = backup_restore.get("restore_verified") is True
+    overwrite_refusal_verified = backup_restore.get("overwrite_refusal_verified") is True
+    backup_failures: list[str] = []
+    for key, value in (
+        ("before_backup_label", before_label),
+        ("after_backup_label", after_label),
+        ("restore_probe_label", restore_label),
+    ):
+        if not value:
+            backup_failures.append(f"backup_restore.{key} is required")
+        elif label_looks_like_path(value):
+            backup_failures.append(f"backup_restore.{key} must be a label, not a local path")
+    if not restore_verified:
+        backup_failures.append("backup_restore.restore_verified must be true")
+    if not overwrite_refusal_verified:
+        backup_failures.append("backup_restore.overwrite_refusal_verified must be true")
+    failures.extend(backup_failures)
+    checks["backup_restore_evidence"] = build_check(
+        "passed" if not backup_failures else "failed",
+        before_backup_label=before_label,
+        after_backup_label=after_label,
+        restore_probe_label=restore_label,
+        restore_verified=restore_verified,
+        overwrite_refusal_verified=overwrite_refusal_verified,
+    )
+
+    return {
+        "boundary": READINESS_BOUNDARY,
+        "status": "go" if not failures else "no_go",
+        "checks": checks,
+    }, failures
 
 
 def validate_manifest(manifest: dict[str, Any], manifest_path: Path) -> dict[str, Any]:
@@ -141,13 +280,23 @@ def validate_manifest(manifest: dict[str, Any], manifest_path: Path) -> dict[str
             failures.append({"case_id": summary.get("case_id", ""), "failures": case_failures})
 
     missing_card_types = sorted(VALID_CARD_TYPES.difference(card_type_counts.keys()))
+    readiness, readiness_failures = validate_readiness(
+        manifest,
+        case_count=len(cases),
+        card_type_counts=card_type_counts,
+        review_level_counts=review_level_counts,
+        export_blocking_counts=export_blocking_counts,
+    )
+    if readiness_failures:
+        failures.append({"case_id": "", "failures": readiness_failures})
     status = "passed" if not failures else "failed"
     return {
         "status": status,
         "boundary": manifest.get("layer", ""),
         "canonical": manifest.get("canonical", None),
         "source_policy": manifest.get("source_policy", ""),
-        "manifest": str(manifest_path),
+        "manifest": "private manifest path omitted",
+        "manifest_filename": manifest_path.name,
         "case_count": len(cases),
         "failed": len(failures),
         "failures": failures,
@@ -157,6 +306,7 @@ def validate_manifest(manifest: dict[str, Any], manifest_path: Path) -> dict[str
             "export_blocking_counts": export_blocking_counts,
             "missing_recommended_card_types": missing_card_types,
         },
+        "readiness": readiness,
         "cases": case_summaries,
     }
 

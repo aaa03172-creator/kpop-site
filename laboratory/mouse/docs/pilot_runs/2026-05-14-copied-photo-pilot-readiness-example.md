@@ -1,94 +1,10 @@
-from __future__ import annotations
-
-import argparse
-import importlib.util
-import json
-import sys
-from datetime import datetime
-from pathlib import Path
-from typing import Any
-
-
-ROOT = Path(__file__).resolve().parents[1]
-VERIFIER_PATH = ROOT / "scripts" / "verify-real-photo-pilot.py"
-
-
-def load_real_photo_verifier() -> Any:
-    spec = importlib.util.spec_from_file_location("verify_real_photo_pilot", VERIFIER_PATH)
-    if not spec or not spec.loader:
-        raise RuntimeError(f"Unable to load verifier: {VERIFIER_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def sanitize_failures(failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    sanitized: list[dict[str, Any]] = []
-    for failure in failures:
-        messages = []
-        for message in failure.get("failures", []):
-            text = str(message)
-            if text.startswith("source_photo_path does not exist:"):
-                text = "source_photo_path does not exist: <private source photo path>"
-            messages.append(text)
-        sanitized.append({"case_id": str(failure.get("case_id") or ""), "failures": messages})
-    return sanitized
-
-
-def case_rows(cases: list[dict[str, Any]]) -> str:
-    rows = []
-    for case in cases:
-        rows.append(
-            "| {case_id} | {card_type} | {review_level} | {blocking} | private source photo path omitted |".format(
-                case_id=case.get("case_id") or "",
-                card_type=case.get("card_type") or "",
-                review_level=case.get("expected_review_level") or "",
-                blocking=str(bool(case.get("expected_export_blocking"))).lower(),
-            )
-        )
-    return "\n".join(rows)
-
-
-def readiness_rows(readiness: dict[str, Any]) -> str:
-    rows = [f"| Go/no-go | {readiness.get('status', 'skipped')} | |"]
-    checks = readiness.get("checks")
-    if not isinstance(checks, dict):
-        return "\n".join(rows)
-    for name, check in checks.items():
-        if not isinstance(check, dict):
-            continue
-        details = {
-            key: value
-            for key, value in check.items()
-            if key != "status"
-        }
-        rows.append(
-            "| {name} | {status} | {details} |".format(
-                name=name,
-                status=check.get("status", ""),
-                details=json.dumps(details, ensure_ascii=False, sort_keys=True),
-            )
-        )
-    return "\n".join(rows)
-
-
-def build_sanitized_log(*, run_label: str, summary: dict[str, Any]) -> str:
-    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    coverage = summary.get("coverage", {})
-    card_type_counts = coverage.get("card_type_counts", {})
-    review_level_counts = coverage.get("review_level_counts", {})
-    export_blocking_counts = coverage.get("export_blocking_counts", {})
-    cases = summary.get("cases", [])
-    status = summary.get("status", "failed")
-    readiness = summary.get("readiness", {})
-
-    return f"""# Copied Pilot Run Log - {run_label}
+# Copied Pilot Run Log - copied-photo-pilot-readiness-example
 
 Layer classification: review item / pilot run log.
 
 Canonical: false.
 
-Generated at: {generated_at}
+Generated at: 2026-05-14 14:36:37
 
 This sanitized log was prepared from a private copied-photo manifest. It intentionally omits private photo paths, raw OCR/AI payloads, generated workbook paths, local database paths, and backup folder paths.
 
@@ -96,9 +12,9 @@ This sanitized log was prepared from a private copied-photo manifest. It intenti
 
 | Check | Result |
 | --- | --- |
-| Manifest validation | {status} |
+| Manifest validation | passed |
 | Manifest used | private manifest verified; path intentionally omitted |
-| Case count | {summary.get("case_count", 0)} |
+| Case count | 20 |
 | Data boundary | review item / test fixture |
 | Source photos | raw source copied outside Git |
 
@@ -106,9 +22,9 @@ This sanitized log was prepared from a private copied-photo manifest. It intenti
 
 | Coverage | Counts |
 | --- | --- |
-| Card types | {json.dumps(card_type_counts, ensure_ascii=False, sort_keys=True)} |
-| Review levels | {json.dumps(review_level_counts, ensure_ascii=False, sort_keys=True)} |
-| Export blocking | {json.dumps(export_blocking_counts, ensure_ascii=False, sort_keys=True)} |
+| Card types | {"mating": 7, "other": 2, "separated": 8, "unclear": 3} |
+| Review levels | {"must_review": 10, "quick_check": 8, "trace_only": 2} |
+| Export blocking | {"blocking": 10, "non_blocking": 10} |
 
 ## Sanitized Metrics To Publish
 
@@ -116,7 +32,7 @@ Publish only aggregate counts and rates from the copied-photo run. Do not publis
 
 | Metric | Sanitized value |
 | --- | ---: |
-| Manifest cases verified | {summary.get("case_count", 0)} |
+| Manifest cases verified | 20 |
 | Photos uploaded |  |
 | Photos with extraction draft |  |
 | Photos requiring manual transcription |  |
@@ -186,13 +102,37 @@ Go only if every hard gate passes. A soft gate miss means revise workflow or run
 
 | Check | Status | Sanitized details |
 | --- | --- | --- |
-{readiness_rows(readiness)}
+| Go/no-go | go | |
+| photo_count | passed | {"actual": 20, "expected": {"max": 30, "min": 20}} |
+| card_type_coverage | passed | {"missing": [], "required": ["separated", "mating", "unclear", "other"]} |
+| review_level_coverage | passed | {"missing": [], "required": ["must_review", "quick_check", "trace_only"]} |
+| export_blocking_expectations | passed | {"actual": {"blocking": 10, "non_blocking": 10}, "minimum_blocking": 1, "minimum_non_blocking": 1} |
+| backup_restore_evidence | passed | {"after_backup_label": "after-20-photo-readiness-example", "before_backup_label": "before-20-photo-readiness-example", "overwrite_refusal_verified": true, "restore_probe_label": "restore-probe-20-photo-readiness-example", "restore_verified": true} |
 
 ## Per-Photo Private Manifest Summary
 
 | Case/photo label | Card type | Expected review level | Export blocking? | Private path status |
 | --- | --- | --- | --- | --- |
-{case_rows(cases)}
+| pilot_photo_001 | separated | quick_check | false | private source photo path omitted |
+| pilot_photo_002 | separated | must_review | true | private source photo path omitted |
+| pilot_photo_003 | separated | quick_check | false | private source photo path omitted |
+| pilot_photo_004 | separated | must_review | true | private source photo path omitted |
+| pilot_photo_005 | separated | quick_check | false | private source photo path omitted |
+| pilot_photo_006 | separated | must_review | true | private source photo path omitted |
+| pilot_photo_007 | separated | quick_check | false | private source photo path omitted |
+| pilot_photo_008 | separated | must_review | true | private source photo path omitted |
+| pilot_photo_009 | mating | must_review | true | private source photo path omitted |
+| pilot_photo_010 | mating | quick_check | false | private source photo path omitted |
+| pilot_photo_011 | mating | must_review | true | private source photo path omitted |
+| pilot_photo_012 | mating | quick_check | false | private source photo path omitted |
+| pilot_photo_013 | mating | must_review | true | private source photo path omitted |
+| pilot_photo_014 | mating | quick_check | false | private source photo path omitted |
+| pilot_photo_015 | mating | must_review | true | private source photo path omitted |
+| pilot_photo_016 | unclear | must_review | true | private source photo path omitted |
+| pilot_photo_017 | unclear | must_review | true | private source photo path omitted |
+| pilot_photo_018 | unclear | quick_check | false | private source photo path omitted |
+| pilot_photo_019 | other | trace_only | false | private source photo path omitted |
+| pilot_photo_020 | other | trace_only | false | private source photo path omitted |
 
 Operator wording note: manifest card type `other` maps to the UI label `Other / Unknown`. Treat it as trace-only unless the source photo clearly supports a supported cage-card workflow.
 
@@ -237,56 +177,3 @@ Operator wording note: manifest card type `other` maps to the UI label `Other / 
 - [ ] No generated workbook paths.
 - [ ] No local database or backup folder paths.
 - [ ] No animal-room details beyond sanitized case labels.
-"""
-
-
-def sanitized_summary(summary: dict[str, Any], output_log: Path | None) -> dict[str, Any]:
-    return {
-        "status": summary.get("status", "failed"),
-        "boundary": "review item / pilot run log",
-        "canonical": False,
-        "manifest_case_count": summary.get("case_count", 0),
-        "coverage": summary.get("coverage", {}),
-        "readiness": summary.get("readiness", {}),
-        "failures": sanitize_failures(summary.get("failures", [])),
-        "sanitized_log_path": str(output_log) if output_log else "",
-    }
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Prepare a repeatable sanitized run log for a copied-photo pilot.")
-    parser.add_argument("--manifest", default="config/real_photo_validation_cases.example.json")
-    parser.add_argument("--run-label", default="copied-pilot")
-    parser.add_argument("--output-log", default="")
-    parser.add_argument("--json", action="store_true")
-    args = parser.parse_args()
-
-    manifest_path = Path(args.manifest)
-    if not manifest_path.is_absolute():
-        manifest_path = (ROOT / manifest_path).resolve()
-
-    verifier = load_real_photo_verifier()
-    manifest = verifier.load_manifest(manifest_path)
-    validation = verifier.validate_manifest(manifest, manifest_path)
-
-    output_log = Path(args.output_log) if args.output_log else None
-    if output_log and validation.get("status") == "passed":
-        output_log.parent.mkdir(parents=True, exist_ok=True)
-        output_log.write_text(
-            build_sanitized_log(run_label=args.run_label, summary=validation),
-            encoding="utf-8",
-        )
-
-    result = sanitized_summary(validation, output_log)
-    if args.json:
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-    else:
-        print(f"status: {result['status']}")
-        print(f"manifest_case_count: {result['manifest_case_count']}")
-        if output_log:
-            print(f"sanitized_log_path: {output_log}")
-    return 0 if validation.get("status") == "passed" else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
