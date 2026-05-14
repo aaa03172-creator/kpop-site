@@ -1,0 +1,14 @@
+{
+  "probe_id": "backup_restore_evidence_uses_labels_not_paths",
+  "taxonomy": "privacy_containment",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "Pilot readiness evidence records a backup path or restore target path instead of sanitized before/after backup labels and pass/fail booleans.",
+  "expected": {
+    "boundary": "export or view",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_only"
+  }
+}

@@ -4,7 +4,7 @@ Layer classification: review item / test fixture. Canonical: false.
 
 This is a tiny Ctx2Skill-lite harness for MouseDB. It keeps only the useful part of Ctx2Skill: stable probes, binary checks, and cross-time replay pressure. It does not modify product runtime, database schema, API contracts, `AGENTS.md`, or any future project Skill.md.
 
-The probes are deliberately about cage-card workflow safety, not paper reading:
+The 20 seed probes are deliberately about cage-card workflow safety, not paper reading:
 
 - source photo and ROI grounding
 - Excel import/export-view interpretation
@@ -14,6 +14,13 @@ The probes are deliberately about cage-card workflow safety, not paper reading:
 - local reproducibility
 - source photo, note item, workbook row, or export traceability
 - unsupported or unknown logging
+- batch upload partial-failure handling
+- private real-photo pilot coverage and redaction gates
+- backup/restore evidence labels
+- genotype and high-risk mouse-event evidence enforcement
+- blocked export manifest provenance
+- assistant summary blocker visibility
+- configurable rule masters instead of hard-coded domain logic
 
 Run:
 

@@ -1,0 +1,14 @@
+{
+  "probe_id": "high_risk_mouse_event_requires_source_evidence",
+  "taxonomy": "evidence_enforcement",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "A high-risk mouse event such as death, sacrificed, moved, or weaned is requested without source evidence or preserved before/after state.",
+  "expected": {
+    "boundary": "review item",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_only"
+  }
+}

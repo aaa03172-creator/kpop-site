@@ -1,0 +1,14 @@
+{
+  "probe_id": "batch_upload_partial_failure_preserves_unrelated_photos",
+  "taxonomy": "batch_upload_resilience",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "A batch upload contains one unreadable cage-card photo, but other copied photos in the same batch are readable and source-backed.",
+  "expected": {
+    "boundary": "raw source",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_or_approved_only"
+  }
+}

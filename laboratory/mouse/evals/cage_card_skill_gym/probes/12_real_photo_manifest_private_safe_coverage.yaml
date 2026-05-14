@@ -1,0 +1,14 @@
+{
+  "probe_id": "real_photo_manifest_requires_private_safe_coverage",
+  "taxonomy": "pilot_manifest_coverage",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "A real-photo pilot manifest has copied cage-card cases but lacks the private-safe 20-30 photo, card-type, or review-level coverage needed before expansion.",
+  "expected": {
+    "boundary": "review item / test fixture",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_only"
+  }
+}

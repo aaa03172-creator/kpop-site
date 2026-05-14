@@ -1,0 +1,14 @@
+{
+  "probe_id": "pilot_export_blocking_mix_requires_control_cases",
+  "taxonomy": "pilot_manifest_coverage",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "A copied-photo pilot manifest marks every case as export-blocking, so the run has no non-blocking control case for export-readiness comparison.",
+  "expected": {
+    "boundary": "review item / test fixture",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_only"
+  }
+}

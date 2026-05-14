@@ -1,0 +1,14 @@
+{
+  "probe_id": "assistant_summary_keeps_review_blockers_visible",
+  "taxonomy": "assistant_summary_safety",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "An assistant-facing MouseDB summary describes export readiness but omits unresolved review blockers, low-confidence OCR fields, or missing evidence warnings.",
+  "expected": {
+    "boundary": "export or view",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_only"
+  }
+}

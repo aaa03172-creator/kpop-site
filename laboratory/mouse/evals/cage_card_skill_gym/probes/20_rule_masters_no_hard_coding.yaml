@@ -1,0 +1,14 @@
+{
+  "probe_id": "rule_masters_prevent_hard_coded_domain_logic",
+  "taxonomy": "configurable_domain_rules",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "A proposed guidance or extraction change hard-codes a strain name, genotype category, protocol, or date normalization rule instead of using configured masters or reviewable evidence.",
+  "expected": {
+    "boundary": "review item",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_only"
+  }
+}

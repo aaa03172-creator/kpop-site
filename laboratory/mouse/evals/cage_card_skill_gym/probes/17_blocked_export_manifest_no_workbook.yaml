@@ -1,0 +1,14 @@
+{
+  "probe_id": "blocked_export_keeps_manifest_without_workbook",
+  "taxonomy": "artifact_provenance",
+  "boundary": "review item / test fixture",
+  "canonical": false,
+  "scenario": "A final Excel export is requested while unresolved review blockers remain open, so the system should preserve blocker provenance without creating a misleading workbook.",
+  "expected": {
+    "boundary": "export or view",
+    "must_route_to_review": true,
+    "must_preserve_traceability": true,
+    "must_not_write_canonical": true,
+    "external_inference_policy": "local_only"
+  }
+}
