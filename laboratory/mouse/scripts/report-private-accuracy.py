@@ -39,6 +39,20 @@ FIELD_FAMILIES = {
 }
 
 PASSING_STATUSES = {"exact", "corrected"}
+SOURCE_IMAGE_QUALITY_BUCKETS = {"clear", "acceptable", "weak", "poor", "cropped", "unreadable", "unknown"}
+QUALITY_SIGNAL_BUCKETS = {"strong", "acceptable", "weak", "missing", "unknown"}
+HYBRID_FAILURE_LABELS = {
+    "missing_source_trace",
+    "numeric_only_note_line",
+    "ocr_ai_ear_label_disagreement",
+    "ocr_ai_mouse_id_disagreement",
+    "ocr_ai_note_line_disagreement",
+    "ocr_ai_strike_status_disagreement",
+    "parsed_note_line_needs_review",
+    "rule_expected_ear_label_mismatch",
+    "unknown_note_line_parse",
+    "weak_source_or_roi_quality",
+}
 
 
 def load_real_photo_verifier() -> Any:
@@ -204,6 +218,146 @@ def count_failure_labels(result_cases: dict[str, dict[str, Any]]) -> dict[str, i
     return dict(sorted(counts.items()))
 
 
+def empty_hybrid_metric_counts() -> dict[str, Any]:
+    return {
+        "scored_note_line_cases": 0,
+        "pre_review_exact": 0,
+        "auto_candidate_usable_without_edit": 0,
+        "review_corrections": 0,
+        "local_ocr_pre_review_exact": 0,
+        "exact_or_corrected_before_apply": 0,
+        "invalid_hybrid_evaluator_inputs": 0,
+        "failure_label_counts": {},
+    }
+
+
+def hybrid_rate(count: int, total: int) -> float:
+    return round(count / total, 4) if total else 0.0
+
+
+def finalize_hybrid_metric_counts(counts: dict[str, Any]) -> dict[str, Any]:
+    total = int(counts["scored_note_line_cases"])
+    pre_review_exact_rate = hybrid_rate(int(counts["pre_review_exact"]), total)
+    local_ocr_rate = hybrid_rate(int(counts["local_ocr_pre_review_exact"]), total)
+    invalid_inputs = int(counts["invalid_hybrid_evaluator_inputs"])
+    return {
+        "status": "invalid_input" if invalid_inputs else "passed",
+        "scored_note_line_cases": total,
+        "pre_review_exact_rate": pre_review_exact_rate,
+        "auto_candidate_usable_without_edit_rate": hybrid_rate(
+            int(counts["auto_candidate_usable_without_edit"]), total
+        ),
+        "review_correction_rate": hybrid_rate(int(counts["review_corrections"]), total),
+        "local_ocr_pre_review_exact_rate": local_ocr_rate,
+        "local_ocr_to_hybrid_delta": hybrid_rate(
+            int(counts["pre_review_exact"]) - int(counts["local_ocr_pre_review_exact"]),
+            total,
+        ),
+        "exact_or_corrected_before_apply_rate": hybrid_rate(
+            int(counts["exact_or_corrected_before_apply"]), total
+        ),
+        "invalid_hybrid_evaluator_inputs": invalid_inputs,
+        "failure_label_counts": dict(sorted(counts["failure_label_counts"].items())),
+    }
+
+
+def sanitized_hybrid_failure_label(value: Any) -> str:
+    label = str(value or "").strip()
+    return label if label in HYBRID_FAILURE_LABELS else "unknown_failure_label"
+
+
+def add_hybrid_metric_case(counts: dict[str, Any], note_case: dict[str, Any]) -> None:
+    counts["scored_note_line_cases"] += 1
+    hybrid_status = str(note_case.get("hybrid_pre_review_status") or "").strip()
+    local_status = str(note_case.get("local_ocr_pre_review_status") or "").strip()
+    if hybrid_status == "exact":
+        counts["pre_review_exact"] += 1
+    if local_status == "exact":
+        counts["local_ocr_pre_review_exact"] += 1
+    if bool_value(note_case.get("auto_candidate_usable_without_edit")):
+        counts["auto_candidate_usable_without_edit"] += 1
+    if bool_value(note_case.get("review_correction_required")):
+        counts["review_corrections"] += 1
+    if hybrid_status == "exact" or (
+        bool_value(note_case.get("review_correction_required"))
+        and bool_value(note_case.get("reviewed_before_apply"))
+    ):
+        counts["exact_or_corrected_before_apply"] += 1
+    labels = note_case.get("failure_labels", [])
+    if isinstance(labels, list):
+        for label in labels:
+            key = str(label).strip()
+            if key:
+                sanitized = sanitized_hybrid_failure_label(key)
+                counts["failure_label_counts"][sanitized] = counts["failure_label_counts"].get(sanitized, 0) + 1
+
+
+def add_invalid_hybrid_metric_input(counts: dict[str, Any]) -> None:
+    counts["invalid_hybrid_evaluator_inputs"] += 1
+
+
+def sanitized_bucket(value: Any, allowed: set[str]) -> str:
+    normalized = str(value or "unknown").strip().lower()
+    return normalized if normalized in allowed else "unknown"
+
+
+def hybrid_note_line_evaluator_metrics(result_cases: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    totals = empty_hybrid_metric_counts()
+    by_source_quality: dict[str, dict[str, Any]] = {}
+    by_roi_alignment: dict[str, dict[str, Any]] = {}
+    by_line_segmentation: dict[str, dict[str, Any]] = {}
+
+    for result in result_cases.values():
+        evaluator = result.get("hybrid_note_line_evaluator")
+        if evaluator is None:
+            continue
+        if not isinstance(evaluator, dict):
+            add_invalid_hybrid_metric_input(totals)
+            continue
+        scored_cases = evaluator.get("scored_cases")
+        if not isinstance(scored_cases, list):
+            add_invalid_hybrid_metric_input(totals)
+            continue
+        for note_case in scored_cases:
+            if not isinstance(note_case, dict):
+                add_invalid_hybrid_metric_input(totals)
+                continue
+            add_hybrid_metric_case(totals, note_case)
+            source_bucket = sanitized_bucket(
+                note_case.get("source_image_quality_bucket", note_case.get("source_image_quality")),
+                SOURCE_IMAGE_QUALITY_BUCKETS,
+            )
+            roi_bucket = sanitized_bucket(note_case.get("roi_alignment_bucket"), QUALITY_SIGNAL_BUCKETS)
+            line_bucket = sanitized_bucket(note_case.get("line_segmentation_bucket"), QUALITY_SIGNAL_BUCKETS)
+            add_hybrid_metric_case(
+                by_source_quality.setdefault(source_bucket, empty_hybrid_metric_counts()),
+                note_case,
+            )
+            add_hybrid_metric_case(
+                by_roi_alignment.setdefault(roi_bucket, empty_hybrid_metric_counts()),
+                note_case,
+            )
+            add_hybrid_metric_case(
+                by_line_segmentation.setdefault(line_bucket, empty_hybrid_metric_counts()),
+                note_case,
+            )
+
+    summary = finalize_hybrid_metric_counts(totals)
+    summary["source_image_quality_breakdown"] = {
+        key: finalize_hybrid_metric_counts(value)
+        for key, value in sorted(by_source_quality.items())
+    }
+    summary["roi_alignment_breakdown"] = {
+        key: finalize_hybrid_metric_counts(value)
+        for key, value in sorted(by_roi_alignment.items())
+    }
+    summary["line_segmentation_breakdown"] = {
+        key: finalize_hybrid_metric_counts(value)
+        for key, value in sorted(by_line_segmentation.items())
+    }
+    return summary
+
+
 def workflow_metrics(results: dict[str, Any], matched_case_count: int) -> dict[str, Any]:
     metrics = results.get("workflow_metrics")
     if not isinstance(metrics, dict):
@@ -267,6 +421,7 @@ def build_hard_gates(
     result_cases: dict[str, dict[str, Any]],
     missing_case_count: int,
     family_scores: dict[str, dict[str, Any]],
+    hybrid_metrics: dict[str, Any],
     result_validation_failures: list[str],
 ) -> dict[str, dict[str, Any]]:
     all_source_preserved = (
@@ -340,6 +495,14 @@ def build_hard_gates(
             "failed_families": accuracy_failed,
             "missing_result_cases": missing_case_count,
         },
+        "hybrid_note_line_evaluator_input": {
+            "status": "passed"
+            if int(hybrid_metrics.get("invalid_hybrid_evaluator_inputs") or 0) == 0
+            else "failed",
+            "invalid_hybrid_evaluator_inputs": int(
+                hybrid_metrics.get("invalid_hybrid_evaluator_inputs") or 0
+            ),
+        },
     }
     return gates
 
@@ -374,6 +537,7 @@ def build_report(*, manifest_path: Path | str, results_path: Path | str) -> dict
         manifest_case_ids=manifest_case_ids,
         result_cases=matched_result_cases,
     )
+    hybrid_metrics = hybrid_note_line_evaluator_metrics(matched_result_cases)
     workload = workload_summary(matched_result_cases)
     hard_gates = build_hard_gates(
         validation=validation,
@@ -381,6 +545,7 @@ def build_report(*, manifest_path: Path | str, results_path: Path | str) -> dict
         result_cases=matched_result_cases,
         missing_case_count=len(missing_case_ids),
         family_scores=family_scores,
+        hybrid_metrics=hybrid_metrics,
         result_validation_failures=result_validation_failures,
     )
     decision = go_decision(hard_gates, workload)
@@ -398,6 +563,7 @@ def build_report(*, manifest_path: Path | str, results_path: Path | str) -> dict
         "workflow_metrics": workflow_metrics(results, len(matched_result_cases)),
         "workload": workload,
         "field_family_scores": family_scores,
+        "hybrid_note_line_evaluator_metrics": hybrid_metrics,
         "hard_gates": hard_gates,
         "failure_taxonomy_counts": count_failure_labels(matched_result_cases),
         "result_validation_failures": len(result_validation_failures),
@@ -406,6 +572,22 @@ def build_report(*, manifest_path: Path | str, results_path: Path | str) -> dict
 
 def markdown_table_row(values: list[Any]) -> str:
     return "| " + " | ".join(str(value) for value in values) + " |"
+
+
+def hybrid_breakdown_rows(breakdown: dict[str, dict[str, Any]]) -> list[str]:
+    if not breakdown:
+        return [markdown_table_row(["none", 0, "0.00%", "0.00%"])]
+    return [
+        markdown_table_row(
+            [
+                bucket,
+                metrics["scored_note_line_cases"],
+                f"{metrics['pre_review_exact_rate']:.2%}",
+                f"{metrics['review_correction_rate']:.2%}",
+            ]
+        )
+        for bucket, metrics in breakdown.items()
+    ]
 
 
 def build_markdown_report(*, run_label: str, summary: dict[str, Any]) -> str:
@@ -436,6 +618,10 @@ def build_markdown_report(*, run_label: str, summary: dict[str, Any]) -> str:
         for label, count in taxonomy.items()
     ] or [markdown_table_row(["none", 0])]
     metrics = summary["workflow_metrics"]
+    hybrid = summary["hybrid_note_line_evaluator_metrics"]
+    source_breakdown_rows = hybrid_breakdown_rows(hybrid["source_image_quality_breakdown"])
+    roi_breakdown_rows = hybrid_breakdown_rows(hybrid["roi_alignment_breakdown"])
+    line_breakdown_rows = hybrid_breakdown_rows(hybrid["line_segmentation_breakdown"])
     return f"""# Private Accuracy Scoring Report - {run_label}
 
 Layer classification: {BOUNDARY}.
@@ -479,6 +665,36 @@ This report was generated from local-only private scoring inputs. It intentional
 | Review items corrected | {metrics['review_items_corrected']} |
 | Review items accepted without correction | {metrics['review_items_accepted_without_correction']} |
 | XLSX exports generated | {metrics['xlsx_exports_generated']} |
+
+## Hybrid Note-Line Evaluator Metrics
+
+| Metric | Sanitized value |
+| --- | ---: |
+| Scored note-line cases | {hybrid['scored_note_line_cases']} |
+| Pre-review exact rate | {hybrid['pre_review_exact_rate']:.2%} |
+| Auto candidate usable without edit rate | {hybrid['auto_candidate_usable_without_edit_rate']:.2%} |
+| Review correction rate | {hybrid['review_correction_rate']:.2%} |
+| Local OCR pre-review exact rate | {hybrid['local_ocr_pre_review_exact_rate']:.2%} |
+| Local OCR to hybrid delta | {hybrid['local_ocr_to_hybrid_delta']:.2%} |
+| Exact or corrected before apply rate | {hybrid['exact_or_corrected_before_apply_rate']:.2%} |
+
+### Source image quality breakdown
+
+| Bucket | Scored | Pre-review exact rate | Review correction rate |
+| --- | ---: | ---: | ---: |
+{chr(10).join(source_breakdown_rows)}
+
+### ROI alignment breakdown
+
+| Bucket | Scored | Pre-review exact rate | Review correction rate |
+| --- | ---: | ---: | ---: |
+{chr(10).join(roi_breakdown_rows)}
+
+### Line segmentation breakdown
+
+| Bucket | Scored | Pre-review exact rate | Review correction rate |
+| --- | ---: | ---: | ---: |
+{chr(10).join(line_breakdown_rows)}
 
 ## Reviewer Workload
 
@@ -526,7 +742,11 @@ def main() -> int:
             build_markdown_report(run_label=args.run_label, summary=summary),
             encoding="utf-8",
         )
-        summary = {**summary, "sanitized_report_path": str(output_report)}
+        summary = {
+            **summary,
+            "sanitized_report_written": True,
+            "sanitized_report_filename": output_report.name,
+        }
 
     if args.json:
         print(json.dumps(summary, indent=2, ensure_ascii=False))

@@ -142,6 +142,14 @@ def passing_result(case_id: str, *, review_level: str, blocking: bool) -> dict[s
     }
 
 
+def add_hybrid_note_line_cases(case: dict[str, object], scored_cases: list[dict[str, object]]) -> dict[str, object]:
+    case["hybrid_note_line_evaluator"] = {
+        "boundary": "review item / private accuracy scoring input",
+        "scored_cases": scored_cases,
+    }
+    return case
+
+
 def write_results(tmp_path: Path, cases: list[dict[str, object]]) -> Path:
     payload = {
         "layer": "review item / private accuracy scoring input",
@@ -193,6 +201,105 @@ def test_reporter_scores_private_results_without_leaking_manifest_values(tmp_pat
     assert str(manifest_path) not in encoded
     assert str(tmp_path) not in encoded
     assert "source_photo_path" not in encoded
+
+
+def test_reporter_summarizes_hybrid_note_line_evaluator_metrics_without_case_text(tmp_path: Path) -> None:
+    reporter = load_reporter_module()
+    manifest_path = write_private_manifest(tmp_path)
+    cases = [
+        add_hybrid_note_line_cases(
+            passing_result("pilot_photo_001", review_level="quick_check", blocking=False),
+            [
+                {
+                    "hybrid_pre_review_status": "exact",
+                    "local_ocr_pre_review_status": "missed",
+                    "auto_candidate_usable_without_edit": True,
+                    "review_correction_required": False,
+                    "reviewed_before_apply": True,
+                    "source_image_quality_bucket": "acceptable",
+                    "roi_alignment_bucket": "strong",
+                    "line_segmentation_bucket": "strong",
+                }
+            ],
+        ),
+        add_hybrid_note_line_cases(
+            passing_result("pilot_photo_002", review_level="must_review", blocking=True),
+            [
+                {
+                    "hybrid_pre_review_status": "missed",
+                    "local_ocr_pre_review_status": "missed",
+                    "auto_candidate_usable_without_edit": False,
+                    "review_correction_required": True,
+                    "reviewed_before_apply": True,
+                    "source_image_quality_bucket": "poor",
+                    "roi_alignment_bucket": "weak",
+                    "line_segmentation_bucket": "weak",
+                    "failure_labels": [
+                        "ocr_ai_note_line_disagreement",
+                        "SECRET_PRIVATE_FAILURE_SHOULD_MAP_TO_UNKNOWN",
+                    ],
+                }
+            ],
+        ),
+        add_hybrid_note_line_cases(
+            passing_result("pilot_photo_003", review_level="must_review", blocking=True),
+            [
+                {
+                    "hybrid_pre_review_status": "exact",
+                    "local_ocr_pre_review_status": "exact",
+                    "auto_candidate_usable_without_edit": True,
+                    "review_correction_required": False,
+                    "reviewed_before_apply": True,
+                    "source_image_quality_bucket": "SECRET_PRIVATE_BUCKET_SHOULD_MAP_TO_UNKNOWN",
+                    "roi_alignment_bucket": "strong",
+                    "line_segmentation_bucket": "strong",
+                    "raw_line_text": "SECRET_RAW_NOTE_SHOULD_NOT_APPEAR",
+                }
+            ],
+        ),
+        passing_result("pilot_photo_004", review_level="trace_only", blocking=False),
+    ]
+    results_path = write_results(tmp_path, cases)
+
+    summary = reporter.build_report(manifest_path=manifest_path, results_path=results_path)
+
+    metrics = summary["hybrid_note_line_evaluator_metrics"]
+    assert metrics["scored_note_line_cases"] == 3
+    assert metrics["pre_review_exact_rate"] == 0.6667
+    assert metrics["auto_candidate_usable_without_edit_rate"] == 0.6667
+    assert metrics["review_correction_rate"] == 0.3333
+    assert metrics["local_ocr_pre_review_exact_rate"] == 0.3333
+    assert metrics["local_ocr_to_hybrid_delta"] == 0.3333
+    assert metrics["exact_or_corrected_before_apply_rate"] == 1.0
+    assert metrics["invalid_hybrid_evaluator_inputs"] == 0
+    assert metrics["source_image_quality_breakdown"]["acceptable"]["pre_review_exact_rate"] == 1.0
+    assert metrics["source_image_quality_breakdown"]["poor"]["review_correction_rate"] == 1.0
+    assert metrics["source_image_quality_breakdown"]["unknown"]["scored_note_line_cases"] == 1
+    assert metrics["roi_alignment_breakdown"]["strong"]["scored_note_line_cases"] == 2
+    assert metrics["line_segmentation_breakdown"]["strong"]["scored_note_line_cases"] == 2
+    assert metrics["failure_label_counts"] == {
+        "ocr_ai_note_line_disagreement": 1,
+        "unknown_failure_label": 1,
+    }
+    encoded = json.dumps(summary, ensure_ascii=False)
+    assert "SECRET_" not in encoded
+    assert "raw_line_text" not in encoded
+
+
+def test_reporter_flags_malformed_hybrid_note_line_metric_input(tmp_path: Path) -> None:
+    reporter = load_reporter_module()
+    manifest_path = write_private_manifest(tmp_path)
+    malformed = passing_result("pilot_photo_001", review_level="quick_check", blocking=False)
+    malformed["hybrid_note_line_evaluator"] = {"scored_cases": "not-a-list"}
+    results_path = write_results(tmp_path, [malformed])
+
+    summary = reporter.build_report(manifest_path=manifest_path, results_path=results_path)
+
+    metrics = summary["hybrid_note_line_evaluator_metrics"]
+    assert metrics["invalid_hybrid_evaluator_inputs"] == 1
+    assert metrics["status"] == "invalid_input"
+    assert summary["hard_gates"]["hybrid_note_line_evaluator_input"]["status"] == "failed"
+    assert summary["decision"] == "no_go"
 
 
 def test_reporter_returns_no_go_for_missing_cases_and_unreviewed_high_risk_failures(tmp_path: Path) -> None:
@@ -260,15 +367,20 @@ def test_reporter_cli_writes_sanitized_markdown_and_json_summary(tmp_path: Path)
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout)
     assert summary["decision"] == "go"
-    assert summary["sanitized_report_path"] == str(output_report)
+    assert summary["sanitized_report_written"] is True
+    assert summary["sanitized_report_filename"] == output_report.name
     markdown = output_report.read_text(encoding="utf-8")
     assert "Layer classification: review item / sanitized private accuracy report." in markdown
     assert "Mouse IDs and note-line continuity" in markdown
+    assert "Hybrid Note-Line Evaluator Metrics" in markdown
+    assert "Source image quality breakdown" in markdown
+    assert "ROI alignment breakdown" in markdown
     assert "| Go/no-go decision | go |" in markdown
     combined = result.stdout + markdown
     assert "SECRET_" not in combined
     assert str(manifest_path) not in combined
     assert str(results_path) not in combined
+    assert str(output_report) not in result.stdout
 
 
 def test_package_exposes_private_accuracy_reporter_command() -> None:
