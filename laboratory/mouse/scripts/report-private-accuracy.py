@@ -41,6 +41,11 @@ FIELD_FAMILIES = {
 PASSING_STATUSES = {"exact", "corrected"}
 SOURCE_IMAGE_QUALITY_BUCKETS = {"clear", "acceptable", "weak", "poor", "cropped", "unreadable", "unknown"}
 QUALITY_SIGNAL_BUCKETS = {"strong", "acceptable", "weak", "missing", "unknown"}
+CANDIDATE_SOURCE_STATUS_KEYS = {
+    "local_ocr": ["local_ocr_pre_review_status", "ocr_pre_review_status"],
+    "ai": ["ai_pre_review_status"],
+    "hybrid": ["hybrid_pre_review_status"],
+}
 HYBRID_FAILURE_LABELS = {
     "missing_source_trace",
     "numeric_only_note_line",
@@ -226,6 +231,9 @@ def empty_hybrid_metric_counts() -> dict[str, Any]:
         "review_corrections": 0,
         "local_ocr_pre_review_exact": 0,
         "exact_or_corrected_before_apply": 0,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "reviewer_overrides": 0,
         "invalid_hybrid_evaluator_inputs": 0,
         "failure_label_counts": {},
     }
@@ -256,6 +264,12 @@ def finalize_hybrid_metric_counts(counts: dict[str, Any]) -> dict[str, Any]:
         "exact_or_corrected_before_apply_rate": hybrid_rate(
             int(counts["exact_or_corrected_before_apply"]), total
         ),
+        "false_positive_count": int(counts["false_positives"]),
+        "false_positive_rate": hybrid_rate(int(counts["false_positives"]), total),
+        "false_negative_count": int(counts["false_negatives"]),
+        "false_negative_rate": hybrid_rate(int(counts["false_negatives"]), total),
+        "reviewer_override_count": int(counts["reviewer_overrides"]),
+        "reviewer_override_rate": hybrid_rate(int(counts["reviewer_overrides"]), total),
         "invalid_hybrid_evaluator_inputs": invalid_inputs,
         "failure_label_counts": dict(sorted(counts["failure_label_counts"].items())),
     }
@@ -270,6 +284,7 @@ def add_hybrid_metric_case(counts: dict[str, Any], note_case: dict[str, Any]) ->
     counts["scored_note_line_cases"] += 1
     hybrid_status = str(note_case.get("hybrid_pre_review_status") or "").strip()
     local_status = str(note_case.get("local_ocr_pre_review_status") or "").strip()
+    expected_candidate_present = note_case.get("expected_candidate_present") is not False
     if hybrid_status == "exact":
         counts["pre_review_exact"] += 1
     if local_status == "exact":
@@ -283,6 +298,15 @@ def add_hybrid_metric_case(counts: dict[str, Any], note_case: dict[str, Any]) ->
         and bool_value(note_case.get("reviewed_before_apply"))
     ):
         counts["exact_or_corrected_before_apply"] += 1
+    if hybrid_status == "false_positive" or bool_value(note_case.get("hybrid_false_positive")):
+        counts["false_positives"] += 1
+    if (
+        hybrid_status in {"missed", "false_negative"}
+        and expected_candidate_present
+    ) or bool_value(note_case.get("hybrid_false_negative")):
+        counts["false_negatives"] += 1
+    if bool_value(note_case.get("reviewer_override")):
+        counts["reviewer_overrides"] += 1
     labels = note_case.get("failure_labels", [])
     if isinstance(labels, list):
         for label in labels:
@@ -301,11 +325,70 @@ def sanitized_bucket(value: Any, allowed: set[str]) -> str:
     return normalized if normalized in allowed else "unknown"
 
 
+def first_status_value(note_case: dict[str, Any], keys: list[str]) -> str:
+    for key in keys:
+        value = str(note_case.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def add_candidate_source_metric_case(
+    counts: dict[str, Any],
+    note_case: dict[str, Any],
+    *,
+    status_keys: list[str],
+) -> None:
+    counts["scored_note_line_cases"] += 1
+    status = first_status_value(note_case, status_keys)
+    expected_candidate_present = note_case.get("expected_candidate_present") is not False
+    if status == "exact":
+        counts["pre_review_exact"] += 1
+    if bool_value(note_case.get("auto_candidate_usable_without_edit")) and status == "exact":
+        counts["auto_candidate_usable_without_edit"] += 1
+    if bool_value(note_case.get("review_correction_required")):
+        counts["review_corrections"] += 1
+    if status == "exact" or (
+        bool_value(note_case.get("review_correction_required"))
+        and bool_value(note_case.get("reviewed_before_apply"))
+    ):
+        counts["exact_or_corrected_before_apply"] += 1
+    if status == "false_positive":
+        counts["false_positives"] += 1
+    if status in {"missed", "false_negative"} and expected_candidate_present:
+        counts["false_negatives"] += 1
+    if bool_value(note_case.get("reviewer_override")):
+        counts["reviewer_overrides"] += 1
+
+
+def sanitized_rule_snapshot_hash(note_case: dict[str, Any]) -> str:
+    value = note_case.get("rule_snapshot_hash")
+    if not value:
+        rule_candidate = note_case.get("rule_candidate")
+        if isinstance(rule_candidate, dict):
+            rule_snapshot = rule_candidate.get("rule_snapshot")
+            if isinstance(rule_snapshot, dict):
+                value = rule_snapshot.get("rule_hash")
+    text_value = str(value or "").strip()
+    if (
+        6 <= len(text_value) <= 128
+        and not any(marker in text_value for marker in (":", "/", "\\", " "))
+        and all(ch.isalnum() or ch in {"_", "-"} for ch in text_value)
+    ):
+        return text_value
+    return "unknown_rule_hash"
+
+
 def hybrid_note_line_evaluator_metrics(result_cases: dict[str, dict[str, Any]]) -> dict[str, Any]:
     totals = empty_hybrid_metric_counts()
     by_source_quality: dict[str, dict[str, Any]] = {}
     by_roi_alignment: dict[str, dict[str, Any]] = {}
     by_line_segmentation: dict[str, dict[str, Any]] = {}
+    by_candidate_source: dict[str, dict[str, Any]] = {
+        source: empty_hybrid_metric_counts()
+        for source in CANDIDATE_SOURCE_STATUS_KEYS
+    }
+    by_rule_snapshot: dict[str, dict[str, Any]] = {}
 
     for result in result_cases.values():
         evaluator = result.get("hybrid_note_line_evaluator")
@@ -329,6 +412,7 @@ def hybrid_note_line_evaluator_metrics(result_cases: dict[str, dict[str, Any]]) 
             )
             roi_bucket = sanitized_bucket(note_case.get("roi_alignment_bucket"), QUALITY_SIGNAL_BUCKETS)
             line_bucket = sanitized_bucket(note_case.get("line_segmentation_bucket"), QUALITY_SIGNAL_BUCKETS)
+            rule_hash = sanitized_rule_snapshot_hash(note_case)
             add_hybrid_metric_case(
                 by_source_quality.setdefault(source_bucket, empty_hybrid_metric_counts()),
                 note_case,
@@ -341,8 +425,26 @@ def hybrid_note_line_evaluator_metrics(result_cases: dict[str, dict[str, Any]]) 
                 by_line_segmentation.setdefault(line_bucket, empty_hybrid_metric_counts()),
                 note_case,
             )
+            add_hybrid_metric_case(
+                by_rule_snapshot.setdefault(rule_hash, empty_hybrid_metric_counts()),
+                note_case,
+            )
+            for source, status_keys in CANDIDATE_SOURCE_STATUS_KEYS.items():
+                add_candidate_source_metric_case(
+                    by_candidate_source[source],
+                    note_case,
+                    status_keys=status_keys,
+                )
 
     summary = finalize_hybrid_metric_counts(totals)
+    summary["candidate_source_metrics"] = {
+        key: finalize_hybrid_metric_counts(value)
+        for key, value in sorted(by_candidate_source.items())
+    }
+    summary["rule_snapshot_breakdown"] = {
+        key: finalize_hybrid_metric_counts(value)
+        for key, value in sorted(by_rule_snapshot.items())
+    }
     summary["source_image_quality_breakdown"] = {
         key: finalize_hybrid_metric_counts(value)
         for key, value in sorted(by_source_quality.items())
@@ -590,6 +692,42 @@ def hybrid_breakdown_rows(breakdown: dict[str, dict[str, Any]]) -> list[str]:
     ]
 
 
+def hybrid_candidate_source_rows(breakdown: dict[str, dict[str, Any]]) -> list[str]:
+    if not breakdown:
+        return [markdown_table_row(["none", 0, "0.00%", "0.00%", "0.00%", "0.00%"])]
+    return [
+        markdown_table_row(
+            [
+                source,
+                metrics["scored_note_line_cases"],
+                f"{metrics['pre_review_exact_rate']:.2%}",
+                f"{metrics['false_positive_rate']:.2%}",
+                f"{metrics['false_negative_rate']:.2%}",
+                f"{metrics['reviewer_override_rate']:.2%}",
+            ]
+        )
+        for source, metrics in breakdown.items()
+    ]
+
+
+def hybrid_rule_snapshot_rows(breakdown: dict[str, dict[str, Any]]) -> list[str]:
+    if not breakdown:
+        return [markdown_table_row(["none", 0, "0.00%", 0, 0, 0])]
+    return [
+        markdown_table_row(
+            [
+                rule_hash,
+                metrics["scored_note_line_cases"],
+                f"{metrics['pre_review_exact_rate']:.2%}",
+                metrics["false_positive_count"],
+                metrics["false_negative_count"],
+                metrics["reviewer_override_count"],
+            ]
+        )
+        for rule_hash, metrics in breakdown.items()
+    ]
+
+
 def build_markdown_report(*, run_label: str, summary: dict[str, Any]) -> str:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     field_rows = []
@@ -622,6 +760,8 @@ def build_markdown_report(*, run_label: str, summary: dict[str, Any]) -> str:
     source_breakdown_rows = hybrid_breakdown_rows(hybrid["source_image_quality_breakdown"])
     roi_breakdown_rows = hybrid_breakdown_rows(hybrid["roi_alignment_breakdown"])
     line_breakdown_rows = hybrid_breakdown_rows(hybrid["line_segmentation_breakdown"])
+    candidate_source_rows = hybrid_candidate_source_rows(hybrid["candidate_source_metrics"])
+    rule_snapshot_rows = hybrid_rule_snapshot_rows(hybrid["rule_snapshot_breakdown"])
     return f"""# Private Accuracy Scoring Report - {run_label}
 
 Layer classification: {BOUNDARY}.
@@ -677,6 +817,21 @@ This report was generated from local-only private scoring inputs. It intentional
 | Local OCR pre-review exact rate | {hybrid['local_ocr_pre_review_exact_rate']:.2%} |
 | Local OCR to hybrid delta | {hybrid['local_ocr_to_hybrid_delta']:.2%} |
 | Exact or corrected before apply rate | {hybrid['exact_or_corrected_before_apply_rate']:.2%} |
+| False positive rate | {hybrid['false_positive_rate']:.2%} |
+| False negative rate | {hybrid['false_negative_rate']:.2%} |
+| Reviewer override rate | {hybrid['reviewer_override_rate']:.2%} |
+
+### Candidate source comparison
+
+| Candidate source | Scored | Pre-review exact rate | False positive rate | False negative rate | Reviewer override rate |
+| --- | ---: | ---: | ---: | ---: | ---: |
+{chr(10).join(candidate_source_rows)}
+
+### Rule snapshot/hash breakdown
+
+| Rule hash | Scored | Pre-review exact rate | False positives | False negatives | Reviewer overrides |
+| --- | ---: | ---: | ---: | ---: | ---: |
+{chr(10).join(rule_snapshot_rows)}
 
 ### Source image quality breakdown
 

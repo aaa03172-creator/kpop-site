@@ -286,6 +286,103 @@ def test_reporter_summarizes_hybrid_note_line_evaluator_metrics_without_case_tex
     assert "raw_line_text" not in encoded
 
 
+def test_reporter_summarizes_hybrid_candidate_sources_overrides_and_rule_hashes(
+    tmp_path: Path,
+) -> None:
+    reporter = load_reporter_module()
+    manifest_path = write_private_manifest(tmp_path)
+    cases = [
+        add_hybrid_note_line_cases(
+            passing_result("pilot_photo_001", review_level="quick_check", blocking=False),
+            [
+                {
+                    "expected_candidate_present": True,
+                    "hybrid_pre_review_status": "exact",
+                    "local_ocr_pre_review_status": "missed",
+                    "ai_pre_review_status": "exact",
+                    "auto_candidate_usable_without_edit": True,
+                    "review_correction_required": False,
+                    "reviewed_before_apply": True,
+                    "source_image_quality_bucket": "acceptable",
+                    "roi_alignment_bucket": "strong",
+                    "line_segmentation_bucket": "strong",
+                    "rule_snapshot_hash": "rulehash_apom_20260506",
+                    "raw_line_text": "SECRET_RAW_NOTE_SHOULD_NOT_APPEAR",
+                }
+            ],
+        ),
+        add_hybrid_note_line_cases(
+            passing_result("pilot_photo_002", review_level="must_review", blocking=True),
+            [
+                {
+                    "expected_candidate_present": False,
+                    "hybrid_pre_review_status": "false_positive",
+                    "local_ocr_pre_review_status": "false_positive",
+                    "ai_pre_review_status": "false_positive",
+                    "auto_candidate_usable_without_edit": False,
+                    "review_correction_required": True,
+                    "reviewer_override": True,
+                    "reviewed_before_apply": True,
+                    "source_image_quality_bucket": "weak",
+                    "roi_alignment_bucket": "weak",
+                    "line_segmentation_bucket": "weak",
+                    "rule_candidate": {
+                        "rule_snapshot": {"rule_hash": "rulehash_apom_20260506"}
+                    },
+                }
+            ],
+        ),
+        add_hybrid_note_line_cases(
+            passing_result("pilot_photo_003", review_level="must_review", blocking=True),
+            [
+                {
+                    "expected_candidate_present": True,
+                    "hybrid_pre_review_status": "missed",
+                    "local_ocr_pre_review_status": "missed",
+                    "ai_pre_review_status": "missed",
+                    "auto_candidate_usable_without_edit": False,
+                    "review_correction_required": True,
+                    "reviewer_override": True,
+                    "reviewed_before_apply": True,
+                    "source_image_quality_bucket": "poor",
+                    "roi_alignment_bucket": "weak",
+                    "line_segmentation_bucket": "weak",
+                    "rule_snapshot_hash": "rulehash_other_20260507",
+                }
+            ],
+        ),
+        passing_result("pilot_photo_004", review_level="trace_only", blocking=False),
+    ]
+    results_path = write_results(tmp_path, cases)
+
+    summary = reporter.build_report(manifest_path=manifest_path, results_path=results_path)
+
+    metrics = summary["hybrid_note_line_evaluator_metrics"]
+    assert metrics["false_positive_rate"] == 0.3333
+    assert metrics["false_negative_rate"] == 0.3333
+    assert metrics["reviewer_override_rate"] == 0.6667
+    assert metrics["candidate_source_metrics"]["local_ocr"]["false_negative_rate"] == 0.6667
+    assert metrics["candidate_source_metrics"]["ai"]["pre_review_exact_rate"] == 0.3333
+    assert metrics["candidate_source_metrics"]["hybrid"]["false_positive_rate"] == 0.3333
+    assert metrics["rule_snapshot_breakdown"]["rulehash_apom_20260506"]["scored_note_line_cases"] == 2
+    assert metrics["rule_snapshot_breakdown"]["rulehash_apom_20260506"]["false_positive_count"] == 1
+    assert metrics["rule_snapshot_breakdown"]["rulehash_other_20260507"]["false_negative_count"] == 1
+    encoded = json.dumps(summary, ensure_ascii=False)
+    assert "SECRET_" not in encoded
+    assert "raw_line_text" not in encoded
+
+    output_report = tmp_path / "sanitized-private-accuracy.md"
+    output_report.write_text(
+        reporter.build_markdown_report(run_label="candidate-source", summary=summary),
+        encoding="utf-8",
+    )
+    markdown = output_report.read_text(encoding="utf-8")
+    assert "Candidate source comparison" in markdown
+    assert "Rule snapshot/hash breakdown" in markdown
+    assert "rulehash_apom_20260506" in markdown
+    assert "SECRET_" not in markdown
+
+
 def test_reporter_flags_malformed_hybrid_note_line_metric_input(tmp_path: Path) -> None:
     reporter = load_reporter_module()
     manifest_path = write_private_manifest(tmp_path)

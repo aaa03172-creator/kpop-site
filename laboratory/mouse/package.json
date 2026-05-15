@@ -10,6 +10,7 @@
     "parse:legacy": "python -X utf8 scripts/parse_legacy_workbooks.py",
     "pilot:copied-runbook": "python scripts/prepare-copied-pilot-run.py",
     "pilot:private-accuracy": "python scripts/report-private-accuracy.py",
+    "pilot:real-photo-hybrid-pack": "python scripts/prepare-real-photo-hybrid-evaluator-run.py",
     "test": "node scripts/verify-mvp.js",
     "test:acceptance": "python scripts/verify-acceptance-matrix.py",
     "test:local": "python scripts/verify-local-app.py",
