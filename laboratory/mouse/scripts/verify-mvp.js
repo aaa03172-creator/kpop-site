@@ -1281,6 +1281,73 @@ async function main() {
       legacyApplyFailure.detailText.includes("Reviewed strain name must match the mapped canonical strain."),
     "Legacy strain apply failures should stay on the open review and show the backend guard message."
   );
+  const hybridEvaluatorDetail = await staticPage.evaluate(() => {
+    const item = {
+      review_id: "review_hybrid_static",
+      parse_id: "parse_hybrid_static",
+      status: "open",
+      issue: "Hybrid note-line evaluator conflict",
+      severity: "High",
+      attention_level: "must_review",
+      attention_reason: "hybrid evaluator flagged note-line candidate conflict",
+      priority: "high",
+      assigned_role: "Colony Reviewer",
+      current_value: "101 L'",
+      suggested_value: "Review OCR, AI, and rule candidates",
+      review_reason: "Hybrid evaluator detected note-line candidate conflicts.",
+      evidence_preview: "101 L'",
+      photo_id: "photo_hybrid_static",
+      original_filename: "hybrid-card.png",
+      note_item_id: "note_hybrid_static",
+      hybrid_note_line_evaluator: {
+        candidate_kind: "hybrid_note_line",
+        review_routing: { attention_level: "must_review", must_review: true },
+        ocr_candidate: { raw_line_text: "101 L'", parsed_ear_label_code: "L_PRIME", confidence: 0.91 },
+        ai_candidate: { raw_line_text: "101 R'", parsed_ear_label_code: "R_PRIME", confidence: 0.93 },
+        hybrid_candidate: { raw_line_text: "101 L'", parsed_mouse_display_id: "101", parsed_ear_label_code: "L_PRIME", confidence: 0.9 },
+        conflicts: ["ocr_ai_note_line_disagreement", "rule_expected_ear_label_mismatch"],
+        source_quality: {
+          source_image_quality: "acceptable",
+          roi_alignment_confidence: 0.9,
+          line_segmentation_confidence: 0.88
+        },
+        rule_candidate: {
+          expected_ear_label_code: "R_PRIME",
+          rule_interpretation_candidate: "active",
+          rule_interpretation_boundary: "review hint only",
+          rule_snapshot: {
+            rule_set_id: "label_rule_apom_tgtg_20260506",
+            display_name: "ApoM Tg/Tg 2026-05-06",
+            rule_hash: "abc123hash"
+          }
+        }
+      }
+    };
+    currentVisibleReviews = [item];
+    selectedReviewId = item.review_id;
+    renderReviewDetail(item);
+    const panel = document.getElementById("reviewDetailPanel");
+    return {
+      text: panel.textContent,
+      hasPanel: Boolean(panel.querySelector(".hybrid-note-line-evaluator-panel")),
+      hasConflict: Boolean(panel.querySelector("[data-hybrid-conflict='ocr_ai_note_line_disagreement']")),
+      boundary: panel.querySelector("[data-rule-boundary]")?.textContent || ""
+    };
+  });
+  assert(
+    hybridEvaluatorDetail.hasPanel &&
+      hybridEvaluatorDetail.text.includes("Hybrid Note-Line Evaluator") &&
+      hybridEvaluatorDetail.text.includes("OCR candidate") &&
+      hybridEvaluatorDetail.text.includes("AI candidate") &&
+      hybridEvaluatorDetail.text.includes("Hybrid candidate") &&
+      hybridEvaluatorDetail.text.includes("ocr_ai_note_line_disagreement") &&
+      hybridEvaluatorDetail.text.includes("ROI alignment") &&
+      hybridEvaluatorDetail.text.includes("Line segmentation") &&
+      hybridEvaluatorDetail.text.includes("abc123hash") &&
+      hybridEvaluatorDetail.boundary.includes("review hint only") &&
+      hybridEvaluatorDetail.hasConflict,
+    "Review detail should render hybrid evaluator candidates, conflicts, quality signals, rule snapshot, and review-hint boundary."
+  );
   const reviewFollowThrough = await staticPage.evaluate(async () => {
     const originalFetch = window.fetch;
     window.fetch = async (input, options) => {

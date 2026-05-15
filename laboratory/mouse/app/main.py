@@ -8714,6 +8714,7 @@ def list_review_items() -> list[dict[str, Any]]:
                    review_note.interpreted_status AS review_note_interpreted_status,
                    review_note.parsed_mouse_display_id AS review_note_mouse_display_id,
                    review_note.parsed_count AS review_note_count,
+                   review_note.parsed_metadata_json AS review_note_parsed_metadata_json,
                    review_snapshot.card_snapshot_id,
                    review_snapshot.card_type AS review_card_type,
                    review_snapshot.card_id_raw AS review_card_id_raw,
@@ -8792,6 +8793,8 @@ def list_review_items() -> list[dict[str, Any]]:
         payload["confidence"] = payload.get("parse_confidence")
         payload["image_url"] = f"/api/photos/{quote(payload['photo_id'])}/image" if payload.get("photo_id") else ""
         payload["review_note_summary"] = json_object(payload.pop("review_note_summary_json", "{}"))
+        review_note_metadata = json_object(payload.pop("review_note_parsed_metadata_json", "{}"))
+        payload["hybrid_note_line_evaluator"] = review_note_metadata.get("hybrid_note_line_evaluator", {})
         parse_payload = json_object(payload.pop("parse_raw_payload", "{}"))
         payload["review_plausibility_findings"] = parse_payload_plausibility_findings(parse_payload)
         payload.update(review_attention_level(payload, parse_payload))

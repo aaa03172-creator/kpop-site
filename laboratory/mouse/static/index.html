@@ -1063,6 +1063,48 @@
       color: var(--ink);
       overflow-wrap: anywhere;
     }
+    .hybrid-note-line-evaluator-panel {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+    .hybrid-note-line-evaluator-panel h4 {
+      margin: 0;
+      font-size: 13px;
+    }
+    .hybrid-candidate-grid {
+      display: grid;
+      gap: 8px;
+    }
+    .hybrid-candidate-block {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 9px;
+      font-size: 12px;
+    }
+    .hybrid-candidate-block strong,
+    .hybrid-candidate-block span {
+      display: block;
+    }
+    .hybrid-candidate-block span {
+      margin-top: 3px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    .hybrid-conflict-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .hybrid-conflict-list span {
+      border: 1px solid #f0c8a3;
+      border-radius: 999px;
+      background: #fff7ed;
+      color: #8a3f0b;
+      padding: 3px 7px;
+      text-transform: none;
+      font-size: 11px;
+    }
     .apply-preview-panel {
       margin-top: 12px;
       border: 1px solid var(--line);
@@ -5948,6 +5990,79 @@
       `;
     }
 
+    function hybridEvaluatorConfidence(value) {
+      const numberValue = Number(value);
+      if (!Number.isFinite(numberValue)) return "";
+      return numberValue >= 0 && numberValue <= 1
+        ? `${Math.round(numberValue * 100)}%`
+        : `${Math.round(numberValue)}%`;
+    }
+
+    function hybridEvaluatorCandidateBlock(label, candidate) {
+      const source = candidate || {};
+      const details = [
+        ["Raw", source.raw_line_text],
+        ["Mouse", source.parsed_mouse_display_id],
+        ["Ear", source.parsed_ear_label_code],
+        ["Type", source.parsed_type],
+        ["Confidence", hybridEvaluatorConfidence(source.confidence)]
+      ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+      return `
+        <div class="hybrid-candidate-block">
+          <strong>${escapeHtml(label)}</strong>
+          ${details.length
+            ? details.map(([key, value]) => `<span>${escapeHtml(key)}: ${escapeHtml(value)}</span>`).join("")
+            : `<span>--</span>`}
+        </div>
+      `;
+    }
+
+    function reviewHybridNoteLineEvaluatorPanel(item) {
+      const evaluator = item?.hybrid_note_line_evaluator || {};
+      if (!Object.keys(evaluator).length) return "";
+      const routing = evaluator.review_routing || {};
+      const sourceQuality = evaluator.source_quality || {};
+      const ruleCandidate = evaluator.rule_candidate || {};
+      const ruleSnapshot = ruleCandidate.rule_snapshot || {};
+      const conflicts = Array.isArray(evaluator.conflicts) ? evaluator.conflicts : [];
+      const sourceQualityRows = [
+        ["Source image quality", sourceQuality.source_image_quality],
+        ["ROI alignment", hybridEvaluatorConfidence(sourceQuality.roi_alignment_confidence)],
+        ["Line segmentation", hybridEvaluatorConfidence(sourceQuality.line_segmentation_confidence)]
+      ];
+      const ruleSnapshotText = [
+        ruleSnapshot.display_name,
+        ruleSnapshot.rule_set_id,
+        ruleSnapshot.rule_hash
+      ].filter(Boolean).join(" / ") || "--";
+      const ruleBoundary = ruleCandidate.rule_interpretation_boundary || "review hint only";
+      return `
+        <div class="detail-stack hybrid-note-line-evaluator-panel">
+          <h4>Hybrid Note-Line Evaluator</h4>
+          <div class="detail-row"><span>Boundary</span><strong>review item / parsed intermediate result</strong></div>
+          <div class="detail-row"><span>Routing</span><strong>${escapeHtml([routing.attention_level, routing.must_review ? "must review" : ""].filter(Boolean).join(" / ") || "--")}</strong></div>
+          <div class="hybrid-candidate-grid">
+            ${hybridEvaluatorCandidateBlock("OCR candidate", evaluator.ocr_candidate)}
+            ${hybridEvaluatorCandidateBlock("AI candidate", evaluator.ai_candidate)}
+            ${hybridEvaluatorCandidateBlock("Hybrid candidate", evaluator.hybrid_candidate)}
+          </div>
+          <div class="detail-row">
+            <span>Conflicts</span>
+            <strong class="hybrid-conflict-list">
+              ${conflicts.length
+                ? conflicts.map((conflict) => `<span data-hybrid-conflict="${escapeHtml(conflict)}">${escapeHtml(conflict)}</span>`).join("")
+                : `<span>none</span>`}
+            </strong>
+          </div>
+          ${sourceQualityRows.map(([label, value]) => `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "--")}</strong></div>`).join("")}
+          <div class="detail-row"><span>Rule snapshot</span><strong>${escapeHtml(ruleSnapshotText)}</strong></div>
+          <div class="detail-row"><span>Rule expected</span><strong>${escapeHtml(ruleCandidate.expected_ear_label_code || "--")}</strong></div>
+          <div class="detail-row"><span>Rule state</span><strong>${escapeHtml(ruleCandidate.rule_interpretation_candidate || "--")}</strong></div>
+          <div class="detail-row" data-rule-boundary><span>Rule boundary</span><strong>${escapeHtml(ruleBoundary)}; source photo and raw note line remain primary evidence.</strong></div>
+        </div>
+      `;
+    }
+
     function renderCanonicalApplyPreview(result) {
       const panel = document.getElementById("canonicalApplyPreviewPanel");
       const blockers = result.blockers || [];
@@ -6018,6 +6133,7 @@
         </div>
         ${reviewPlausibilityPanel(item)}
         ${reviewEvidencePanel(item)}
+        ${reviewHybridNoteLineEvaluatorPanel(item)}
         <div class="detail-stack">
           <button class="audit-review-item" type="button" data-review-id="${escapeHtml(item.review_id)}">Load Audit Trace</button>
           <button class="assistant-review-draft" type="button" data-review-id="${escapeHtml(item.review_id)}">Load Assistant Draft</button>

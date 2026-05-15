@@ -1192,6 +1192,122 @@ def test_multi_label_numeric_note_line_uses_grouped_review_contract(tmp_path: Pa
         db.DB_PATH = old_db_path
 
 
+def test_review_items_expose_hybrid_note_line_evaluator_metadata(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        photo_id = "photo_review_hybrid"
+        parse_id = "parse_review_hybrid"
+        record = {
+            "type": "Separated",
+            "sourcePhotoId": photo_id,
+            "labelingRuleSetId": "label_rule_apom_tgtg_20260506",
+            "notes": [
+                {
+                    "raw": "101 L'",
+                    "ocrCandidate": {
+                        "raw_line_text": "101 L'",
+                        "parsed_mouse_display_id": "101",
+                        "parsed_ear_label_code": "L_PRIME",
+                        "confidence": 0.91,
+                    },
+                    "aiCandidate": {
+                        "raw_line_text": "101 R'",
+                        "parsed_mouse_display_id": "101",
+                        "parsed_ear_label_code": "R_PRIME",
+                        "confidence": 0.93,
+                    },
+                    "sourceQuality": {
+                        "source_image_quality": "acceptable",
+                        "roi_alignment_confidence": 0.9,
+                        "line_segmentation_confidence": 0.88,
+                    },
+                    "roiRef": "note_block:1",
+                }
+            ],
+        }
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    photo_id,
+                    "hybrid-review-card.jpg",
+                    "data/photos/test/hybrid-review-card.jpg",
+                    "2026-05-15T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    parse_id,
+                    photo_id,
+                    "manual_photo_transcription",
+                    json.dumps(record, ensure_ascii=False),
+                    "2026-05-15T00:00:00Z",
+                    "review",
+                    90,
+                    1,
+                ),
+            )
+            snapshot_id = create_card_snapshot(conn, parse_id, photo_id, record, "2026-05-15T00:00:00Z")
+            write_note_items_and_mouse_candidates(
+                conn,
+                parse_id,
+                {**record, "cardSnapshotId": snapshot_id},
+                "review",
+            )
+            note_item_id = f"note_{parse_id}_1"
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value, suggested_value,
+                     review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"review_ear_{note_item_id}",
+                    parse_id,
+                    "High",
+                    "Hybrid note-line evaluator conflict",
+                    "101 L'",
+                    "Review OCR, AI, and rule candidates",
+                    "Hybrid evaluator detected note-line candidate conflicts.",
+                    "open",
+                    "2026-05-15T00:00:01Z",
+                ),
+            )
+
+        [item] = [
+            review
+            for review in list_review_items()
+            if review["review_id"] == f"review_ear_{note_item_id}"
+        ]
+
+        evaluator = item["hybrid_note_line_evaluator"]
+        assert evaluator["candidate_kind"] == "hybrid_note_line"
+        assert evaluator["ocr_candidate"]["raw_line_text"] == "101 L'"
+        assert evaluator["ai_candidate"]["raw_line_text"] == "101 R'"
+        assert evaluator["hybrid_candidate"]["parsed_ear_label_code"] == "L_PRIME"
+        assert "ocr_ai_note_line_disagreement" in evaluator["conflicts"]
+        assert evaluator["source_quality"]["roi_alignment_confidence"] == 0.9
+        assert evaluator["source_quality"]["line_segmentation_confidence"] == 0.88
+        assert evaluator["rule_candidate"]["rule_snapshot"]["rule_hash"]
+        assert evaluator["rule_candidate"]["rule_interpretation_boundary"] == "review hint only"
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_resolving_grouped_numeric_note_review_updates_all_numeric_notes(tmp_path: Path) -> None:
     old_db_path = db.DB_PATH
     try:
