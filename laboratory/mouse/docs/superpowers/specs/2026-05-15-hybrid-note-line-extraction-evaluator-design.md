@@ -12,6 +12,18 @@ The first automatic-extraction target metric is `pre_review_exact_rate` for mous
 
 The first safety target remains mouse ID and note-line exact-or-corrected-before-apply accuracy of at least 95%, with zero unreviewed high-risk mouse ID or source-trace misses.
 
+## Metric Definitions
+
+The private pilot should score note-line extraction at the note-line case level. A scored case is one visible note-line expectation in the private manifest, including mouse ID lines, numeric-only temporary labels, struck note lines, and mating/litter context lines that the evaluator attempts to classify.
+
+- `pre_review_exact_rate`: scored note-line cases where the pre-review hybrid candidate exactly preserves the expected raw note-line continuity anchor and, when applicable, exact mouse ID and ear-label code, divided by all scored note-line cases.
+- `auto_candidate_usable_without_edit`: scored note-line cases where the pre-review candidate could be accepted after source-photo check without text correction, divided by all scored note-line cases.
+- `review_correction_rate`: scored note-line cases requiring reviewer text or classification correction before apply, divided by all scored note-line cases.
+- `local_ocr_to_hybrid_delta`: hybrid `pre_review_exact_rate` minus local-OCR-only `pre_review_exact_rate` on the same scored note-line cases.
+- `exact_or_corrected_before_apply`: scored note-line cases that were either pre-review exact or corrected by a reviewer before canonical apply/export use, divided by all scored note-line cases.
+
+Identity continuity errors, missing source refs, and unreviewed high-risk misses are hard-gate failures even when aggregate rates pass.
+
 ## Existing Assets To Reuse
 
 The design builds on work already present in this repository:
@@ -96,6 +108,12 @@ The evaluator should use an additive structure so existing readers keep working:
     "ear_label_code": "R_PRIME",
     "confidence": 0.88
   },
+  "source_quality": {
+    "source_image_quality": "acceptable",
+    "roi_alignment_confidence": 0.86,
+    "line_segmentation_confidence": 0.81,
+    "quality_flags": []
+  },
   "rule_candidate": {
     "labeling_rule_set_id": "label_rule_apom_tgtg_20260506",
     "labeling_rule_display_name": "ApoM Tg/Tg 2026-05-06",
@@ -115,7 +133,7 @@ The evaluator should use an additive structure so existing readers keep working:
   },
   "applied_rule_keys": [
     "ocr_ai_exact_note_line_agreement",
-    "expected_ear_label_sequence_match"
+    "rule_consistency_expected_ear_label_sequence"
   ],
   "conflicts": [],
   "source_refs": {
@@ -133,6 +151,7 @@ This payload is parsed/intermediate evidence. It may be stored in a new helper t
 Rules improve candidate ranking and review routing, but they are not direct evidence. The evaluator must keep rule assumptions visible and reproducible:
 
 - Store a rule snapshot identifier with each evaluator result: rule set ID, display name, effective date or session date, and a stable hash of the fields used for evaluation.
+- Compute the rule hash from a stable JSON object with sorted keys. The first hash input fields are `rule_set_id`, `display_name`, `session_date` or `effective_from`, `crossed_out_handling`, ordered `ear_label_sequence`, `sample_mapping`, and `genotyping_target` when present.
 - Preserve `raw_strike_status` separately from any default or rule-specific interpretation.
 - Store `default_strike_interpretation` and `rule_interpretation_candidate` separately. A selected rule may propose that a crossed-out mouse line means dead, moved, separated, or needs review, but the evaluator must not overwrite the raw strike mark or silently create a canonical event.
 - Treat crossed-out handling as source-context-specific. The labeling-session rule for mouse-number note lines must not be reused for mating/litter rows, workbook cleanup notes, or free-text breeding statuses.
@@ -234,17 +253,27 @@ npm run test:browser-photo-export-e2e
 npm run test:python
 ```
 
-## Implementation Order
+## Implementation Phases
+
+Phase 1: pure note-line evaluator.
 
 1. Add a pure evaluator module that accepts OCR candidates, AI candidates, parsed note rows, source/ROI quality signals, and optional labeling rule context.
 2. Add unit tests for scoring and routing before connecting it to API flows.
 3. Add a stable rule snapshot helper for labeling rule context used by the evaluator.
 4. Attach evaluator metadata additively to existing note-line evidence without changing canonical apply semantics.
-5. Pass selected labeling rule context into approved AI extraction prompts with confirmation-bias guardrails.
-6. Surface evaluator explanation and rule scope in review detail.
-7. Convert adjacent breeding-rule confidence weights into configurable signals before using them for any routing beyond review suggestions.
-8. Change strain-specific assumption helpers to return reviewable candidate metadata before they are reused by evaluator or export flows.
-9. Extend private accuracy scoring to report evaluator-specific note-line failures.
+
+Phase 2: rule safety cleanup.
+
+1. Pass selected labeling rule context into approved AI extraction prompts with confirmation-bias guardrails.
+2. Surface evaluator explanation and rule scope in review detail.
+3. Convert adjacent breeding-rule confidence weights into configurable signals before using them for any routing beyond review suggestions.
+4. Change strain-specific assumption helpers to return reviewable candidate metadata before they are reused by evaluator or export flows.
+
+Phase 3: pilot scoring and reporting.
+
+1. Extend private accuracy scoring to report evaluator-specific note-line failures.
+2. Report `pre_review_exact_rate`, `auto_candidate_usable_without_edit`, `review_correction_rate`, and local-OCR-to-hybrid delta separately.
+3. Include source/ROI quality breakdowns in private aggregate reports without private photo paths or raw text.
 
 ## Storage And Pilot Decisions
 
