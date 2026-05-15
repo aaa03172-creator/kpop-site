@@ -8,7 +8,9 @@ Canonical: false.
 
 Improve real cage-card automatic extraction accuracy for mouse IDs and note-line continuity by combining existing local OCR/AI draft output, ROI crops, note-line parsing, labeling session rules, and review routing. The evaluator should raise the quality of automatic drafts before review, but it must not write canonical mouse, cage, mating, litter, genotype, event, or export state directly.
 
-The first target metric is mouse ID and note-line exact-or-corrected-before-apply accuracy of at least 95% in the private copied-photo pilot, with zero unreviewed high-risk mouse ID or source-trace misses.
+The first automatic-extraction target metric is `pre_review_exact_rate` for mouse IDs and note-line continuity in the private copied-photo pilot. The evaluator should also report `auto_candidate_usable_without_edit`, `review_correction_rate`, and local-OCR-to-hybrid delta so automatic draft quality is not confused with reviewer-corrected safety.
+
+The first safety target remains mouse ID and note-line exact-or-corrected-before-apply accuracy of at least 95%, with zero unreviewed high-risk mouse ID or source-trace misses.
 
 ## Existing Assets To Reuse
 
@@ -125,16 +127,17 @@ This payload is parsed/intermediate evidence. It may be stored in a new helper t
 The evaluator should score agreement and conflicts conservatively:
 
 - Increase confidence when local OCR and AI agree on raw line, mouse ID, and ear-label code.
-- Increase confidence when the parsed ear label matches the expected labeling rule sequence.
+- Treat expected labeling rule sequence matches as `rule_consistency` signals, not visual evidence. A sequence match may lower review burden only when OCR/AI/raw visual candidates are independently plausible; it must not raise confidence by itself.
 - Increase confidence when line order is consistent with the selected cage/card group.
 - Decrease confidence when OCR and AI disagree on mouse ID, ear label, or strike mark.
+- Decrease confidence when OCR and AI agree but share weak input quality, such as low ROI alignment confidence, low source image quality, or uncertain line segmentation.
 - Decrease confidence when a mouse number jumps without crossed-out/dead evidence.
 - Decrease confidence when a parsed ear label conflicts with the expected sequence.
 - Decrease confidence when a line is numeric-only; numeric-only notes stay reviewable and must not become mouse IDs automatically.
 - Decrease confidence when a note line maps to a duplicate active mouse candidate.
 - Route any impossible ear-label suffix, unclear strike, duplicate active mouse, or missing source reference to `must_review`.
 
-The evaluator can emit `trace_only` only when the note line is not used for canonical candidate apply or export readiness. It can emit `quick_check` when automatic candidates agree and no high-risk conflict is present. It must emit `must_review` for any high-risk identity, evidence, or export-safety conflict.
+The evaluator can emit `trace_only` only when the note line is not used for canonical candidate apply or export readiness. It can emit `quick_check` when automatic candidates agree, source/ROI quality is acceptable, and no high-risk conflict is present. It must emit `must_review` for any high-risk identity, evidence, or export-safety conflict.
 
 ## AI Prompt Context
 
@@ -143,6 +146,7 @@ When external AI extraction is approved, the prompt should include only minimal 
 - selected labeling rule-set display name;
 - ordered ear-label examples for the first several active mouse lines;
 - instruction that crossed-out handling is context-specific and not global;
+- instruction that rule context is only a review hint and must never override visible raw transcription;
 - reminder that numeric-only note lines are temporary labels or review anchors, not mouse IDs by default;
 - assigned strain names/aliases already used for matching scope.
 
@@ -183,14 +187,17 @@ Public reports should aggregate these labels without raw text or private paths.
 Focused tests should cover:
 
 - OCR and AI exact agreement routes a note-line candidate to `quick_check`;
+- OCR and AI agreement with weak ROI/source quality still routes to `must_review`;
 - AI/OCR mouse ID disagreement routes to `must_review`;
-- expected ear-label sequence match raises confidence without overwriting raw text;
+- expected ear-label sequence match records `rule_consistency` without overwriting raw text or raising confidence by itself;
 - expected ear-label sequence conflict creates a conflict label and review routing;
+- AI prompt context includes a guard that rules cannot override visible raw transcription;
 - crossed-out mouse line is skipped in active ear-label sequence under the selected rule;
 - numeric-only notes remain `unlabeled_numeric_note` and cannot auto-create mouse IDs;
 - impossible suffixes such as `RWM` stay reviewable;
 - low-confidence OCR plus no AI agreement routes to `must_review`;
 - hybrid metadata preserves `photo_id`, `card_snapshot_id`, note item, and ROI refs;
+- pilot reports separate `pre_review_exact_rate`, `auto_candidate_usable_without_edit`, and `review_correction_rate`;
 - private accuracy reporter can score the note-line field family from sanitized results.
 
 Recommended focused verification:
@@ -204,19 +211,19 @@ npm run test:python
 
 ## Implementation Order
 
-1. Add a pure evaluator module that accepts OCR candidates, AI candidates, parsed note rows, and optional labeling rule context.
+1. Add a pure evaluator module that accepts OCR candidates, AI candidates, parsed note rows, source/ROI quality signals, and optional labeling rule context.
 2. Add unit tests for scoring and routing before connecting it to API flows.
-3. Attach evaluator metadata additively to note-line evidence without changing canonical apply semantics.
+3. Attach evaluator metadata additively to existing note-line evidence without changing canonical apply semantics.
 4. Pass selected labeling rule context into approved AI extraction prompts.
 5. Surface evaluator explanation in review detail.
 6. Extend private accuracy scoring to report evaluator-specific note-line failures.
 
-## Open Questions
+## Storage And Pilot Decisions
 
-- Whether to store evaluator output in a new table or as metadata on existing note/evidence rows.
-- Whether line-level ROI crops are needed before or after the first 20-30 copied-photo pilot.
-- Whether local OCR confidence should be calibrated per ROI template type.
-- Whether the first pilot should require AI extraction for all photos or only for low-confidence local OCR notes.
+- First implementation slice should store evaluator output as additive metadata on existing note/evidence rows, such as `card_note_item_log.parsed_metadata_json` and related `photo_evidence_item` references. A separate table can be introduced after the private pilot if reporting or query complexity justifies it.
+- First implementation slice should capture source/ROI quality and line ordering signals even if line-level crop files are not yet persisted.
+- Local OCR confidence should be reported by ROI template type when available, but template-specific calibration can follow the first private pilot.
+- The first private pilot should compare local OCR only versus hybrid output. AI extraction should be approved per run and used for all pilot photos only if the operator explicitly wants a full AI-assisted baseline; otherwise use it for low-confidence or high-risk note-line cases first.
 
 ## Approval Gate
 
