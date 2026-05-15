@@ -1,0 +1,542 @@
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+VERIFIER_PATH = ROOT / "scripts" / "verify-real-photo-pilot.py"
+
+BOUNDARY = "review item / sanitized private accuracy report"
+RESULT_INPUT_LAYER = "review item / private accuracy scoring input"
+
+FIELD_FAMILIES = {
+    "mouse_ids_or_note_lines": {
+        "label": "Mouse IDs and note-line continuity",
+        "threshold": 0.95,
+    },
+    "card_type_review_routing": {
+        "label": "Card type and review routing",
+        "threshold": 1.0,
+    },
+    "sex_count_dob": {
+        "label": "Sex/count and DOB/date handling",
+        "threshold": 0.9,
+    },
+    "mating_litter_context": {
+        "label": "Mating/litter context",
+        "threshold": 0.9,
+    },
+    "export_provenance": {
+        "label": "Export provenance",
+        "threshold": 1.0,
+    },
+}
+
+PASSING_STATUSES = {"exact", "corrected"}
+
+
+def load_real_photo_verifier() -> Any:
+    spec = importlib.util.spec_from_file_location("verify_real_photo_pilot", VERIFIER_PATH)
+    if not spec or not spec.loader:
+        raise RuntimeError("Unable to load real-photo pilot verifier")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_json_object(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError("JSON root must be an object")
+    return payload
+
+
+def bool_value(value: Any) -> bool:
+    return value is True
+
+
+def case_ids_from_manifest(manifest: dict[str, Any]) -> list[str]:
+    cases = manifest.get("cases")
+    if not isinstance(cases, list):
+        return []
+    return [
+        str(case.get("case_id") or "")
+        for case in cases
+        if isinstance(case, dict) and str(case.get("case_id") or "").strip()
+    ]
+
+
+def expected_case_index(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    cases = manifest.get("cases")
+    if not isinstance(cases, list):
+        return {}
+    index: dict[str, dict[str, Any]] = {}
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        case_id = str(case.get("case_id") or "").strip()
+        if case_id:
+            index[case_id] = case
+    return index
+
+
+def result_case_index(results: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    cases = results.get("cases")
+    if not isinstance(cases, list):
+        return {}, ["results.cases must be a list"]
+    index: dict[str, dict[str, Any]] = {}
+    failures: list[str] = []
+    for case in cases:
+        if not isinstance(case, dict):
+            failures.append("result case must be an object")
+            continue
+        case_id = str(case.get("case_id") or "").strip()
+        if not case_id:
+            failures.append("result case_id is required")
+            continue
+        if case_id in index:
+            failures.append(f"duplicate result case_id: {case_id}")
+            continue
+        index[case_id] = case
+    return index, failures
+
+
+def validate_results_payload(results: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    if results.get("layer") != RESULT_INPUT_LAYER:
+        failures.append(f"results.layer must be {RESULT_INPUT_LAYER!r}")
+    if results.get("canonical") is not False:
+        failures.append("results.canonical must be false")
+    if not str(results.get("source_policy") or "").strip():
+        failures.append("results.source_policy is required")
+    _, case_failures = result_case_index(results)
+    failures.extend(case_failures)
+    return failures
+
+
+def score_is_passing(score: dict[str, Any]) -> bool:
+    status = str(score.get("status") or "").strip()
+    if status == "exact":
+        return True
+    if status == "corrected":
+        return bool_value(score.get("reviewed_before_apply"))
+    return False
+
+
+def empty_family_score() -> dict[str, Any]:
+    return {
+        "label": "",
+        "threshold": 0.0,
+        "evaluated": 0,
+        "passed": 0,
+        "exact": 0,
+        "corrected_before_apply": 0,
+        "missed": 0,
+        "not_applicable": 0,
+        "unreviewed_high_risk_misses": 0,
+        "traceability_failures": 0,
+        "rate": 0.0,
+        "status": "failed",
+    }
+
+
+def calculate_family_scores(
+    *,
+    manifest_case_ids: list[str],
+    result_cases: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    family_scores = {}
+    for family, definition in FIELD_FAMILIES.items():
+        summary = empty_family_score()
+        summary["label"] = definition["label"]
+        summary["threshold"] = definition["threshold"]
+        for case_id in manifest_case_ids:
+            result = result_cases.get(case_id)
+            score = {}
+            if isinstance(result, dict):
+                field_scores = result.get("field_scores")
+                if isinstance(field_scores, dict) and isinstance(field_scores.get(family), dict):
+                    score = field_scores[family]
+            has_score = bool(score)
+            status = str(score.get("status") or "missed").strip()
+            if status == "not_applicable":
+                summary["not_applicable"] += 1
+                continue
+            summary["evaluated"] += 1
+            if status == "exact":
+                summary["exact"] += 1
+            if status == "corrected" and bool_value(score.get("reviewed_before_apply")):
+                summary["corrected_before_apply"] += 1
+            if status == "missed" or status not in PASSING_STATUSES:
+                summary["missed"] += 1
+            if has_score and not bool_value(score.get("traceable")):
+                summary["traceability_failures"] += 1
+            if has_score and status == "missed" and not bool_value(score.get("reviewed_before_apply")):
+                summary["unreviewed_high_risk_misses"] += 1
+            if score and score_is_passing(score):
+                summary["passed"] += 1
+        if summary["evaluated"]:
+            summary["rate"] = round(summary["passed"] / summary["evaluated"], 4)
+        threshold_met = summary["rate"] >= definition["threshold"]
+        high_risk_clean = summary["unreviewed_high_risk_misses"] == 0
+        summary["status"] = "passed" if threshold_met and high_risk_clean else "failed"
+        family_scores[family] = summary
+    return family_scores
+
+
+def count_failure_labels(result_cases: dict[str, dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for result in result_cases.values():
+        labels = result.get("failure_labels", [])
+        if not isinstance(labels, list):
+            continue
+        for label in labels:
+            key = str(label).strip()
+            if key:
+                counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def workflow_metrics(results: dict[str, Any], matched_case_count: int) -> dict[str, Any]:
+    metrics = results.get("workflow_metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
+    return {
+        "photos_uploaded": int(metrics.get("photos_uploaded") or matched_case_count),
+        "photos_with_extraction_draft": int(metrics.get("photos_with_extraction_draft") or 0),
+        "manual_transcriptions": int(metrics.get("manual_transcriptions") or 0),
+        "review_items_opened": int(metrics.get("review_items_opened") or 0),
+        "review_items_corrected": int(metrics.get("review_items_corrected") or 0),
+        "review_items_accepted_without_correction": int(
+            metrics.get("review_items_accepted_without_correction") or 0
+        ),
+        "xlsx_exports_generated": int(metrics.get("xlsx_exports_generated") or 0),
+    }
+
+
+def percentile(values: list[float], percent: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = (len(ordered) - 1) * percent
+    lower = int(index)
+    upper = min(lower + 1, len(ordered) - 1)
+    if lower == upper:
+        return round(ordered[lower], 2)
+    fraction = index - lower
+    return round(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction, 2)
+
+
+def workload_summary(result_cases: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    seconds = [
+        float(case["review_seconds"])
+        for case in result_cases.values()
+        if isinstance(case.get("review_seconds"), (int, float))
+    ]
+    manual_count = len(
+        [case for case in result_cases.values() if bool_value(case.get("manual_transcription_required"))]
+    )
+    total = len(result_cases)
+    manual_rate = round(manual_count / total, 4) if total else 0.0
+    return {
+        "median_review_seconds": percentile(seconds, 0.5),
+        "p90_review_seconds": percentile(seconds, 0.9),
+        "manual_transcription_count": manual_count,
+        "manual_transcription_rate": manual_rate,
+        "status": "passed"
+        if (
+            (not seconds or (percentile(seconds, 0.5) or 0) <= 240)
+            and (not seconds or (percentile(seconds, 0.9) or 0) <= 480)
+            and manual_rate <= 0.4
+        )
+        else "needs_narrow_rerun",
+    }
+
+
+def build_hard_gates(
+    *,
+    validation: dict[str, Any],
+    manifest_index: dict[str, dict[str, Any]],
+    result_cases: dict[str, dict[str, Any]],
+    missing_case_count: int,
+    family_scores: dict[str, dict[str, Any]],
+    result_validation_failures: list[str],
+) -> dict[str, dict[str, Any]]:
+    all_source_preserved = (
+        missing_case_count == 0
+        and all(bool_value(case.get("source_preserved")) for case in result_cases.values())
+    )
+    traceability_failures = sum(
+        int(summary["traceability_failures"]) for summary in family_scores.values()
+    )
+    unresolved_blockers = len(
+        [case for case in result_cases.values() if bool_value(case.get("unresolved_must_review_at_export"))]
+    )
+    expected_blocking_failures = 0
+    review_level_failures = 0
+    for case_id, expected in manifest_index.items():
+        result = result_cases.get(case_id)
+        if result is None:
+            continue
+        expected_review = str(expected.get("expected_review_level") or "")
+        actual_review = str(result.get("actual_review_level") or "")
+        if expected_review and actual_review != expected_review:
+            review_level_failures += 1
+        if bool_value(expected.get("expected_export_blocking")) and not bool_value(
+            result.get("export_blocked_until_resolved")
+        ):
+            expected_blocking_failures += 1
+    silent_overwrites = len(
+        [case for case in result_cases.values() if bool_value(case.get("silent_overwrite"))]
+    )
+    accuracy_failed = [
+        family
+        for family, summary in family_scores.items()
+        if summary.get("status") != "passed"
+    ]
+
+    gates = {
+        "private_data_containment": {
+            "status": "passed" if not result_validation_failures else "failed",
+            "details": "Reporter output contains sanitized aggregates only.",
+        },
+        "manifest_validation": {
+            "status": "passed" if validation.get("status") == "passed" else "failed",
+            "failed_checks": int(validation.get("failed") or 0),
+        },
+        "source_preservation": {
+            "status": "passed" if all_source_preserved else "failed",
+            "missing_or_unpreserved_cases": missing_case_count
+            + len([case for case in result_cases.values() if not bool_value(case.get("source_preserved"))]),
+        },
+        "traceability": {
+            "status": "passed"
+            if missing_case_count == 0 and traceability_failures == 0
+            else "failed",
+            "traceability_failures": traceability_failures,
+            "missing_result_cases": missing_case_count,
+        },
+        "review_blocking": {
+            "status": "passed"
+            if unresolved_blockers == 0 and expected_blocking_failures == 0 and review_level_failures == 0
+            else "failed",
+            "unresolved_must_review_at_export": unresolved_blockers,
+            "expected_blocking_failures": expected_blocking_failures,
+            "review_level_failures": review_level_failures,
+        },
+        "silent_overwrite_prevention": {
+            "status": "passed" if silent_overwrites == 0 else "failed",
+            "silent_overwrite_count": silent_overwrites,
+        },
+        "accuracy_thresholds": {
+            "status": "passed" if not accuracy_failed and missing_case_count == 0 else "failed",
+            "failed_families": accuracy_failed,
+            "missing_result_cases": missing_case_count,
+        },
+    }
+    return gates
+
+
+def go_decision(hard_gates: dict[str, dict[str, Any]], workload: dict[str, Any]) -> str:
+    if any(gate.get("status") != "passed" for gate in hard_gates.values()):
+        return "no_go"
+    if workload.get("status") != "passed":
+        return "narrow_rerun"
+    return "go"
+
+
+def build_report(*, manifest_path: Path | str, results_path: Path | str) -> dict[str, Any]:
+    manifest_path = Path(manifest_path)
+    results_path = Path(results_path)
+    verifier = load_real_photo_verifier()
+    manifest = verifier.load_manifest(manifest_path)
+    validation = verifier.validate_manifest(manifest, manifest_path)
+    results = load_json_object(results_path)
+    result_validation_failures = validate_results_payload(results)
+    result_cases, _ = result_case_index(results)
+    manifest_case_ids = case_ids_from_manifest(manifest)
+    manifest_index = expected_case_index(manifest)
+    missing_case_ids = [case_id for case_id in manifest_case_ids if case_id not in result_cases]
+    extra_case_ids = sorted([case_id for case_id in result_cases if case_id not in manifest_index])
+    matched_result_cases = {
+        case_id: result_cases[case_id]
+        for case_id in manifest_case_ids
+        if case_id in result_cases
+    }
+    family_scores = calculate_family_scores(
+        manifest_case_ids=manifest_case_ids,
+        result_cases=matched_result_cases,
+    )
+    workload = workload_summary(matched_result_cases)
+    hard_gates = build_hard_gates(
+        validation=validation,
+        manifest_index=manifest_index,
+        result_cases=matched_result_cases,
+        missing_case_count=len(missing_case_ids),
+        family_scores=family_scores,
+        result_validation_failures=result_validation_failures,
+    )
+    decision = go_decision(hard_gates, workload)
+    status = "passed" if decision == "go" else "failed"
+    return {
+        "status": status,
+        "decision": decision,
+        "boundary": BOUNDARY,
+        "canonical": False,
+        "case_count": len(manifest_case_ids),
+        "matched_case_count": len(matched_result_cases),
+        "missing_result_case_count": len(missing_case_ids),
+        "extra_result_case_count": len(extra_case_ids),
+        "coverage": validation.get("coverage", {}),
+        "workflow_metrics": workflow_metrics(results, len(matched_result_cases)),
+        "workload": workload,
+        "field_family_scores": family_scores,
+        "hard_gates": hard_gates,
+        "failure_taxonomy_counts": count_failure_labels(matched_result_cases),
+        "result_validation_failures": len(result_validation_failures),
+    }
+
+
+def markdown_table_row(values: list[Any]) -> str:
+    return "| " + " | ".join(str(value) for value in values) + " |"
+
+
+def build_markdown_report(*, run_label: str, summary: dict[str, Any]) -> str:
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    field_rows = []
+    for family in FIELD_FAMILIES:
+        score = summary["field_family_scores"][family]
+        field_rows.append(
+            markdown_table_row(
+                [
+                    score["label"],
+                    score["status"],
+                    f"{score['rate']:.2%}",
+                    f"{score['threshold']:.0%}",
+                    score["passed"],
+                    score["evaluated"],
+                    score["unreviewed_high_risk_misses"],
+                ]
+            )
+        )
+    gate_rows = [
+        markdown_table_row([name, gate.get("status", "")])
+        for name, gate in summary["hard_gates"].items()
+    ]
+    taxonomy = summary.get("failure_taxonomy_counts", {})
+    taxonomy_rows = [
+        markdown_table_row([label, count])
+        for label, count in taxonomy.items()
+    ] or [markdown_table_row(["none", 0])]
+    metrics = summary["workflow_metrics"]
+    return f"""# Private Accuracy Scoring Report - {run_label}
+
+Layer classification: {BOUNDARY}.
+
+Canonical: false.
+
+Generated at: {generated_at}
+
+This report was generated from local-only private scoring inputs. It intentionally omits private photo paths, raw cage-card text, raw OCR/AI payloads, generated workbook paths, local database paths, backup paths, and case-level animal-room details.
+
+## Go / No-Go
+
+| Check | Result |
+| --- | --- |
+| Go/no-go decision | {summary['decision']} |
+| Manifest cases | {summary['case_count']} |
+| Matched scoring cases | {summary['matched_case_count']} |
+| Missing scoring cases | {summary['missing_result_case_count']} |
+| Extra scoring cases ignored | {summary['extra_result_case_count']} |
+
+## Field-Family Accuracy
+
+| Field family | Status | Rate | Threshold | Passed | Evaluated | Unreviewed high-risk misses |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+{chr(10).join(field_rows)}
+
+## Hard Gates
+
+| Gate | Status |
+| --- | --- |
+{chr(10).join(gate_rows)}
+
+## Workflow Metrics
+
+| Metric | Sanitized value |
+| --- | ---: |
+| Photos uploaded | {metrics['photos_uploaded']} |
+| Photos with extraction draft | {metrics['photos_with_extraction_draft']} |
+| Manual transcriptions | {metrics['manual_transcriptions']} |
+| Review items opened | {metrics['review_items_opened']} |
+| Review items corrected | {metrics['review_items_corrected']} |
+| Review items accepted without correction | {metrics['review_items_accepted_without_correction']} |
+| XLSX exports generated | {metrics['xlsx_exports_generated']} |
+
+## Reviewer Workload
+
+| Criterion | Sanitized value |
+| --- | ---: |
+| Median review seconds | {summary['workload']['median_review_seconds']} |
+| 90th percentile review seconds | {summary['workload']['p90_review_seconds']} |
+| Manual transcription count | {summary['workload']['manual_transcription_count']} |
+| Manual transcription rate | {summary['workload']['manual_transcription_rate']:.2%} |
+| Workload status | {summary['workload']['status']} |
+
+## Failure Taxonomy Counts
+
+| Failure label | Count |
+| --- | ---: |
+{chr(10).join(taxonomy_rows)}
+
+## Sanitization Checklist
+
+- [ ] No private source photo paths.
+- [ ] No raw copied-photo OCR/AI payloads.
+- [ ] No raw expected field text copied from the private manifest.
+- [ ] No generated workbook paths.
+- [ ] No local database or backup folder paths.
+- [ ] No animal-room details beyond sanitized case labels.
+"""
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Score private copied-photo accuracy inputs and emit sanitized aggregates."
+    )
+    parser.add_argument("--manifest", required=True, help="Private manifest path.")
+    parser.add_argument("--results", required=True, help="Private scoring results JSON path.")
+    parser.add_argument("--run-label", default="private-accuracy", help="Sanitized report label.")
+    parser.add_argument("--output-report", default="", help="Optional sanitized Markdown report path.")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable summary.")
+    args = parser.parse_args()
+
+    summary = build_report(manifest_path=Path(args.manifest), results_path=Path(args.results))
+    output_report = Path(args.output_report) if args.output_report else None
+    if output_report:
+        output_report.parent.mkdir(parents=True, exist_ok=True)
+        output_report.write_text(
+            build_markdown_report(run_label=args.run_label, summary=summary),
+            encoding="utf-8",
+        )
+        summary = {**summary, "sanitized_report_path": str(output_report)}
+
+    if args.json:
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
+    else:
+        print(f"status: {summary['status']}")
+        print(f"decision: {summary['decision']}")
+        if output_report:
+            print(f"sanitized_report_path: {output_report}")
+    return 0 if summary.get("decision") in {"go", "narrow_rerun"} else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
