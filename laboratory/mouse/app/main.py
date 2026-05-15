@@ -31,6 +31,7 @@ from . import db as app_db
 from .db import ROOT, connection, init_db
 from .breeding_rules import DEFAULT_BREEDING_RULE_SET
 from .labeling_rules import interpret_crossed_out_status, match_samples_to_mice
+from .hybrid_note_line_evaluator import build_rule_snapshot, evaluate_note_line_candidate
 from .matching import MatchCandidate, match_candidate
 from .storage import new_id, save_legacy_workbook, save_upload, utc_now
 from scripts.parse_legacy_workbooks import parse_workbook
@@ -6784,6 +6785,32 @@ def load_labeling_rule_sample_mapping(conn: Any, rule_set_id: str) -> str:
     return str(row["sample_mapping"] or "").strip() if row else ""
 
 
+def load_labeling_rule_context(conn: Any, rule_set_id: str) -> dict[str, Any]:
+    rule_id = str(rule_set_id or "").strip()
+    if not rule_id:
+        return {}
+    row = conn.execute(
+        """
+        SELECT rule_set_id, display_name, session_date, crossed_out_handling,
+               sample_mapping, genotyping_target
+        FROM labeling_rule_set
+        WHERE rule_set_id = ?
+        """,
+        (rule_id,),
+    ).fetchone()
+    if not row:
+        return {}
+    return {
+        "rule_set_id": row["rule_set_id"],
+        "display_name": row["display_name"],
+        "session_date": row["session_date"],
+        "crossed_out_handling": row["crossed_out_handling"],
+        "ear_label_sequence": load_labeling_rule_ear_sequence(conn, rule_id),
+        "sample_mapping": row["sample_mapping"],
+        "genotyping_target": row["genotyping_target"],
+    }
+
+
 @app.get("/api/labeling-rule-sets")
 def list_labeling_rule_sets() -> list[dict[str, Any]]:
     with connection() as conn:
@@ -7459,11 +7486,13 @@ def write_note_items_and_mouse_candidates(
     crossed_out_handling = (
         load_labeling_rule_crossed_out_handling(conn, labeling_rule_set_id) if labeling_rule_set_id else ""
     )
+    labeling_rule_context = load_labeling_rule_context(conn, labeling_rule_set_id) if labeling_rule_set_id else {}
     ear_sequence_index = 0
 
     for index, note in enumerate(notes, start=1):
         raw_line = str(note.get("raw") if isinstance(note, dict) else note)
         strike_status = str(note.get("strike") or "none") if isinstance(note, dict) else "none"
+        note_item_id = f"note_{parse_id}_{index}"
         parsed = parse_note_line(raw_line, card_type)
         status_from_strike = interpreted_status(card_type, strike_status)
         interpreted = (
@@ -7472,6 +7501,7 @@ def write_note_items_and_mouse_candidates(
             else status_from_strike if parsed["parsed_type"] != "unknown" else "unknown"
         )
         parsed_metadata = dict(parsed.get("parsed_metadata") or {})
+        note_needs_review = int(parsed["needs_review"] or 0)
         if parsed["parsed_type"] == "mouse_item" and labeling_rule_set_id:
             expected_ear_label_code = None
             label_status = (
@@ -7484,7 +7514,41 @@ def write_note_items_and_mouse_candidates(
                 ear_sequence_index += 1
             parsed_metadata["expected_ear_label_code"] = expected_ear_label_code
             parsed_metadata["labeling_rule_set_id"] = labeling_rule_set_id
-        note_item_id = f"note_{parse_id}_{index}"
+            if labeling_rule_context:
+                parsed_metadata["labeling_rule_snapshot_hash"] = build_rule_snapshot(
+                    {**labeling_rule_context, "expected_ear_label_code": expected_ear_label_code}
+                )["rule_hash"]
+        has_hybrid_candidate_input = isinstance(note, dict) and (
+            note.get("ocrCandidate")
+            or note.get("ocr_candidate")
+            or note.get("aiCandidate")
+            or note.get("ai_candidate")
+        )
+        if has_hybrid_candidate_input:
+            rule_context = dict(labeling_rule_context)
+            if "expected_ear_label_code" in parsed_metadata:
+                rule_context["expected_ear_label_code"] = parsed_metadata["expected_ear_label_code"]
+            evaluator_result = evaluate_note_line_candidate(
+                ocr_candidate=note.get("ocrCandidate") or note.get("ocr_candidate"),
+                ai_candidate=note.get("aiCandidate") or note.get("ai_candidate"),
+                parsed_note_row={
+                    **parsed,
+                    "raw_line_text": raw_line,
+                    "photo_id": photo_id or None,
+                    "parse_id": parse_id,
+                    "note_item_id": note_item_id,
+                    "line_number": index,
+                    "card_snapshot_id": snapshot_id or None,
+                    "roi_ref": note.get("roiRef") or note.get("roi_ref"),
+                    "strike_status": strike_status,
+                    "interpreted_status": interpreted,
+                },
+                source_quality=note.get("sourceQuality") or note.get("source_quality"),
+                rule_context=rule_context or None,
+            )
+            parsed_metadata["hybrid_note_line_evaluator"] = evaluator_result
+            if evaluator_result["review_routing"]["must_review"]:
+                note_needs_review = 1
         conn.execute(
             """
             INSERT OR REPLACE INTO card_note_item_log
@@ -7514,7 +7578,7 @@ def write_note_items_and_mouse_candidates(
                 parsed["parsed_count"],
                 json.dumps(parsed_metadata, ensure_ascii=False),
                 parsed["confidence"],
-                parsed["needs_review"],
+                note_needs_review,
             ),
         )
         note_count += 1
