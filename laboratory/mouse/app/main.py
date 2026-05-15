@@ -117,6 +117,8 @@ class CorrectionCreate(BaseModel):
     reason: str = ""
     source_record_id: str | None = None
     review_id: str | None = None
+    scoring_audit_status: str = ""
+    scoring_audit_note: str = ""
 
 
 class MouseEventCreate(BaseModel):
@@ -151,6 +153,8 @@ class ReviewResolutionCreate(BaseModel):
     note_label_count: int | None = Field(default=None, ge=0)
     note_label_interpreted_status: str = ""
     ear_label_code: str = ""
+    audit_taxonomy_status: str = ""
+    audit_taxonomy_note: str = ""
 
 
 class PhotoManualTranscriptionCreate(BaseModel):
@@ -3881,17 +3885,18 @@ def correction_evidence_reference_json(source_record_id: str | None, review_id: 
 
 
 def correction_context_json(payload: CorrectionCreate) -> str:
-    return json.dumps(
-        {
-            "entity_type": payload.entity_type,
-            "entity_id": payload.entity_id,
-            "field_name": payload.field_name,
-            "before_value": payload.before_value,
-            "after_value": payload.after_value,
-            "reason": payload.reason,
-        },
-        ensure_ascii=False,
-    )
+    context = {
+        "entity_type": payload.entity_type,
+        "entity_id": payload.entity_id,
+        "field_name": payload.field_name,
+        "before_value": payload.before_value,
+        "after_value": payload.after_value,
+        "reason": payload.reason,
+    }
+    if payload.scoring_audit_status:
+        context["scoring_audit_status"] = payload.scoring_audit_status
+        context["scoring_audit_note"] = payload.scoring_audit_note
+    return json.dumps(context, ensure_ascii=False)
 
 
 def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -> str:
@@ -9913,9 +9918,38 @@ def assistant_draft_review_item(review_id: str) -> dict[str, Any]:
     return assistant_review_draft_from_audit(audit)
 
 
+SCORING_AUDIT_TAXONOMY_STATUSES = {
+    "exact",
+    "partial_match",
+    "near_miss",
+    "unscorable_due_to_occlusion",
+}
+
+
+def review_scoring_audit_metadata(payload: ReviewResolutionCreate) -> dict[str, str]:
+    status = payload.audit_taxonomy_status.strip()
+    if not status:
+        return {}
+    if status not in SCORING_AUDIT_TAXONOMY_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="Audit taxonomy status must be exact, partial_match, near_miss, or unscorable_due_to_occlusion.",
+        )
+    note = payload.audit_taxonomy_note.strip()
+    if len(note) > 200 or re.search(r"([A-Za-z]:\\|\\\\|/Users/|/home/|SECRET_)", note):
+        note = "sanitized_review_note"
+    return {
+        "status": status,
+        "note": note,
+        "boundary": "review item / scoring audit metadata",
+        "provenance": "operator_selected_review_resolution",
+    }
+
+
 @app.post("/api/review-items/{review_id}/resolve")
 def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict[str, Any]:
     resolved_at = utc_now()
+    scoring_audit = review_scoring_audit_metadata(payload)
     allowed_legacy_decisions = {
         "resolve",
         "accept_legacy_candidate",
@@ -9984,6 +10018,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
             "reviewed_strain_name": payload.reviewed_strain_name,
             "reviewed_gene_symbol": payload.reviewed_gene_symbol,
             "reviewed_allele_name": payload.reviewed_allele_name,
+            "scoring_audit": scoring_audit,
         }
         conn.execute(
             """
@@ -10071,6 +10106,8 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
                     reason=payload.resolution_note,
                     source_record_id=payload.correction_source_record_id,
                     review_id=review_id,
+                    scoring_audit_status=scoring_audit.get("status", ""),
+                    scoring_audit_note=scoring_audit.get("note", ""),
                 ),
                 resolved_at,
             )
@@ -10119,6 +10156,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "correction_id": correction_id,
         "note_label_update": note_label_update,
         "ear_label_update": ear_label_update,
+        "scoring_audit": scoring_audit,
         "review_action_id": review_action_id,
         "audit_url": f"/api/review-items/{quote(review_id)}/audit",
     }

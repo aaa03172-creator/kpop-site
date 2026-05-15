@@ -462,6 +462,65 @@ def test_resolving_ear_label_review_updates_note_without_overwriting_raw(tmp_pat
         db.DB_PATH = old_db_path
 
 
+def test_resolving_review_preserves_scoring_audit_taxonomy_without_private_payloads(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "audit_taxonomy", [{"raw": "318 RWM", "strike": "single"}])
+        note_item_id = f"note_{parse_id}_1"
+
+        result = resolve_review_item(
+            f"review_ear_{note_item_id}",
+            ReviewResolutionCreate(
+                resolution_note="Checked source evidence; reviewer classified the extracted note-line candidate.",
+                resolved_value="R_PRIME",
+                note_item_id=note_item_id,
+                ear_label_code="R_PRIME",
+                correction_entity_type="card_note_item",
+                correction_entity_id=note_item_id,
+                correction_field_name="parsed_ear_label_code",
+                correction_before_value="RWM",
+                correction_after_value="R_PRIME",
+                audit_taxonomy_status="near_miss",
+                audit_taxonomy_note="Reviewer selected near miss from the bounded audit taxonomy.",
+            ),
+        )
+
+        with db.connection() as conn:
+            review_action = conn.execute(
+                """
+                SELECT after_value
+                FROM action_log
+                WHERE action_type = 'review_resolved'
+                  AND target_id = ?
+                """,
+                (f"review_ear_{note_item_id}",),
+            ).fetchone()
+            correction = conn.execute(
+                """
+                SELECT correction_context_json
+                FROM correction_log
+                WHERE review_id = ?
+                """,
+                (f"review_ear_{note_item_id}",),
+            ).fetchone()
+
+        assert result["scoring_audit"] == {
+            "status": "near_miss",
+            "note": "Reviewer selected near miss from the bounded audit taxonomy.",
+            "boundary": "review item / scoring audit metadata",
+            "provenance": "operator_selected_review_resolution",
+        }
+        after = json.loads(review_action["after_value"])
+        assert after["scoring_audit"] == result["scoring_audit"]
+        correction_context = json.loads(correction["correction_context_json"])
+        assert correction_context["scoring_audit_status"] == "near_miss"
+        encoded = json.dumps({"result": result, "after": after, "correction": correction_context}, ensure_ascii=False)
+        assert "SECRET_" not in encoded
+        assert str(tmp_path) not in encoded
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_review_attention_focuses_missing_core_photo_fields() -> None:
     result = review_attention_level(
         {

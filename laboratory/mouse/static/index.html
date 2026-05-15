@@ -5536,6 +5536,14 @@
               : ""}
           </select>
           ${resolvedValueControl}
+          <select class="review-audit-taxonomy-status" aria-label="Scoring audit taxonomy">
+            <option value="">Scoring audit taxonomy</option>
+            <option value="exact">Exact</option>
+            <option value="partial_match">Partial match</option>
+            <option value="near_miss">Near miss</option>
+            <option value="unscorable_due_to_occlusion">Unscorable due to occlusion</option>
+          </select>
+          <input class="review-audit-taxonomy-note" type="text" placeholder="Audit note" aria-label="Scoring audit note">
           <input class="review-resolution-note" type="text" placeholder="Resolution note required" aria-label="Resolution note">
           ${strainApplyControls}
           ${noteLabelControls}
@@ -5785,6 +5793,8 @@
         return null;
       }
       const noteLabelCountValue = container.querySelector(".note-label-count")?.value || "";
+      const auditTaxonomyStatus = container.querySelector(".review-audit-taxonomy-status")?.value || "";
+      const auditTaxonomyNote = container.querySelector(".review-audit-taxonomy-note")?.value.trim() || "";
       const earLabelCode = container.querySelector(".ear-label-code")?.value || "";
       if (item?.issue === "Ear label needs review" && !earLabelCode) {
         resolvedValueInput.focus();
@@ -5830,7 +5840,9 @@
         note_label_decision: noteLabelDecision?.value || "",
         note_label_mouse_id: container.querySelector(".note-label-mouse-id")?.value || "",
         note_label_count: noteLabelCountValue ? Number(noteLabelCountValue) : null,
-        ear_label_code: earLabelCode
+        ear_label_code: earLabelCode,
+        audit_taxonomy_status: auditTaxonomyStatus,
+        audit_taxonomy_note: auditTaxonomyNote
       };
     }
 
@@ -6184,6 +6196,8 @@
       const noteLabelDecisionInput = actions.querySelector(".note-label-decision");
       const noteLabelMouseIdInput = actions.querySelector(".note-label-mouse-id");
       const noteLabelCountInput = actions.querySelector(".note-label-count");
+      const auditTaxonomyInput = actions.querySelector(".review-audit-taxonomy-status");
+      const auditTaxonomyNoteInput = actions.querySelector(".review-audit-taxonomy-note");
       actions.dataset.assistantReviewType = reviewType;
       actions.dataset.assistantFormFillPolicy = formFillPolicy;
       actions.dataset.assistantCorrectionEntityType = resolution.correction_entity_type || "review_item";
@@ -6204,6 +6218,8 @@
         if (noteLabelMouseIdInput) noteLabelMouseIdInput.value = resolution.note_label_mouse_id || "";
         if (noteLabelCountInput) noteLabelCountInput.value = resolution.note_label_count ?? "";
       }
+      if (auditTaxonomyInput) auditTaxonomyInput.value = resolution.audit_taxonomy_status || "";
+      if (auditTaxonomyNoteInput) auditTaxonomyNoteInput.value = resolution.audit_taxonomy_note || "";
       const message = actions.querySelector(".review-resolution-message");
       if (message) {
         message.textContent = `Assistant draft copied into the form (${reviewType.replaceAll("_", " ")}). Review source evidence before resolving.`;
