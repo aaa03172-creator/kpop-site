@@ -41,6 +41,7 @@ FIELD_FAMILIES = {
 PASSING_STATUSES = {"exact", "corrected"}
 SOURCE_IMAGE_QUALITY_BUCKETS = {"clear", "acceptable", "weak", "poor", "cropped", "unreadable", "unknown"}
 QUALITY_SIGNAL_BUCKETS = {"strong", "acceptable", "weak", "missing", "unknown"}
+AUDIT_TAXONOMY_STATUSES = {"partial_match", "near_miss", "unscorable_due_to_occlusion"}
 CANDIDATE_SOURCE_STATUS_KEYS = {
     "local_ocr": ["local_ocr_pre_review_status", "ocr_pre_review_status"],
     "ai": ["ai_pre_review_status"],
@@ -54,7 +55,10 @@ HYBRID_FAILURE_LABELS = {
     "ocr_ai_note_line_disagreement",
     "ocr_ai_strike_status_disagreement",
     "parsed_note_line_needs_review",
+    "partial_match",
+    "near_miss",
     "rule_expected_ear_label_mismatch",
+    "unscorable_due_to_occlusion",
     "unknown_note_line_parse",
     "weak_source_or_roi_quality",
 }
@@ -233,6 +237,9 @@ def empty_hybrid_metric_counts() -> dict[str, Any]:
         "exact_or_corrected_before_apply": 0,
         "false_positives": 0,
         "false_negatives": 0,
+        "partial_matches": 0,
+        "near_misses": 0,
+        "unscorable_due_to_occlusion": 0,
         "reviewer_overrides": 0,
         "invalid_hybrid_evaluator_inputs": 0,
         "failure_label_counts": {},
@@ -268,6 +275,14 @@ def finalize_hybrid_metric_counts(counts: dict[str, Any]) -> dict[str, Any]:
         "false_positive_rate": hybrid_rate(int(counts["false_positives"]), total),
         "false_negative_count": int(counts["false_negatives"]),
         "false_negative_rate": hybrid_rate(int(counts["false_negatives"]), total),
+        "partial_match_count": int(counts["partial_matches"]),
+        "partial_match_rate": hybrid_rate(int(counts["partial_matches"]), total),
+        "near_miss_count": int(counts["near_misses"]),
+        "near_miss_rate": hybrid_rate(int(counts["near_misses"]), total),
+        "unscorable_due_to_occlusion_count": int(counts["unscorable_due_to_occlusion"]),
+        "unscorable_due_to_occlusion_rate": hybrid_rate(
+            int(counts["unscorable_due_to_occlusion"]), total
+        ),
         "reviewer_override_count": int(counts["reviewer_overrides"]),
         "reviewer_override_rate": hybrid_rate(int(counts["reviewer_overrides"]), total),
         "invalid_hybrid_evaluator_inputs": invalid_inputs,
@@ -280,6 +295,15 @@ def sanitized_hybrid_failure_label(value: Any) -> str:
     return label if label in HYBRID_FAILURE_LABELS else "unknown_failure_label"
 
 
+def add_audit_status_counts(counts: dict[str, Any], status: str) -> None:
+    if status == "partial_match":
+        counts["partial_matches"] += 1
+    elif status == "near_miss":
+        counts["near_misses"] += 1
+    elif status == "unscorable_due_to_occlusion":
+        counts["unscorable_due_to_occlusion"] += 1
+
+
 def add_hybrid_metric_case(counts: dict[str, Any], note_case: dict[str, Any]) -> None:
     counts["scored_note_line_cases"] += 1
     hybrid_status = str(note_case.get("hybrid_pre_review_status") or "").strip()
@@ -287,6 +311,7 @@ def add_hybrid_metric_case(counts: dict[str, Any], note_case: dict[str, Any]) ->
     expected_candidate_present = note_case.get("expected_candidate_present") is not False
     if hybrid_status == "exact":
         counts["pre_review_exact"] += 1
+    add_audit_status_counts(counts, hybrid_status)
     if local_status == "exact":
         counts["local_ocr_pre_review_exact"] += 1
     if bool_value(note_case.get("auto_candidate_usable_without_edit")):
@@ -344,6 +369,7 @@ def add_candidate_source_metric_case(
     expected_candidate_present = note_case.get("expected_candidate_present") is not False
     if status == "exact":
         counts["pre_review_exact"] += 1
+    add_audit_status_counts(counts, status)
     if bool_value(note_case.get("auto_candidate_usable_without_edit")) and status == "exact":
         counts["auto_candidate_usable_without_edit"] += 1
     if bool_value(note_case.get("review_correction_required")):
@@ -474,6 +500,29 @@ def workflow_metrics(results: dict[str, Any], matched_case_count: int) -> dict[s
             metrics.get("review_items_accepted_without_correction") or 0
         ),
         "xlsx_exports_generated": int(metrics.get("xlsx_exports_generated") or 0),
+    }
+
+
+def reviewer_scoring_provenance(results: dict[str, Any]) -> dict[str, Any]:
+    provenance = results.get("reviewer_scoring_provenance")
+    if not isinstance(provenance, dict):
+        return {
+            "method": "unspecified",
+            "approved_by_operator": False,
+            "approval_scope": "",
+            "raw_payload_policy": "omitted_from_sanitized_report",
+        }
+    method = str(provenance.get("method") or "unspecified").strip()
+    if method not in {"manual_operator_review", "model_vision_reviewer_scoring", "mixed_manual_and_model_review"}:
+        method = "other_sanitized_review_method"
+    approval_scope = str(provenance.get("approval_scope") or "").strip()
+    if len(approval_scope) > 120 or any(marker in approval_scope for marker in (":", "\\", "/")):
+        approval_scope = "sanitized_scope"
+    return {
+        "method": method,
+        "approved_by_operator": provenance.get("approved_by_operator") is True,
+        "approval_scope": approval_scope,
+        "raw_payload_policy": "omitted_from_sanitized_report",
     }
 
 
@@ -663,6 +712,7 @@ def build_report(*, manifest_path: Path | str, results_path: Path | str) -> dict
         "extra_result_case_count": len(extra_case_ids),
         "coverage": validation.get("coverage", {}),
         "workflow_metrics": workflow_metrics(results, len(matched_result_cases)),
+        "reviewer_scoring_provenance": reviewer_scoring_provenance(results),
         "workload": workload,
         "field_family_scores": family_scores,
         "hybrid_note_line_evaluator_metrics": hybrid_metrics,
@@ -728,6 +778,18 @@ def hybrid_rule_snapshot_rows(breakdown: dict[str, dict[str, Any]]) -> list[str]
     ]
 
 
+def audit_taxonomy_rows(metrics: dict[str, Any]) -> list[str]:
+    return [
+        markdown_table_row(["partial match", metrics["partial_match_count"], f"{metrics['partial_match_rate']:.2%}"]),
+        markdown_table_row(["near miss", metrics["near_miss_count"], f"{metrics['near_miss_rate']:.2%}"]),
+        markdown_table_row([
+            "unscorable due to occlusion",
+            metrics["unscorable_due_to_occlusion_count"],
+            f"{metrics['unscorable_due_to_occlusion_rate']:.2%}",
+        ]),
+    ]
+
+
 def build_markdown_report(*, run_label: str, summary: dict[str, Any]) -> str:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     field_rows = []
@@ -762,6 +824,8 @@ def build_markdown_report(*, run_label: str, summary: dict[str, Any]) -> str:
     line_breakdown_rows = hybrid_breakdown_rows(hybrid["line_segmentation_breakdown"])
     candidate_source_rows = hybrid_candidate_source_rows(hybrid["candidate_source_metrics"])
     rule_snapshot_rows = hybrid_rule_snapshot_rows(hybrid["rule_snapshot_breakdown"])
+    audit_rows = audit_taxonomy_rows(hybrid)
+    provenance = summary.get("reviewer_scoring_provenance", {})
     return f"""# Private Accuracy Scoring Report - {run_label}
 
 Layer classification: {BOUNDARY}.
@@ -771,6 +835,15 @@ Canonical: false.
 Generated at: {generated_at}
 
 This report was generated from local-only private scoring inputs. It intentionally omits private photo paths, raw cage-card text, raw OCR/AI payloads, generated workbook paths, local database paths, backup paths, and case-level animal-room details.
+
+## Reviewer scoring provenance
+
+| Field | Sanitized value |
+| --- | --- |
+| Method | {provenance.get('method', 'unspecified')} |
+| Approved by operator | {provenance.get('approved_by_operator', False)} |
+| Approval scope | {provenance.get('approval_scope', '')} |
+| Raw payload policy | {provenance.get('raw_payload_policy', 'omitted_from_sanitized_report')} |
 
 ## Go / No-Go
 
@@ -820,6 +893,12 @@ This report was generated from local-only private scoring inputs. It intentional
 | False positive rate | {hybrid['false_positive_rate']:.2%} |
 | False negative rate | {hybrid['false_negative_rate']:.2%} |
 | Reviewer override rate | {hybrid['reviewer_override_rate']:.2%} |
+
+### Audit taxonomy
+
+| Taxonomy | Count | Rate |
+| --- | ---: | ---: |
+{chr(10).join(audit_rows)}
 
 ### Candidate source comparison
 

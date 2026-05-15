@@ -383,6 +383,101 @@ def test_reporter_summarizes_hybrid_candidate_sources_overrides_and_rule_hashes(
     assert "SECRET_" not in markdown
 
 
+def test_reporter_summarizes_scoring_audit_taxonomy_and_model_vision_provenance(
+    tmp_path: Path,
+) -> None:
+    reporter = load_reporter_module()
+    manifest_path = write_private_manifest(tmp_path)
+    cases = [
+        add_hybrid_note_line_cases(
+            passing_result("pilot_photo_001", review_level="quick_check", blocking=False),
+            [
+                {
+                    "expected_candidate_present": True,
+                    "hybrid_pre_review_status": "partial_match",
+                    "local_ocr_pre_review_status": "near_miss",
+                    "ai_pre_review_status": "partial_match",
+                    "auto_candidate_usable_without_edit": False,
+                    "review_correction_required": True,
+                    "reviewer_override": True,
+                    "reviewed_before_apply": True,
+                    "source_image_quality_bucket": "acceptable",
+                    "roi_alignment_bucket": "acceptable",
+                    "line_segmentation_bucket": "acceptable",
+                    "failure_labels": ["partial_match", "near_miss"],
+                    "raw_line_text": "SECRET_RAW_NOTE_SHOULD_NOT_APPEAR",
+                }
+            ],
+        ),
+        add_hybrid_note_line_cases(
+            passing_result("pilot_photo_002", review_level="must_review", blocking=True),
+            [
+                {
+                    "expected_candidate_present": True,
+                    "hybrid_pre_review_status": "unscorable_due_to_occlusion",
+                    "local_ocr_pre_review_status": "missed",
+                    "ai_pre_review_status": "unscorable_due_to_occlusion",
+                    "auto_candidate_usable_without_edit": False,
+                    "review_correction_required": True,
+                    "reviewer_override": True,
+                    "reviewed_before_apply": True,
+                    "source_image_quality_bucket": "weak",
+                    "roi_alignment_bucket": "weak",
+                    "line_segmentation_bucket": "weak",
+                    "failure_labels": ["unscorable_due_to_occlusion"],
+                }
+            ],
+        ),
+        passing_result("pilot_photo_003", review_level="must_review", blocking=True),
+        passing_result("pilot_photo_004", review_level="trace_only", blocking=False),
+    ]
+    results_path = write_results(tmp_path, cases)
+    results = json.loads(results_path.read_text(encoding="utf-8"))
+    results["reviewer_scoring_provenance"] = {
+        "method": "model_vision_reviewer_scoring",
+        "approved_by_operator": True,
+        "approval_scope": "17 ApoM tgtg photos only",
+        "private_source_dir": str(tmp_path / "SECRET_PRIVATE_SOURCE_PATH"),
+        "raw_reviewer_notes": "SECRET_RAW_REVIEW_NOTES_SHOULD_NOT_APPEAR",
+    }
+    results_path.write_text(json.dumps(results), encoding="utf-8")
+
+    summary = reporter.build_report(manifest_path=manifest_path, results_path=results_path)
+
+    provenance = summary["reviewer_scoring_provenance"]
+    assert provenance == {
+        "method": "model_vision_reviewer_scoring",
+        "approved_by_operator": True,
+        "approval_scope": "17 ApoM tgtg photos only",
+        "raw_payload_policy": "omitted_from_sanitized_report",
+    }
+    metrics = summary["hybrid_note_line_evaluator_metrics"]
+    assert metrics["partial_match_count"] == 1
+    assert metrics["partial_match_rate"] == 0.5
+    assert metrics["near_miss_count"] == 0
+    assert metrics["unscorable_due_to_occlusion_count"] == 1
+    assert metrics["unscorable_due_to_occlusion_rate"] == 0.5
+    assert metrics["candidate_source_metrics"]["local_ocr"]["near_miss_count"] == 1
+    assert metrics["candidate_source_metrics"]["ai"]["partial_match_count"] == 1
+    assert metrics["candidate_source_metrics"]["ai"]["unscorable_due_to_occlusion_count"] == 1
+    assert metrics["failure_label_counts"] == {
+        "near_miss": 1,
+        "partial_match": 1,
+        "unscorable_due_to_occlusion": 1,
+    }
+    encoded = json.dumps(summary, ensure_ascii=False)
+    assert "SECRET_" not in encoded
+    assert str(tmp_path) not in encoded
+
+    markdown = reporter.build_markdown_report(run_label="audit-taxonomy", summary=summary)
+    assert "Reviewer scoring provenance" in markdown
+    assert "model_vision_reviewer_scoring" in markdown
+    assert "Audit taxonomy" in markdown
+    assert "partial match" in markdown
+    assert "unscorable due to occlusion" in markdown
+    assert "SECRET_" not in markdown
+
+
 def test_reporter_flags_malformed_hybrid_note_line_metric_input(tmp_path: Path) -> None:
     reporter = load_reporter_module()
     manifest_path = write_private_manifest(tmp_path)
