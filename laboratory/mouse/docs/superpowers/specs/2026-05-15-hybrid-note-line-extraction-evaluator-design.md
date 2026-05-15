@@ -98,8 +98,14 @@ The evaluator should use an additive structure so existing readers keep working:
   },
   "rule_candidate": {
     "labeling_rule_set_id": "label_rule_apom_tgtg_20260506",
+    "labeling_rule_display_name": "ApoM Tg/Tg 2026-05-06",
+    "labeling_rule_effective_from": "2026-05-06",
+    "labeling_rule_hash": "sha256:6b4d2e0f8a1c9d3e",
     "expected_ear_label_code": "R_PRIME",
-    "crossed_out_interpretation": "active"
+    "raw_strike_status": "none",
+    "default_strike_interpretation": "active",
+    "rule_interpretation_candidate": "active",
+    "rule_interpretation_boundary": "review hint only"
   },
   "hybrid_candidate": {
     "mouse_display_id": "101",
@@ -122,6 +128,19 @@ The evaluator should use an additive structure so existing readers keep working:
 
 This payload is parsed/intermediate evidence. It may be stored in a new helper table later or embedded as additive metadata on `card_note_item_log` / `photo_evidence_item`, but raw note-line text must remain unchanged.
 
+## Rule Safety Requirements
+
+Rules improve candidate ranking and review routing, but they are not direct evidence. The evaluator must keep rule assumptions visible and reproducible:
+
+- Store a rule snapshot identifier with each evaluator result: rule set ID, display name, effective date or session date, and a stable hash of the fields used for evaluation.
+- Preserve `raw_strike_status` separately from any default or rule-specific interpretation.
+- Store `default_strike_interpretation` and `rule_interpretation_candidate` separately. A selected rule may propose that a crossed-out mouse line means dead, moved, separated, or needs review, but the evaluator must not overwrite the raw strike mark or silently create a canonical event.
+- Treat crossed-out handling as source-context-specific. The labeling-session rule for mouse-number note lines must not be reused for mating/litter rows, workbook cleanup notes, or free-text breeding statuses.
+- Treat expected ear-label sequence as a consistency check only. It can explain why a reviewer should inspect a line, but it must not convert weak visual evidence into a high-confidence mouse identity.
+- Show rule scope in review surfaces using lab-facing wording, such as `Rule used: ApoM Tg/Tg 2026-05-06, review hint only`.
+- Keep strain-specific assumptions as reviewable candidates. A rule such as default genotype for pups should return candidate metadata with `review_required`, not a bare accepted value.
+- Move breeding confidence weights, such as mixed-sex plus mating-date deltas, into configurable rule signals before using them to drive automatic routing beyond review suggestions.
+
 ## Scoring Rules
 
 The evaluator should score agreement and conflicts conservatively:
@@ -133,6 +152,7 @@ The evaluator should score agreement and conflicts conservatively:
 - Decrease confidence when OCR and AI agree but share weak input quality, such as low ROI alignment confidence, low source image quality, or uncertain line segmentation.
 - Decrease confidence when a mouse number jumps without crossed-out/dead evidence.
 - Decrease confidence when a parsed ear label conflicts with the expected sequence.
+- Decrease confidence when the selected rule set is missing, stale for the batch, outside the photo's scope, or lacks a reproducible snapshot hash.
 - Decrease confidence when a line is numeric-only; numeric-only notes stay reviewable and must not become mouse IDs automatically.
 - Decrease confidence when a note line maps to a duplicate active mouse candidate.
 - Route any impossible ear-label suffix, unclear strike, duplicate active mouse, or missing source reference to `must_review`.
@@ -159,6 +179,7 @@ Review detail should show the evaluator as an explanation, not as authority:
 - raw source photo and note ROI stay visually primary;
 - raw line, OCR candidate, AI candidate, rule candidate, and hybrid candidate are distinguishable;
 - applied rule keys and conflicts are visible in compact form;
+- selected rule set, scope, and `review hint only` status are visible wherever rule-derived candidates are shown;
 - reviewer can accept, correct, mark as numeric/count note, ignore, or send to manual transcription;
 - corrections preserve before/after values and source evidence refs.
 
@@ -191,6 +212,10 @@ Focused tests should cover:
 - AI/OCR mouse ID disagreement routes to `must_review`;
 - expected ear-label sequence match records `rule_consistency` without overwriting raw text or raising confidence by itself;
 - expected ear-label sequence conflict creates a conflict label and review routing;
+- evaluator output stores a rule snapshot hash and rule scope metadata;
+- crossed-out note lines preserve raw strike status, default interpretation, and rule-specific candidate interpretation separately;
+- strain-specific assumptions return reviewable candidate metadata rather than bare accepted values;
+- breeding confidence weights used by routing are read from configurable rule signals before any non-review use;
 - AI prompt context includes a guard that rules cannot override visible raw transcription;
 - crossed-out mouse line is skipped in active ear-label sequence under the selected rule;
 - numeric-only notes remain `unlabeled_numeric_note` and cannot auto-create mouse IDs;
@@ -213,15 +238,19 @@ npm run test:python
 
 1. Add a pure evaluator module that accepts OCR candidates, AI candidates, parsed note rows, source/ROI quality signals, and optional labeling rule context.
 2. Add unit tests for scoring and routing before connecting it to API flows.
-3. Attach evaluator metadata additively to existing note-line evidence without changing canonical apply semantics.
-4. Pass selected labeling rule context into approved AI extraction prompts.
-5. Surface evaluator explanation in review detail.
-6. Extend private accuracy scoring to report evaluator-specific note-line failures.
+3. Add a stable rule snapshot helper for labeling rule context used by the evaluator.
+4. Attach evaluator metadata additively to existing note-line evidence without changing canonical apply semantics.
+5. Pass selected labeling rule context into approved AI extraction prompts with confirmation-bias guardrails.
+6. Surface evaluator explanation and rule scope in review detail.
+7. Convert adjacent breeding-rule confidence weights into configurable signals before using them for any routing beyond review suggestions.
+8. Change strain-specific assumption helpers to return reviewable candidate metadata before they are reused by evaluator or export flows.
+9. Extend private accuracy scoring to report evaluator-specific note-line failures.
 
 ## Storage And Pilot Decisions
 
 - First implementation slice should store evaluator output as additive metadata on existing note/evidence rows, such as `card_note_item_log.parsed_metadata_json` and related `photo_evidence_item` references. A separate table can be introduced after the private pilot if reporting or query complexity justifies it.
 - First implementation slice should capture source/ROI quality and line ordering signals even if line-level crop files are not yet persisted.
+- First implementation slice should include rule snapshot metadata in `parsed_metadata_json`; a future table can normalize it if repeated hashes become useful for reporting.
 - Local OCR confidence should be reported by ROI template type when available, but template-specific calibration can follow the first private pilot.
 - The first private pilot should compare local OCR only versus hybrid output. AI extraction should be approved per run and used for all pilot photos only if the operator explicitly wants a full AI-assisted baseline; otherwise use it for low-confidence or high-risk note-line cases first.
 
