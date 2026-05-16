@@ -653,6 +653,38 @@
     .review-actions select {
       margin: 0;
     }
+    .review-accuracy-outcome {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fbfa;
+      padding: 9px;
+    }
+    .review-accuracy-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .review-field-outcome-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+    }
+    .review-field-outcome-grid label {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .review-field-outcome-grid span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
     .review-queue-summary {
       display: flex;
       flex-wrap: wrap;
@@ -5544,6 +5576,7 @@
             <option value="unscorable_due_to_occlusion">Unscorable due to occlusion</option>
           </select>
           <input class="review-audit-taxonomy-note" type="text" placeholder="Audit note" aria-label="Scoring audit note">
+          ${reviewAccuracyOutcomeControls(item)}
           <input class="review-resolution-note" type="text" placeholder="Resolution note required" aria-label="Resolution note">
           ${strainApplyControls}
           ${noteLabelControls}
@@ -5795,6 +5828,23 @@
       const noteLabelCountValue = container.querySelector(".note-label-count")?.value || "";
       const auditTaxonomyStatus = container.querySelector(".review-audit-taxonomy-status")?.value || "";
       const auditTaxonomyNote = container.querySelector(".review-audit-taxonomy-note")?.value.trim() || "";
+      const noteLineScoringScope = container.querySelector(".review-note-line-scoring-scope")?.value || "";
+      const fieldScores = {};
+      container.querySelectorAll(".review-field-outcome-status").forEach((select) => {
+        const family = select.dataset.fieldFamily || "";
+        if (!family || !select.value) return;
+        fieldScores[family] = {
+          status: select.value,
+          reviewed_before_apply: true,
+          traceable: true
+        };
+      });
+      const failureLabels = noteLineScoringScope === "no_visible_note_line_for_evaluator_scoring"
+        ? ["no_visible_note_line_for_evaluator_scoring"]
+        : [];
+      const hasFieldReviewOutcome = Boolean(
+        noteLineScoringScope || failureLabels.length || Object.keys(fieldScores).length
+      );
       const earLabelCode = container.querySelector(".ear-label-code")?.value || "";
       if (item?.issue === "Ear label needs review" && !earLabelCode) {
         resolvedValueInput.focus();
@@ -5822,7 +5872,7 @@
         container.dataset.canonicalMappingWarningAcknowledged = button.dataset.reviewId;
         return null;
       }
-      return {
+      const payload = {
         resolution_note: note,
         resolved_value: resolvedValue || "",
         legacy_decision: selectedLegacyDecision,
@@ -5844,6 +5894,18 @@
         audit_taxonomy_status: auditTaxonomyStatus,
         audit_taxonomy_note: auditTaxonomyNote
       };
+      if (hasFieldReviewOutcome) {
+        payload.note_line_scoring_scope = noteLineScoringScope;
+        payload.field_review_outcome = {
+          actual_review_level: item?.attention_level || "quick_check",
+          export_blocked_until_resolved: container.querySelector(".review-export-blocked-until-resolved")?.checked === true,
+          unresolved_must_review_at_export: false,
+          manual_transcription_required: false,
+          failure_labels: failureLabels,
+          field_scores: fieldScores
+        };
+      }
+      return payload;
     }
 
     async function submitReviewResolution(button, item, allowAutoNote) {
@@ -5998,6 +6060,49 @@
           <div class="detail-row"><span>Snapshot sex/count</span><strong>${escapeHtml([item.review_sex_raw, item.review_count_value].filter((value) => value !== null && value !== undefined && value !== "").join(" / ") || "--")}</strong></div>
           <div class="detail-row"><span>Snapshot summary</span><strong>${escapeHtml(snapshotSummary)}</strong></div>
           <div class="detail-row"><span>Photo evidence</span><strong>${escapeHtml(item.image_url || "--")}</strong></div>
+        </div>
+      `;
+    }
+
+    function reviewFieldOutcomeStatusOptions() {
+      return [
+        ["", "Field outcome"],
+        ["exact", "Exact"],
+        ["corrected", "Corrected"],
+        ["missed", "Missed"],
+        ["not_applicable", "Not applicable"]
+      ].map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("");
+    }
+
+    function reviewAccuracyOutcomeControls(item) {
+      const fieldFamilies = [
+        ["mouse_ids_or_note_lines", "Mouse IDs / note-line"],
+        ["card_type_review_routing", "Card type / routing"],
+        ["sex_count_dob", "Sex, count, DOB"],
+        ["mating_litter_context", "Mating / litter"],
+        ["export_provenance", "Export provenance"]
+      ];
+      return `
+        <div class="review-accuracy-outcome" aria-label="Field-level accuracy outcome">
+          <select class="review-note-line-scoring-scope" aria-label="Note-line scoring scope">
+            <option value="">Note-line scope</option>
+            <option value="scored_note_line">Scored note-line</option>
+            <option value="no_visible_note_line_for_evaluator_scoring">No visible note-line</option>
+          </select>
+          <label class="review-accuracy-checkbox">
+            <input class="review-export-blocked-until-resolved" type="checkbox" ${item?.attention_level === "must_review" ? "checked" : ""}>
+            <span>Export blocked until resolved</span>
+          </label>
+          <div class="review-field-outcome-grid">
+            ${fieldFamilies.map(([family, label]) => `
+              <label>
+                <span>${escapeHtml(label)}</span>
+                <select class="review-field-outcome-status" data-field-family="${escapeHtml(family)}" aria-label="${escapeHtml(label)} outcome">
+                  ${reviewFieldOutcomeStatusOptions()}
+                </select>
+              </label>
+            `).join("")}
+          </div>
         </div>
       `;
     }

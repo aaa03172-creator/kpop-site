@@ -79,6 +79,32 @@ def test_static_ui_exposes_review_scoring_audit_taxonomy_controls() -> None:
     assert "audit_taxonomy_note" in payload_function
 
 
+def test_static_ui_builds_field_level_accuracy_outcome_payload() -> None:
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+
+    assert "reviewAccuracyOutcomeControls" in html
+    assert "review-note-line-scoring-scope" in html
+    assert "no_visible_note_line_for_evaluator_scoring" in html
+    assert "review-field-outcome-status" in html
+    assert "data-field-family" in html
+    assert "mouse_ids_or_note_lines" in html
+    assert "card_type_review_routing" in html
+    assert "sex_count_dob" in html
+    assert "mating_litter_context" in html
+    assert "export_provenance" in html
+
+    start = html.index("function reviewResolutionPayload")
+    end = html.index("async function submitReviewResolution", start)
+    payload_function = html[start:end]
+    assert ".review-note-line-scoring-scope" in payload_function
+    assert ".review-field-outcome-status" in payload_function
+    assert "note_line_scoring_scope" in payload_function
+    assert "field_review_outcome" in payload_function
+    assert "reviewed_before_apply: true" in payload_function
+    assert "traceable: true" in payload_function
+    assert "no_visible_note_line_for_evaluator_scoring" in payload_function
+
+
 def test_static_ui_warns_before_mapping_trace_only_candidate_and_refreshes_after_apply() -> None:
     html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
