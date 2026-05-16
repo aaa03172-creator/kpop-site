@@ -590,6 +590,104 @@ def test_resolving_review_preserves_private_accuracy_field_outcome_metadata(tmp_
         db.DB_PATH = old_db_path
 
 
+def test_resolving_review_requires_scope_for_field_accuracy_outcome(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "field_outcome_missing_scope", [{"raw": "6", "strike": "none"}])
+        note_item_id = f"note_{parse_id}_1"
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+
+        with pytest.raises(HTTPException) as exc:
+            resolve_review_item(
+                review_id,
+                ReviewResolutionCreate(
+                    resolution_note="Reviewed source evidence but forgot to choose the note-line scoring scope.",
+                    resolved_value="reviewed card",
+                    note_item_id=note_item_id,
+                    note_label_decision="reviewed_note",
+                    field_review_outcome={
+                        "actual_review_level": "must_review",
+                        "export_blocked_until_resolved": True,
+                        "field_scores": {
+                            "mouse_ids_or_note_lines": {
+                                "status": "corrected",
+                                "reviewed_before_apply": True,
+                                "traceable": True,
+                            },
+                        },
+                    },
+                ),
+            )
+
+        assert exc.value.status_code == 400
+        assert "Note-line scoring scope is required" in str(exc.value.detail)
+        with db.connection() as conn:
+            review = conn.execute(
+                "SELECT status, resolved_at FROM review_queue WHERE review_id = ?",
+                (review_id,),
+            ).fetchone()
+            action_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM action_log
+                WHERE action_type = 'review_resolved'
+                  AND target_id = ?
+                """,
+                (review_id,),
+            ).fetchone()["count"]
+        assert review["status"] == "open"
+        assert review["resolved_at"] is None
+        assert action_count == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_resolving_review_requires_field_scores_for_scoped_accuracy_outcome(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "field_outcome_empty_scores", [{"raw": "6", "strike": "none"}])
+        note_item_id = f"note_{parse_id}_1"
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+
+        with pytest.raises(HTTPException) as exc:
+            resolve_review_item(
+                review_id,
+                ReviewResolutionCreate(
+                    resolution_note="Reviewed source evidence but did not score any field family.",
+                    resolved_value="reviewed card",
+                    note_item_id=note_item_id,
+                    note_label_decision="reviewed_note",
+                    note_line_scoring_scope="scored_note_line",
+                    field_review_outcome={
+                        "actual_review_level": "must_review",
+                        "export_blocked_until_resolved": True,
+                    },
+                ),
+            )
+
+        assert exc.value.status_code == 400
+        assert "At least one field score or failure label is required" in str(exc.value.detail)
+        with db.connection() as conn:
+            review = conn.execute(
+                "SELECT status, resolved_at FROM review_queue WHERE review_id = ?",
+                (review_id,),
+            ).fetchone()
+            action_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM action_log
+                WHERE action_type = 'review_resolved'
+                  AND target_id = ?
+                """,
+                (review_id,),
+            ).fetchone()["count"]
+        assert review["status"] == "open"
+        assert review["resolved_at"] is None
+        assert action_count == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_review_attention_focuses_missing_core_photo_fields() -> None:
     result = review_attention_level(
         {

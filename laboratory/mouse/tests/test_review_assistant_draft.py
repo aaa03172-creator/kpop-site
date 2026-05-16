@@ -103,6 +103,8 @@ def test_static_ui_builds_field_level_accuracy_outcome_payload() -> None:
     assert "reviewed_before_apply: true" in payload_function
     assert "traceable: true" in payload_function
     assert "no_visible_note_line_for_evaluator_scoring" in payload_function
+    assert "Choose note-line scope before resolving field accuracy outcome." in payload_function
+    assert "Select at least one field outcome before resolving scoring scope." in payload_function
 
 
 def test_static_ui_warns_before_mapping_trace_only_candidate_and_refreshes_after_apply() -> None:

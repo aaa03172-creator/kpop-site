@@ -5845,6 +5845,24 @@
       const hasFieldReviewOutcome = Boolean(
         noteLineScoringScope || failureLabels.length || Object.keys(fieldScores).length
       );
+      if (hasFieldReviewOutcome && !noteLineScoringScope) {
+        const message = container.querySelector(".review-resolution-message");
+        if (message) {
+          message.textContent = "Choose note-line scope before resolving field accuracy outcome.";
+          message.classList.add("warn");
+        }
+        container.querySelector(".review-note-line-scoring-scope")?.focus();
+        return null;
+      }
+      if (noteLineScoringScope && !failureLabels.length && !Object.keys(fieldScores).length) {
+        const message = container.querySelector(".review-resolution-message");
+        if (message) {
+          message.textContent = "Select at least one field outcome before resolving scoring scope.";
+          message.classList.add("warn");
+        }
+        container.querySelector(".review-field-outcome-status")?.focus();
+        return null;
+      }
       const earLabelCode = container.querySelector(".ear-label-code")?.value || "";
       if (item?.issue === "Ear label needs review" && !earLabelCode) {
         resolvedValueInput.focus();

@@ -9996,6 +9996,16 @@ def review_private_accuracy_field_outcome(payload: ReviewResolutionCreate) -> di
             label_key = str(label or "").strip()
             if label_key in PRIVATE_ACCURACY_FAILURE_LABELS and label_key not in labels:
                 labels.append(label_key)
+    if not scope and (field_scores or labels):
+        raise HTTPException(
+            status_code=400,
+            detail="Note-line scoring scope is required when recording private accuracy field outcomes.",
+        )
+    if scope and not field_scores and not labels:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one field score or failure label is required when recording private accuracy field outcomes.",
+        )
     if not scope and not field_scores and not labels:
         return {}
     return {
