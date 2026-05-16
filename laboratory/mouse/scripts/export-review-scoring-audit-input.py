@@ -16,6 +16,24 @@ ALLOWED_AUDIT_STATUSES = {
     "near_miss",
     "unscorable_due_to_occlusion",
 }
+FIELD_FAMILIES = {
+    "mouse_ids_or_note_lines",
+    "card_type_review_routing",
+    "sex_count_dob",
+    "mating_litter_context",
+    "export_provenance",
+}
+FIELD_STATUSES = {"exact", "corrected", "missed", "not_applicable"}
+NOTE_LINE_SCOPES = {
+    "scored_note_line",
+    "no_visible_note_line_for_evaluator_scoring",
+}
+FAILURE_LABELS = {
+    "no_visible_note_line_for_evaluator_scoring",
+    "partial_match",
+    "near_miss",
+    "unscorable_due_to_occlusion",
+}
 
 
 def sanitized_run_label(value: str) -> str:
@@ -38,6 +56,54 @@ def json_object(value: Any) -> dict[str, Any]:
 def safe_audit_status(value: Any) -> str:
     status = str(value or "").strip()
     return status if status in ALLOWED_AUDIT_STATUSES else ""
+
+
+def safe_failure_labels(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    labels = []
+    for label in value:
+        key = str(label or "").strip()
+        if key in FAILURE_LABELS and key not in labels:
+            labels.append(key)
+    return labels
+
+
+def safe_field_scores(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    scores = {}
+    for family, score in value.items():
+        family_key = str(family or "").strip()
+        if family_key not in FIELD_FAMILIES or not isinstance(score, dict):
+            continue
+        status = str(score.get("status") or "").strip()
+        if status not in FIELD_STATUSES:
+            continue
+        scores[family_key] = {
+            "status": status,
+            "reviewed_before_apply": score.get("reviewed_before_apply") is True,
+            "traceable": score.get("traceable") is not False,
+        }
+    return scores
+
+
+def safe_field_outcome(value: Any) -> dict[str, Any]:
+    outcome = json_object(value)
+    if not outcome:
+        return {}
+    scope = str(outcome.get("note_line_scoring_scope") or "").strip()
+    if scope not in NOTE_LINE_SCOPES:
+        scope = ""
+    return {
+        "actual_review_level": str(outcome.get("actual_review_level") or "").strip(),
+        "export_blocked_until_resolved": outcome.get("export_blocked_until_resolved") is True,
+        "unresolved_must_review_at_export": outcome.get("unresolved_must_review_at_export") is True,
+        "manual_transcription_required": outcome.get("manual_transcription_required") is True,
+        "note_line_scoring_scope": scope,
+        "failure_labels": safe_failure_labels(outcome.get("failure_labels")),
+        "field_scores": safe_field_scores(outcome.get("field_scores")),
+    }
 
 
 def load_manifest(path: Path | str) -> dict[str, Any]:
@@ -114,28 +180,39 @@ def scored_note_case(status: str) -> dict[str, Any]:
     }
 
 
-def result_case(case_id: str, status: str, *, created_at: str = "") -> dict[str, Any]:
+def result_case(
+    case_id: str,
+    status: str,
+    *,
+    created_at: str = "",
+    field_outcome: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     exact = status == "exact"
+    outcome = field_outcome or {}
+    field_scores = outcome.get("field_scores") or default_field_scores(status)
+    failure_labels = outcome.get("failure_labels") or ([] if exact else [status])
+    scored_cases = [scored_note_case(status)] if status else []
     return {
         "case_id": case_id,
         "scoring_status": "review_resolution_audit_exported",
-        "actual_review_level": "quick_check" if exact else "must_review",
-        "export_blocked_until_resolved": False,
-        "unresolved_must_review_at_export": False,
+        "actual_review_level": outcome.get("actual_review_level") or ("quick_check" if exact else "must_review"),
+        "export_blocked_until_resolved": outcome.get("export_blocked_until_resolved") is True,
+        "unresolved_must_review_at_export": outcome.get("unresolved_must_review_at_export") is True,
         "source_preserved": True,
         "silent_overwrite": False,
         "review_seconds": 0,
-        "manual_transcription_required": False,
-        "failure_labels": [] if exact else [status],
-        "field_scores": default_field_scores(status),
+        "manual_transcription_required": outcome.get("manual_transcription_required") is True,
+        "failure_labels": failure_labels,
+        "field_scores": field_scores,
         "hybrid_note_line_evaluator": {
             "boundary": BOUNDARY,
-            "scored_cases": [scored_note_case(status)],
+            "scored_cases": scored_cases,
         },
         "review_resolution_scoring_audit": {
             "boundary": "review item / scoring audit metadata",
             "provenance": "operator_selected_review_resolution",
             "status": status,
+            "note_line_scoring_scope": outcome.get("note_line_scoring_scope") or "",
             "created_at": created_at,
         },
     }
@@ -154,9 +231,10 @@ def collect_action_audits(conn: sqlite3.Connection) -> list[dict[str, str]]:
     for row in rows:
         after = json_object(row["after_value"])
         scoring = json_object(after.get("scoring_audit"))
+        field_outcome = safe_field_outcome(after.get("field_review_outcome"))
         status = safe_audit_status(scoring.get("status"))
         filename = str(after.get("source_photo_filename") or "").strip()
-        if status and filename:
+        if (status or field_outcome) and filename:
             audits.append(
                 {
                     "review_id": str(row["target_id"] or ""),
@@ -164,6 +242,7 @@ def collect_action_audits(conn: sqlite3.Connection) -> list[dict[str, str]]:
                     "status": status,
                     "created_at": str(row["created_at"] or ""),
                     "source": "action_log",
+                    "field_outcome": field_outcome,
                 }
             )
     return audits
@@ -197,6 +276,7 @@ def collect_correction_audits(conn: sqlite3.Connection, seen_reviews: set[str]) 
                     "status": status,
                     "created_at": str(row["corrected_at"] or ""),
                     "source": "correction_log",
+                    "field_outcome": {},
                 }
             )
     return audits
@@ -232,7 +312,14 @@ def build_results_payload(
         if case_id in matched_case_ids:
             continue
         matched_case_ids.add(case_id)
-        exported_cases.append(result_case(case_id, audit["status"], created_at=audit.get("created_at", "")))
+        exported_cases.append(
+            result_case(
+                case_id,
+                audit["status"],
+                created_at=audit.get("created_at", ""),
+                field_outcome=audit.get("field_outcome") if isinstance(audit.get("field_outcome"), dict) else None,
+            )
+        )
     corrected_count = sum(
         1
         for case in exported_cases

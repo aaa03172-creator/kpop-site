@@ -521,6 +521,75 @@ def test_resolving_review_preserves_scoring_audit_taxonomy_without_private_paylo
         db.DB_PATH = old_db_path
 
 
+def test_resolving_review_preserves_private_accuracy_field_outcome_metadata(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "field_outcome", [{"raw": "6", "strike": "none"}])
+        note_item_id = f"note_{parse_id}_1"
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+
+        result = resolve_review_item(
+            review_id,
+            ReviewResolutionCreate(
+                resolution_note="Reviewed source evidence; no visible mouse note-line was scorable.",
+                resolved_value="reviewed non-scorable card",
+                note_item_id=note_item_id,
+                note_label_decision="reviewed_note",
+                note_line_scoring_scope="no_visible_note_line_for_evaluator_scoring",
+                field_review_outcome={
+                    "actual_review_level": "must_review",
+                    "export_blocked_until_resolved": True,
+                    "unresolved_must_review_at_export": False,
+                    "manual_transcription_required": True,
+                    "failure_labels": ["no_visible_note_line_for_evaluator_scoring", "SECRET_RAW_LABEL"],
+                    "field_scores": {
+                        "mouse_ids_or_note_lines": {
+                            "status": "not_applicable",
+                            "reviewed_before_apply": True,
+                            "traceable": True,
+                            "raw_private_note": "SECRET_RAW_NOTE",
+                        },
+                        "card_type_review_routing": {
+                            "status": "corrected",
+                            "reviewed_before_apply": True,
+                            "traceable": True,
+                        },
+                    },
+                },
+            ),
+        )
+
+        with db.connection() as conn:
+            review_action = conn.execute(
+                """
+                SELECT after_value
+                FROM action_log
+                WHERE action_type = 'review_resolved'
+                  AND target_id = ?
+                """,
+                (review_id,),
+            ).fetchone()
+
+        field_outcome = result["field_review_outcome"]
+        assert field_outcome["boundary"] == "review item / private accuracy field outcome"
+        assert field_outcome["note_line_scoring_scope"] == "no_visible_note_line_for_evaluator_scoring"
+        assert field_outcome["actual_review_level"] == "must_review"
+        assert field_outcome["export_blocked_until_resolved"] is True
+        assert field_outcome["field_scores"]["mouse_ids_or_note_lines"] == {
+            "status": "not_applicable",
+            "reviewed_before_apply": True,
+            "traceable": True,
+        }
+        assert field_outcome["failure_labels"] == ["no_visible_note_line_for_evaluator_scoring"]
+        after = json.loads(review_action["after_value"])
+        assert after["field_review_outcome"] == field_outcome
+        encoded = json.dumps({"result": result, "after": after}, ensure_ascii=False)
+        assert "SECRET_" not in encoded
+        assert str(tmp_path) not in encoded
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_review_attention_focuses_missing_core_photo_fields() -> None:
     result = review_attention_level(
         {

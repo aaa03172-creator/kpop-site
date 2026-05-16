@@ -155,6 +155,8 @@ class ReviewResolutionCreate(BaseModel):
     ear_label_code: str = ""
     audit_taxonomy_status: str = ""
     audit_taxonomy_note: str = ""
+    note_line_scoring_scope: str = ""
+    field_review_outcome: dict[str, Any] = Field(default_factory=dict)
 
 
 class PhotoManualTranscriptionCreate(BaseModel):
@@ -9924,6 +9926,24 @@ SCORING_AUDIT_TAXONOMY_STATUSES = {
     "near_miss",
     "unscorable_due_to_occlusion",
 }
+PRIVATE_ACCURACY_FIELD_FAMILIES = {
+    "mouse_ids_or_note_lines",
+    "card_type_review_routing",
+    "sex_count_dob",
+    "mating_litter_context",
+    "export_provenance",
+}
+PRIVATE_ACCURACY_FIELD_STATUSES = {"exact", "corrected", "missed", "not_applicable"}
+NOTE_LINE_SCORING_SCOPES = {
+    "scored_note_line",
+    "no_visible_note_line_for_evaluator_scoring",
+}
+PRIVATE_ACCURACY_FAILURE_LABELS = {
+    "no_visible_note_line_for_evaluator_scoring",
+    "partial_match",
+    "near_miss",
+    "unscorable_due_to_occlusion",
+}
 
 
 def review_scoring_audit_metadata(payload: ReviewResolutionCreate) -> dict[str, str]:
@@ -9946,10 +9966,56 @@ def review_scoring_audit_metadata(payload: ReviewResolutionCreate) -> dict[str, 
     }
 
 
+def review_private_accuracy_field_outcome(payload: ReviewResolutionCreate) -> dict[str, Any]:
+    outcome = payload.field_review_outcome if isinstance(payload.field_review_outcome, dict) else {}
+    scope = str(payload.note_line_scoring_scope or outcome.get("note_line_scoring_scope") or "").strip()
+    if scope and scope not in NOTE_LINE_SCORING_SCOPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Note-line scoring scope must be scored_note_line or no_visible_note_line_for_evaluator_scoring.",
+        )
+    field_scores_input = outcome.get("field_scores")
+    field_scores = {}
+    if isinstance(field_scores_input, dict):
+        for family, score in field_scores_input.items():
+            family_key = str(family or "").strip()
+            if family_key not in PRIVATE_ACCURACY_FIELD_FAMILIES or not isinstance(score, dict):
+                continue
+            status = str(score.get("status") or "").strip()
+            if status not in PRIVATE_ACCURACY_FIELD_STATUSES:
+                continue
+            field_scores[family_key] = {
+                "status": status,
+                "reviewed_before_apply": score.get("reviewed_before_apply") is True,
+                "traceable": score.get("traceable") is not False,
+            }
+    labels = []
+    raw_labels = outcome.get("failure_labels")
+    if isinstance(raw_labels, list):
+        for label in raw_labels:
+            label_key = str(label or "").strip()
+            if label_key in PRIVATE_ACCURACY_FAILURE_LABELS and label_key not in labels:
+                labels.append(label_key)
+    if not scope and not field_scores and not labels:
+        return {}
+    return {
+        "boundary": "review item / private accuracy field outcome",
+        "provenance": "operator_selected_review_resolution",
+        "note_line_scoring_scope": scope,
+        "actual_review_level": str(outcome.get("actual_review_level") or "").strip(),
+        "export_blocked_until_resolved": outcome.get("export_blocked_until_resolved") is True,
+        "unresolved_must_review_at_export": outcome.get("unresolved_must_review_at_export") is True,
+        "manual_transcription_required": outcome.get("manual_transcription_required") is True,
+        "failure_labels": labels,
+        "field_scores": field_scores,
+    }
+
+
 @app.post("/api/review-items/{review_id}/resolve")
 def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict[str, Any]:
     resolved_at = utc_now()
     scoring_audit = review_scoring_audit_metadata(payload)
+    field_review_outcome = review_private_accuracy_field_outcome(payload)
     allowed_legacy_decisions = {
         "resolve",
         "accept_legacy_candidate",
@@ -10019,6 +10085,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
             "reviewed_gene_symbol": payload.reviewed_gene_symbol,
             "reviewed_allele_name": payload.reviewed_allele_name,
             "scoring_audit": scoring_audit,
+            "field_review_outcome": field_review_outcome,
         }
         conn.execute(
             """
@@ -10157,6 +10224,7 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "note_label_update": note_label_update,
         "ear_label_update": ear_label_update,
         "scoring_audit": scoring_audit,
+        "field_review_outcome": field_review_outcome,
         "review_action_id": review_action_id,
         "audit_url": f"/api/review-items/{quote(review_id)}/audit",
     }

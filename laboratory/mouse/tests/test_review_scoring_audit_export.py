@@ -43,17 +43,35 @@ def write_manifest(tmp_path: Path) -> Path:
                 "case_id": "apom_001",
                 "source_photo_path": str(private_source / "card-action.jpg"),
                 "source_photo_filename": "card-action.jpg",
+                "card_type": "separated",
+                "traceability_label": "Private review audit export / photo 001",
                 "expected_review_level": "must_review",
                 "expected_export_blocking": True,
-                "expected_fields": {"mouse_ids_or_note_lines": ["SECRET_RAW_NOTE_ACTION"]},
+                "expected_fields": {
+                    "raw_strain_text": "operator reviewed",
+                    "mouse_ids_or_note_lines": ["SECRET_RAW_NOTE_ACTION"],
+                    "sex_count": "operator reviewed",
+                    "dob": "operator reviewed",
+                    "mating_or_litter_note": "",
+                    "expected_review_blockers": [],
+                },
             },
             {
                 "case_id": "apom_002",
                 "source_photo_path": str(private_source / "card-correction.jpg"),
                 "source_photo_filename": "card-correction.jpg",
+                "card_type": "separated",
+                "traceability_label": "Private review audit export / photo 002",
                 "expected_review_level": "must_review",
                 "expected_export_blocking": True,
-                "expected_fields": {"mouse_ids_or_note_lines": ["SECRET_RAW_NOTE_CORRECTION"]},
+                "expected_fields": {
+                    "raw_strain_text": "operator reviewed",
+                    "mouse_ids_or_note_lines": [],
+                    "sex_count": "operator reviewed",
+                    "dob": "operator reviewed",
+                    "mating_or_litter_note": "",
+                    "expected_review_blockers": ["no_visible_note_line_for_evaluator_scoring"],
+                },
             },
         ],
     }
@@ -205,6 +223,181 @@ def seed_review_scoring_audit_db(tmp_path: Path) -> Path:
     return db_path
 
 
+def complete_field_scores(*, note_status: str) -> dict[str, dict[str, object]]:
+    return {
+        "mouse_ids_or_note_lines": {
+            "status": note_status,
+            "reviewed_before_apply": True,
+            "traceable": True,
+        },
+        "card_type_review_routing": {
+            "status": "corrected",
+            "reviewed_before_apply": True,
+            "traceable": True,
+        },
+        "sex_count_dob": {
+            "status": "corrected",
+            "reviewed_before_apply": True,
+            "traceable": True,
+        },
+        "mating_litter_context": {
+            "status": "corrected",
+            "reviewed_before_apply": True,
+            "traceable": True,
+        },
+        "export_provenance": {
+            "status": "corrected",
+            "reviewed_before_apply": True,
+            "traceable": True,
+        },
+    }
+
+
+def seed_full_field_review_outcome_db(tmp_path: Path) -> Path:
+    db_path = tmp_path / "mouse_full_outcome.sqlite"
+    old_db_path = db.DB_PATH
+    try:
+        db.DB_PATH = db_path
+        db.init_db()
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo_full_scored",
+                    "card-action.jpg",
+                    "private path omitted",
+                    "2026-05-16T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                    "photo_full_nonscorable",
+                    "card-correction.jpg",
+                    "private path omitted",
+                    "2026-05-16T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "parse_full_scored",
+                    "photo_full_scored",
+                    "ai_photo_extraction",
+                    json.dumps({"rawText": "SECRET_RAW_OCR"}, ensure_ascii=False),
+                    "2026-05-16T00:01:00Z",
+                    "review",
+                    50,
+                    1,
+                    "parse_full_nonscorable",
+                    "photo_full_nonscorable",
+                    "ai_photo_extraction",
+                    json.dumps({"rawText": "SECRET_RAW_OCR"}, ensure_ascii=False),
+                    "2026-05-16T00:01:00Z",
+                    "review",
+                    50,
+                    1,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value, suggested_value,
+                     review_reason, status, created_at, resolved_at, resolution_note)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "review_full_scored",
+                    "parse_full_scored",
+                    "Medium",
+                    "AI-extracted photo transcription needs review",
+                    "SECRET_CURRENT",
+                    "candidate",
+                    "Needs reviewer scoring.",
+                    "resolved",
+                    "2026-05-16T00:02:00Z",
+                    "2026-05-16T00:03:00Z",
+                    "Sanitized review note.",
+                    "review_full_nonscorable",
+                    "parse_full_nonscorable",
+                    "Medium",
+                    "AI-extracted photo transcription needs review",
+                    "SECRET_CURRENT",
+                    "candidate",
+                    "Needs reviewer scoring.",
+                    "resolved",
+                    "2026-05-16T00:02:00Z",
+                    "2026-05-16T00:03:00Z",
+                    "Sanitized review note.",
+                ),
+            )
+            field_outcome_scored = {
+                "actual_review_level": "must_review",
+                "export_blocked_until_resolved": True,
+                "unresolved_must_review_at_export": False,
+                "manual_transcription_required": False,
+                "note_line_scoring_scope": "scored_note_line",
+                "field_scores": complete_field_scores(note_status="exact"),
+                "failure_labels": [],
+            }
+            field_outcome_nonscorable = {
+                "actual_review_level": "must_review",
+                "export_blocked_until_resolved": True,
+                "unresolved_must_review_at_export": False,
+                "manual_transcription_required": False,
+                "note_line_scoring_scope": "no_visible_note_line_for_evaluator_scoring",
+                "field_scores": complete_field_scores(note_status="not_applicable"),
+                "failure_labels": ["no_visible_note_line_for_evaluator_scoring", "SECRET_RAW_LABEL"],
+            }
+            conn.execute(
+                """
+                INSERT INTO action_log
+                    (action_id, action_type, target_id, before_value, after_value, created_at)
+                VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "action_full_scored",
+                    "review_resolved",
+                    "review_full_scored",
+                    json.dumps({"current_value": "SECRET_BEFORE"}, ensure_ascii=False),
+                    json.dumps(
+                        {
+                            "source_photo_filename": "card-action.jpg",
+                            "scoring_audit": {
+                                "status": "exact",
+                                "note": "SECRET_RAW_NOTE",
+                            },
+                            "field_review_outcome": field_outcome_scored,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "2026-05-16T00:03:00Z",
+                    "action_full_nonscorable",
+                    "review_resolved",
+                    "review_full_nonscorable",
+                    json.dumps({"current_value": "SECRET_BEFORE"}, ensure_ascii=False),
+                    json.dumps(
+                        {
+                            "source_photo_filename": "card-correction.jpg",
+                            "field_review_outcome": field_outcome_nonscorable,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "2026-05-16T00:04:00Z",
+                ),
+            )
+    finally:
+        db.DB_PATH = old_db_path
+    return db_path
+
+
 def test_export_review_scoring_audit_input_feeds_private_accuracy_reporter(tmp_path: Path) -> None:
     exporter = load_export_module()
     reporter = load_reporter_module()
@@ -252,6 +445,38 @@ def test_export_review_scoring_audit_input_feeds_private_accuracy_reporter(tmp_p
     assert metrics["partial_match_count"] == 1
     assert metrics["unscorable_due_to_occlusion_count"] == 1
     assert metrics["reviewer_override_count"] == 2
+
+
+def test_export_field_outcomes_and_nonscorable_cases_reconstructs_go_report(tmp_path: Path) -> None:
+    exporter = load_export_module()
+    reporter = load_reporter_module()
+    manifest_path = write_manifest(tmp_path)
+    db_path = seed_full_field_review_outcome_db(tmp_path)
+    output_path = tmp_path / "field-outcome-private-input.json"
+
+    summary = exporter.export_review_scoring_audit_input(
+        db_path=db_path,
+        manifest_path=manifest_path,
+        output_path=output_path,
+        run_label="field outcome audit",
+    )
+
+    assert summary["matched_case_count"] == 2
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert [case["case_id"] for case in payload["cases"]] == ["apom_001", "apom_002"]
+    assert payload["cases"][0]["field_scores"]["mouse_ids_or_note_lines"]["status"] == "exact"
+    assert payload["cases"][1]["field_scores"]["mouse_ids_or_note_lines"]["status"] == "not_applicable"
+    assert payload["cases"][1]["hybrid_note_line_evaluator"]["scored_cases"] == []
+    assert payload["cases"][1]["failure_labels"] == ["no_visible_note_line_for_evaluator_scoring"]
+    encoded = json.dumps(payload, ensure_ascii=False)
+    assert "SECRET_" not in encoded
+    assert str(tmp_path) not in encoded
+
+    report = reporter.build_report(manifest_path=manifest_path, results_path=output_path)
+    assert report["decision"] == "go"
+    assert report["matched_case_count"] == 2
+    assert report["hybrid_note_line_evaluator_metrics"]["scored_note_line_cases"] == 1
+    assert report["failure_taxonomy_counts"] == {"no_visible_note_line_for_evaluator_scoring": 1}
 
 
 def test_review_scoring_audit_export_cli_and_package_script_redact_paths(tmp_path: Path) -> None:
