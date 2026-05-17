@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -589,3 +590,112 @@ def test_private_accuracy_regression_runner_exports_reports_and_compares_metrics
     assert package["scripts"]["pilot:private-accuracy-regression"] == (
         "python scripts/run-private-accuracy-regression.py"
     )
+
+
+def test_private_accuracy_regression_runner_fails_on_baseline_metric_mismatch(tmp_path: Path) -> None:
+    exporter = load_export_module()
+    manifest_path = write_manifest(tmp_path)
+    db_path = seed_full_field_review_outcome_db(tmp_path)
+    baseline_path = tmp_path / "baseline-private-input.json"
+    run_dir = tmp_path / "private-regression-mismatch"
+
+    exporter.export_review_scoring_audit_input(
+        db_path=db_path,
+        manifest_path=manifest_path,
+        output_path=baseline_path,
+        run_label="baseline field outcomes",
+    )
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline["cases"][0]["field_scores"]["mouse_ids_or_note_lines"]["status"] = "missed"
+    baseline_path.write_text(json.dumps(baseline, ensure_ascii=False), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            "python",
+            str(REGRESSION_RUNNER_PATH),
+            "--db-path",
+            str(db_path),
+            "--manifest",
+            str(manifest_path),
+            "--run-dir",
+            str(run_dir),
+            "--run-label",
+            "field outcome regression",
+            "--suffix",
+            "field-outcomes-regression-mismatch",
+            "--baseline-results",
+            str(baseline_path),
+            "--json",
+        ],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["status"] == "failed"
+    assert summary["regression_gate"]["status"] == "failed"
+    assert summary["regression_gate"]["comparison_all_key_metrics_match"] is False
+    assert "field_family_scores" in summary["comparison"]["matches"]
+    assert summary["comparison"]["matches"]["field_family_scores"] is False
+    assert str(tmp_path) not in result.stdout
+
+
+def test_private_accuracy_regression_runner_fails_on_field_outcome_integrity_violation(tmp_path: Path) -> None:
+    manifest_path = write_manifest(tmp_path)
+    db_path = seed_full_field_review_outcome_db(tmp_path)
+    run_dir = tmp_path / "private-regression-integrity"
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT after_value
+            FROM action_log
+            WHERE action_id = 'action_full_scored'
+            """
+        ).fetchone()
+        after = json.loads(row["after_value"])
+        after["field_review_outcome"].pop("note_line_scoring_scope", None)
+        conn.execute(
+            """
+            UPDATE action_log
+            SET after_value = ?
+            WHERE action_id = 'action_full_scored'
+            """,
+            (json.dumps(after, ensure_ascii=False),),
+        )
+
+    result = subprocess.run(
+        [
+            "python",
+            str(REGRESSION_RUNNER_PATH),
+            "--db-path",
+            str(db_path),
+            "--manifest",
+            str(manifest_path),
+            "--run-dir",
+            str(run_dir),
+            "--run-label",
+            "field outcome regression",
+            "--suffix",
+            "field-outcomes-regression-integrity",
+            "--json",
+        ],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["status"] == "failed"
+    assert summary["regression_gate"]["field_outcome_integrity_status"] == "failed"
+    assert summary["field_outcome_integrity"]["missing_scope"] == ["apom_001"]
+    assert str(tmp_path) not in result.stdout

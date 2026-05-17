@@ -74,6 +74,39 @@ def field_outcome_integrity(results_path: Path | str) -> dict[str, Any]:
     }
 
 
+def field_outcome_integrity_status(integrity: dict[str, Any]) -> str:
+    return (
+        "passed"
+        if (
+            not integrity.get("missing_scope")
+            and not integrity.get("empty_scoped")
+            and not integrity.get("invalid_scoring_status")
+        )
+        else "failed"
+    )
+
+
+def regression_gate_status(
+    *,
+    report_status: str,
+    integrity: dict[str, Any],
+    comparison: dict[str, Any],
+) -> dict[str, Any]:
+    integrity_status = field_outcome_integrity_status(integrity)
+    comparison_match = comparison.get("all_key_metrics_match") if comparison else True
+    status = (
+        "passed"
+        if report_status == "passed" and integrity_status == "passed" and comparison_match is True
+        else "failed"
+    )
+    return {
+        "status": status,
+        "report_status": report_status,
+        "field_outcome_integrity_status": integrity_status,
+        "comparison_all_key_metrics_match": comparison_match,
+    }
+
+
 def compare_reports(
     *,
     manifest_path: Path | str,
@@ -144,9 +177,14 @@ def run_private_accuracy_regression(
             new_results_path=results_path,
             comparison_path=comparison_path,
         )
+    gate = regression_gate_status(
+        report_status=str(report.get("status") or ""),
+        integrity=integrity,
+        comparison=comparison,
+    )
 
     return {
-        "status": report.get("status"),
+        "status": gate["status"],
         "decision": report.get("decision"),
         "boundary": BOUNDARY,
         "canonical": False,
@@ -158,6 +196,7 @@ def run_private_accuracy_regression(
         "result_validation_failures": report.get("result_validation_failures"),
         "field_outcome_integrity": integrity,
         "comparison": comparison,
+        "regression_gate": gate,
         "output_path": "private output path omitted",
         "report_path": "private output path omitted",
         "comparison_path": "private output path omitted" if baseline_results_path else "",
@@ -217,7 +256,7 @@ def main() -> int:
         print(f"decision: {summary['decision']}")
         print(f"matched_case_count: {summary['matched_case_count']}")
         print(f"unmatched_audit_count: {summary['unmatched_audit_count']}")
-    return 0 if summary.get("decision") in {"go", "narrow_rerun"} else 1
+    return 0 if summary.get("status") == "passed" and summary.get("decision") in {"go", "narrow_rerun"} else 1
 
 
 if __name__ == "__main__":
