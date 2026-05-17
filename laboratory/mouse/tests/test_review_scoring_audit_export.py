@@ -11,6 +11,7 @@ from app import db
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "scripts" / "export-review-scoring-audit-input.py"
 REPORTER_PATH = ROOT / "scripts" / "report-private-accuracy.py"
+REGRESSION_RUNNER_PATH = ROOT / "scripts" / "run-private-accuracy-regression.py"
 
 
 def load_export_module():
@@ -514,4 +515,77 @@ def test_review_scoring_audit_export_cli_and_package_script_redact_paths(tmp_pat
     assert (
         package["scripts"]["pilot:review-scoring-audit-export"]
         == "python scripts/export-review-scoring-audit-input.py"
+    )
+
+
+def test_private_accuracy_regression_runner_exports_reports_and_compares_metrics(tmp_path: Path) -> None:
+    exporter = load_export_module()
+    manifest_path = write_manifest(tmp_path)
+    db_path = seed_full_field_review_outcome_db(tmp_path)
+    baseline_path = tmp_path / "baseline-private-input.json"
+    run_dir = tmp_path / "private-regression-run"
+
+    exporter.export_review_scoring_audit_input(
+        db_path=db_path,
+        manifest_path=manifest_path,
+        output_path=baseline_path,
+        run_label="baseline field outcomes",
+    )
+
+    result = subprocess.run(
+        [
+            "python",
+            str(REGRESSION_RUNNER_PATH),
+            "--db-path",
+            str(db_path),
+            "--manifest",
+            str(manifest_path),
+            "--run-dir",
+            str(run_dir),
+            "--run-label",
+            "field outcome regression",
+            "--suffix",
+            "field-outcomes-regression-test",
+            "--baseline-results",
+            str(baseline_path),
+            "--json",
+        ],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["status"] == "passed"
+    assert summary["decision"] == "go"
+    assert summary["matched_case_count"] == 2
+    assert summary["field_outcome_integrity"] == {
+        "case_count": 2,
+        "missing_scope": [],
+        "empty_scoped": [],
+        "invalid_scoring_status": [],
+    }
+    assert summary["comparison"]["all_key_metrics_match"] is True
+    assert summary["output_path"] == "private output path omitted"
+    assert summary["report_path"] == "private output path omitted"
+    assert summary["comparison_path"] == "private output path omitted"
+    assert str(tmp_path) not in result.stdout
+
+    exported = run_dir / "review-scoring-audit-export-input-field-outcomes-regression-test.json"
+    report = run_dir / "sanitized-private-accuracy-field-outcomes-regression-test.md"
+    comparison = run_dir / "field-outcomes-regression-comparison-field-outcomes-regression-test.json"
+    assert exported.exists()
+    assert report.exists()
+    assert comparison.exists()
+    encoded = exported.read_text(encoding="utf-8") + report.read_text(encoding="utf-8") + comparison.read_text(encoding="utf-8")
+    assert "SECRET_" not in encoded
+    assert str(tmp_path) not in encoded
+
+    package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+    assert package["scripts"]["pilot:private-accuracy-regression"] == (
+        "python scripts/run-private-accuracy-regression.py"
     )
