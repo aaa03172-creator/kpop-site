@@ -35,6 +35,25 @@ FAILURE_LABELS = {
     "near_miss",
     "unscorable_due_to_occlusion",
 }
+BLOCKED_SANITIZED_KEYS = {
+    "parse_raw_payload",
+    "raw_payload",
+    "raw_line_text",
+    "raw_reviewer_notes",
+    "raw_text",
+    "rawVisibleTextLines",
+    "source_photo_path",
+    "stored_path",
+}
+BLOCKED_SANITIZED_VALUE_PATTERNS = {
+    "windows_path": re.compile(r"[A-Za-z]:[\\/]"),
+    "unc_path": re.compile(r"\\\\"),
+    "unix_user_path": re.compile(r"(/Users/|/home/)"),
+    "kakao_marker": re.compile(r"카카오"),
+    "raw_text_marker": re.compile(r"rawText"),
+    "secret_marker": re.compile(r"SECRET_"),
+    "source_photo_path_marker": re.compile(r"source_photo_path"),
+}
 
 
 def sanitized_run_label(value: str) -> str:
@@ -108,6 +127,39 @@ def safe_field_outcome(value: Any) -> dict[str, Any]:
         "failure_labels": safe_failure_labels(outcome.get("failure_labels")),
         "field_scores": safe_field_scores(outcome.get("field_scores")),
     }
+
+
+def sanitized_payload_violations(value: Any) -> list[str]:
+    violations: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, child in node.items():
+                key_text = str(key or "")
+                if key_text in BLOCKED_SANITIZED_KEYS:
+                    violations.add(f"blocked_key:{key_text}")
+                for label, pattern in BLOCKED_SANITIZED_VALUE_PATTERNS.items():
+                    if pattern.search(key_text):
+                        violations.add(f"blocked_key_marker:{label}")
+                visit(child)
+            return
+        if isinstance(node, list):
+            for child in node:
+                visit(child)
+            return
+        if isinstance(node, str):
+            for label, pattern in BLOCKED_SANITIZED_VALUE_PATTERNS.items():
+                if pattern.search(node):
+                    violations.add(f"blocked_value_marker:{label}")
+
+    visit(value)
+    return sorted(violations)
+
+
+def validate_sanitized_payload(payload: dict[str, Any]) -> None:
+    violations = sanitized_payload_violations(payload)
+    if violations:
+        raise ValueError("sanitized payload validation failed: " + ", ".join(violations))
 
 
 def load_manifest(path: Path | str) -> dict[str, Any]:
@@ -374,6 +426,7 @@ def export_review_scoring_audit_input(
         audits=audits,
         run_label=run_label,
     )
+    validate_sanitized_payload(payload)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
