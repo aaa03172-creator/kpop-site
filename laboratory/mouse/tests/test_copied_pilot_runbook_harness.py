@@ -76,6 +76,32 @@ def test_operator_docs_and_ui_explain_other_unknown_and_browser_upload_limits() 
     assert package["scripts"]["pilot:copied-runbook"] == "python scripts/prepare-copied-pilot-run.py"
 
 
+def test_private_accuracy_regression_runbook_documents_safe_operator_loop() -> None:
+    runbook = (ROOT / "docs" / "apom_tgtg_private_accuracy_regression_runbook_2026-05-17.md").read_text(encoding="utf-8")
+    documentation_map = (ROOT / "docs" / "DOCUMENTATION_MAP.md").read_text(encoding="utf-8")
+
+    assert "Layer classification: review item / local operations runbook. Canonical: false." in runbook
+    assert "npm run pilot:private-accuracy-regression" in runbook
+    assert "--baseline-results" in runbook
+    assert "regression_gate" in runbook
+    assert "field_outcome_integrity" in runbook
+    assert "review-scoring-audit-with-field-outcomes.sqlite" in runbook
+    assert "review-scoring-audit-export-input-with-field-outcomes.json" in runbook
+    assert "raw photos" in runbook
+    assert "private paths" in runbook
+    assert "data/` ignored" in runbook
+    assert "17/17" in runbook
+    assert "go" in runbook
+    assert "scope missing" in runbook
+    assert "metric mismatch" in runbook
+    assert "silent_overwrite" in runbook
+    assert "apom_tgtg_private_accuracy_regression_runbook_2026-05-17.md" in documentation_map
+    assert "C:\\Users\\User" not in runbook
+    assert "카카오" not in runbook
+    assert "source_photo_path" not in runbook
+    assert "SECRET_" not in runbook
+
+
 def test_copied_pilot_harness_writes_go_no_go_and_backup_restore_evidence_without_private_paths(tmp_path: Path) -> None:
     output_log = tmp_path / "copied-photo-readiness-log.md"
 
