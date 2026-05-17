@@ -38,14 +38,17 @@ FAILURE_LABELS = {
 BLOCKED_SANITIZED_KEYS = {
     "parse_raw_payload",
     "raw_payload",
+    "raw_line_text",
+    "raw_reviewer_notes",
+    "raw_text",
+    "rawVisibleTextLines",
     "source_photo_path",
     "stored_path",
 }
 BLOCKED_SANITIZED_VALUE_PATTERNS = {
-    "windows_path": re.compile(r"[A-Za-z]:\\"),
+    "windows_path": re.compile(r"[A-Za-z]:[\\/]"),
     "unc_path": re.compile(r"\\\\"),
     "unix_user_path": re.compile(r"(/Users/|/home/)"),
-    "documents_marker": re.compile(r"Documents"),
     "kakao_marker": re.compile(r"카카오"),
     "raw_text_marker": re.compile(r"rawText"),
     "secret_marker": re.compile(r"SECRET_"),
