@@ -18,6 +18,14 @@ def test_package_exposes_review_field_outcome_browser_e2e_script() -> None:
     assert (ROOT / "scripts" / "verify-review-field-outcome-e2e.js").exists()
 
 
+def test_review_field_outcome_browser_e2e_asserts_submit_payload_field_scores() -> None:
+    script = (ROOT / "scripts" / "verify-review-field-outcome-e2e.js").read_text(encoding="utf-8")
+
+    assert "fillReviewFieldOutcomeControls" in script
+    assert "resolveRequestPayload?.field_review_outcome?.field_scores?.mouse_ids_or_note_lines?.status" in script
+    assert "Browser payload should include corrected mouse-id outcome" in script
+
+
 def test_review_field_outcome_browser_e2e_reaches_sanitized_reporter_input() -> None:
     result = subprocess.run(
         ["node", "scripts/verify-review-field-outcome-e2e.js"],

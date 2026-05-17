@@ -301,6 +301,16 @@ async function selectNoteLineScope(panel, scope) {
   assert(actual === scope, `Note-line scope should be ${scope}; got ${actual}`);
 }
 
+async function fillReviewFieldOutcomeControls(panel) {
+  await selectNoteLineScope(panel, "scored_note_line");
+  await panel.locator(".review-export-blocked-until-resolved").check();
+  await selectFieldOutcome(panel, "mouse_ids_or_note_lines", "corrected");
+  await selectFieldOutcome(panel, "card_type_review_routing", "exact");
+  await selectFieldOutcome(panel, "sex_count_dob", "exact");
+  await selectFieldOutcome(panel, "mating_litter_context", "exact");
+  await selectFieldOutcome(panel, "export_provenance", "exact");
+}
+
 async function stopServer(server) {
   if (server.exitCode !== null || server.signalCode !== null) return;
   await new Promise((resolve) => {
@@ -372,18 +382,12 @@ async function run() {
     await page.waitForSelector("#reviewDetailPanel .review-accuracy-outcome");
 
     const panel = page.locator("#reviewDetailPanel");
-    await selectNoteLineScope(panel, "scored_note_line");
-    await panel.locator(".review-export-blocked-until-resolved").check();
-    await selectFieldOutcome(panel, "mouse_ids_or_note_lines", "corrected");
-    await selectFieldOutcome(panel, "card_type_review_routing", "exact");
-    await selectFieldOutcome(panel, "sex_count_dob", "exact");
-    await selectFieldOutcome(panel, "mating_litter_context", "exact");
-    await selectFieldOutcome(panel, "export_provenance", "exact");
+    await fillReviewFieldOutcomeControls(panel);
     await panel.locator(".review-audit-taxonomy-status").selectOption("partial_match");
     await panel.locator(".review-audit-taxonomy-note").fill("Operator scored field outcome from source note-line evidence.");
     await panel.locator(".review-resolved-value").fill("MT777 R'");
     await panel.locator(".review-resolution-note").fill("Operator reviewed source note-line evidence before applying the resolution.");
-    await selectNoteLineScope(panel, "scored_note_line");
+    await fillReviewFieldOutcomeControls(panel);
 
     let resolveRequestPayload = null;
     page.on("request", (request) => {
@@ -405,6 +409,10 @@ async function run() {
     assert(
       resolveRequestPayload?.note_line_scoring_scope === "scored_note_line",
       `Browser payload should include selected note-line scoring scope: ${JSON.stringify(resolveRequestPayload)}`
+    );
+    assert(
+      resolveRequestPayload?.field_review_outcome?.field_scores?.mouse_ids_or_note_lines?.status === "corrected",
+      `Browser payload should include corrected mouse-id outcome: ${JSON.stringify(resolveRequestPayload)}`
     );
     assert(
       resolution.field_review_outcome.note_line_scoring_scope === "scored_note_line",
