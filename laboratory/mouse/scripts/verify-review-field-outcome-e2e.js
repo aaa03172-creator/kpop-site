@@ -345,6 +345,7 @@ print(json.dumps({
 }
 
 async function run() {
+  fs.mkdirSync(path.join(ROOT, "data"), { recursive: true });
   const tempRoot = fs.mkdtempSync(path.join(ROOT, "data", "review-field-outcome-e2e-"));
   const dataDir = path.join(tempRoot, "data");
   const manifestPath = path.join(tempRoot, "private-manifest.json");

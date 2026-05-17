@@ -481,6 +481,45 @@ def test_export_field_outcomes_and_nonscorable_cases_reconstructs_go_report(tmp_
     assert report["failure_taxonomy_counts"] == {"no_visible_note_line_for_evaluator_scoring": 1}
 
 
+def test_export_field_outcomes_drops_untrusted_review_level_text(tmp_path: Path) -> None:
+    exporter = load_export_module()
+    manifest_path = write_manifest(tmp_path)
+    db_path = seed_full_field_review_outcome_db(tmp_path)
+    output_path = tmp_path / "field-outcome-private-input.json"
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT after_value
+            FROM action_log
+            WHERE action_id = 'action_full_scored'
+            """
+        ).fetchone()
+        after = json.loads(row[0])
+        after["field_review_outcome"]["actual_review_level"] = r"C:\Users\User\Documents\SECRET_RAW_LEVEL"
+        conn.execute(
+            """
+            UPDATE action_log
+            SET after_value = ?
+            WHERE action_id = 'action_full_scored'
+            """,
+            (json.dumps(after, ensure_ascii=False),),
+        )
+
+    exporter.export_review_scoring_audit_input(
+        db_path=db_path,
+        manifest_path=manifest_path,
+        output_path=output_path,
+        run_label="field outcome audit",
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["cases"][0]["actual_review_level"] == "quick_check"
+    encoded = json.dumps(payload, ensure_ascii=False)
+    assert "SECRET_RAW_LEVEL" not in encoded
+    assert str(tmp_path) not in encoded
+
+
 def test_review_scoring_audit_export_cli_and_package_script_redact_paths(tmp_path: Path) -> None:
     manifest_path = write_manifest(tmp_path)
     db_path = seed_review_scoring_audit_db(tmp_path)
@@ -569,6 +608,7 @@ def test_private_accuracy_regression_runner_exports_reports_and_compares_metrics
         "missing_scope": [],
         "empty_scoped": [],
         "invalid_scoring_status": [],
+        "scored_scope_missing_scored_cases": [],
     }
     assert summary["comparison"]["all_key_metrics_match"] is True
     assert summary["output_path"] == "private output path omitted"
@@ -698,4 +738,59 @@ def test_private_accuracy_regression_runner_fails_on_field_outcome_integrity_vio
     assert summary["status"] == "failed"
     assert summary["regression_gate"]["field_outcome_integrity_status"] == "failed"
     assert summary["field_outcome_integrity"]["missing_scope"] == ["apom_001"]
+    assert str(tmp_path) not in result.stdout
+
+
+def test_private_accuracy_regression_runner_fails_when_scored_scope_has_no_scored_cases(tmp_path: Path) -> None:
+    manifest_path = write_manifest(tmp_path)
+    db_path = seed_full_field_review_outcome_db(tmp_path)
+    run_dir = tmp_path / "private-regression-missing-scored-case"
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT after_value
+            FROM action_log
+            WHERE action_id = 'action_full_scored'
+            """
+        ).fetchone()
+        after = json.loads(row[0])
+        after["scoring_audit"] = {}
+        conn.execute(
+            """
+            UPDATE action_log
+            SET after_value = ?
+            WHERE action_id = 'action_full_scored'
+            """,
+            (json.dumps(after, ensure_ascii=False),),
+        )
+
+    result = subprocess.run(
+        [
+            "python",
+            str(REGRESSION_RUNNER_PATH),
+            "--db-path",
+            str(db_path),
+            "--manifest",
+            str(manifest_path),
+            "--run-dir",
+            str(run_dir),
+            "--run-label",
+            "field outcome regression",
+            "--suffix",
+            "field-outcomes-regression-missing-scored-case",
+            "--json",
+        ],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["status"] == "failed"
+    assert summary["regression_gate"]["field_outcome_integrity_status"] == "failed"
+    assert summary["field_outcome_integrity"]["scored_scope_missing_scored_cases"] == ["apom_001"]
     assert str(tmp_path) not in result.stdout

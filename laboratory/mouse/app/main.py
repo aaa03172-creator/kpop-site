@@ -9938,6 +9938,7 @@ NOTE_LINE_SCORING_SCOPES = {
     "scored_note_line",
     "no_visible_note_line_for_evaluator_scoring",
 }
+PRIVATE_ACCURACY_REVIEW_LEVELS = {"must_review", "quick_check", "trace_only", "hidden_default"}
 PRIVATE_ACCURACY_FAILURE_LABELS = {
     "no_visible_note_line_for_evaluator_scoring",
     "partial_match",
@@ -10008,11 +10009,17 @@ def review_private_accuracy_field_outcome(payload: ReviewResolutionCreate) -> di
         )
     if not scope and not field_scores and not labels:
         return {}
+    actual_review_level = str(outcome.get("actual_review_level") or "").strip()
+    if actual_review_level and actual_review_level not in PRIVATE_ACCURACY_REVIEW_LEVELS:
+        raise HTTPException(
+            status_code=400,
+            detail="Actual review level must be must_review, quick_check, trace_only, or hidden_default.",
+        )
     return {
         "boundary": "review item / private accuracy field outcome",
         "provenance": "operator_selected_review_resolution",
         "note_line_scoring_scope": scope,
-        "actual_review_level": str(outcome.get("actual_review_level") or "").strip(),
+        "actual_review_level": actual_review_level,
         "export_blocked_until_resolved": outcome.get("export_blocked_until_resolved") is True,
         "unresolved_must_review_at_export": outcome.get("unresolved_must_review_at_export") is True,
         "manual_transcription_required": outcome.get("manual_transcription_required") is True,
@@ -10026,6 +10033,14 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
     resolved_at = utc_now()
     scoring_audit = review_scoring_audit_metadata(payload)
     field_review_outcome = review_private_accuracy_field_outcome(payload)
+    if (
+        field_review_outcome.get("note_line_scoring_scope") == "scored_note_line"
+        and not scoring_audit.get("status")
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Scored note-line field outcomes require scoring audit taxonomy status.",
+        )
     allowed_legacy_decisions = {
         "resolve",
         "accept_legacy_candidate",

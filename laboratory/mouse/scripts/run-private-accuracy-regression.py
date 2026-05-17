@@ -48,6 +48,7 @@ def field_outcome_integrity(results_path: Path | str) -> dict[str, Any]:
     missing_scope = []
     empty_scoped = []
     invalid_scoring_status = []
+    scored_scope_missing_scored_cases = []
     cases = payload.get("cases") if isinstance(payload.get("cases"), list) else []
     for case in cases:
         if not isinstance(case, dict):
@@ -66,11 +67,18 @@ def field_outcome_integrity(results_path: Path | str) -> dict[str, Any]:
             empty_scoped.append(case_id)
         if case.get("scoring_status") != "review_resolution_audit_exported":
             invalid_scoring_status.append(case_id)
+        scored_cases = []
+        evaluator = case.get("hybrid_note_line_evaluator")
+        if isinstance(evaluator, dict) and isinstance(evaluator.get("scored_cases"), list):
+            scored_cases = evaluator["scored_cases"]
+        if scope == "scored_note_line" and not scored_cases:
+            scored_scope_missing_scored_cases.append(case_id)
     return {
         "case_count": len(cases),
         "missing_scope": missing_scope,
         "empty_scoped": empty_scoped,
         "invalid_scoring_status": invalid_scoring_status,
+        "scored_scope_missing_scored_cases": scored_scope_missing_scored_cases,
     }
 
 
@@ -81,6 +89,7 @@ def field_outcome_integrity_status(integrity: dict[str, Any]) -> str:
             not integrity.get("missing_scope")
             and not integrity.get("empty_scoped")
             and not integrity.get("invalid_scoring_status")
+            and not integrity.get("scored_scope_missing_scored_cases")
         )
         else "failed"
     )

@@ -22,9 +22,10 @@ Classify the artifacts as:
 
 ## Command
 
-Run from the repository root:
+Run from the `laboratory/mouse` project directory:
 
 ```powershell
+Set-Location "<repo root>/laboratory/mouse"
 $base = "<private run dir>"
 npm run pilot:private-accuracy-regression -- `
   --db-path "$base/review-scoring-audit-with-field-outcomes.sqlite" `
@@ -65,7 +66,7 @@ Latest checked ApoM tgtg result on 2026-05-17:
 
 - Decision: `go`
 - Matched cases: `17/17`
-- Field outcome integrity: no scope missing, no empty scoped payload, no invalid scoring status
+- Field outcome integrity: no scope missing, no empty scoped payload, no invalid scoring status, no scored scope missing scored cases
 - Baseline comparison: all key metrics matched
 - Hard gates included private data containment, traceability, review blocking, silent_overwrite prevention, accuracy thresholds, and hybrid evaluator input validation
 
@@ -74,6 +75,8 @@ Latest checked ApoM tgtg result on 2026-05-17:
 If `field_outcome_integrity.missing_scope` is non-empty, a review resolution produced field-level scoring data without a note-line scoring scope. Reopen the corresponding review audit trail and correct the review resolution metadata before using the report.
 
 If `field_outcome_integrity.empty_scoped` is non-empty, a review resolution selected a scoring scope but did not record any field score or failure label. Treat the case as incomplete review scoring.
+
+If `field_outcome_integrity.scored_scope_missing_scored_cases` is non-empty, a review resolution marked a note line as scored without preserving the scoring taxonomy needed for hybrid evaluator metrics. Correct the review scoring audit metadata before using the report.
 
 If `comparison.all_key_metrics_match` is false, inspect the comparison JSON. A metric mismatch can be legitimate only when the baseline intentionally changed. Otherwise, treat it as a regression and investigate the exporter, reporter, or audit DB before publishing results.
 

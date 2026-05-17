@@ -688,6 +688,77 @@ def test_resolving_review_requires_field_scores_for_scoped_accuracy_outcome(tmp_
         db.DB_PATH = old_db_path
 
 
+def test_resolving_review_rejects_private_accuracy_review_level_free_text(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "field_outcome_bad_level", [{"raw": "6", "strike": "none"}])
+        note_item_id = f"note_{parse_id}_1"
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+
+        with pytest.raises(HTTPException) as exc:
+            resolve_review_item(
+                review_id,
+                ReviewResolutionCreate(
+                    resolution_note="Reviewed source evidence.",
+                    resolved_value="reviewed card",
+                    note_item_id=note_item_id,
+                    note_label_decision="reviewed_note",
+                    note_line_scoring_scope="scored_note_line",
+                    audit_taxonomy_status="exact",
+                    field_review_outcome={
+                        "actual_review_level": r"C:\Users\User\Documents\raw-photo-note",
+                        "field_scores": {
+                            "mouse_ids_or_note_lines": {
+                                "status": "exact",
+                                "reviewed_before_apply": True,
+                                "traceable": True,
+                            },
+                        },
+                    },
+                ),
+            )
+
+        assert exc.value.status_code == 400
+        assert "Actual review level must be" in str(exc.value.detail)
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_resolving_review_requires_taxonomy_for_scored_note_line_outcome(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "field_outcome_missing_taxonomy", [{"raw": "6", "strike": "none"}])
+        note_item_id = f"note_{parse_id}_1"
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+
+        with pytest.raises(HTTPException) as exc:
+            resolve_review_item(
+                review_id,
+                ReviewResolutionCreate(
+                    resolution_note="Reviewed source evidence but omitted taxonomy.",
+                    resolved_value="reviewed card",
+                    note_item_id=note_item_id,
+                    note_label_decision="reviewed_note",
+                    note_line_scoring_scope="scored_note_line",
+                    field_review_outcome={
+                        "actual_review_level": "must_review",
+                        "field_scores": {
+                            "mouse_ids_or_note_lines": {
+                                "status": "exact",
+                                "reviewed_before_apply": True,
+                                "traceable": True,
+                            },
+                        },
+                    },
+                ),
+            )
+
+        assert exc.value.status_code == 400
+        assert "require scoring audit taxonomy status" in str(exc.value.detail)
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_review_attention_focuses_missing_core_photo_fields() -> None:
     result = review_attention_level(
         {

@@ -28,6 +28,7 @@ NOTE_LINE_SCOPES = {
     "scored_note_line",
     "no_visible_note_line_for_evaluator_scoring",
 }
+REVIEW_LEVELS = {"must_review", "quick_check", "trace_only", "hidden_default"}
 FAILURE_LABELS = {
     "no_visible_note_line_for_evaluator_scoring",
     "partial_match",
@@ -95,8 +96,11 @@ def safe_field_outcome(value: Any) -> dict[str, Any]:
     scope = str(outcome.get("note_line_scoring_scope") or "").strip()
     if scope not in NOTE_LINE_SCOPES:
         scope = ""
+    actual_review_level = str(outcome.get("actual_review_level") or "").strip()
+    if actual_review_level not in REVIEW_LEVELS:
+        actual_review_level = ""
     return {
-        "actual_review_level": str(outcome.get("actual_review_level") or "").strip(),
+        "actual_review_level": actual_review_level,
         "export_blocked_until_resolved": outcome.get("export_blocked_until_resolved") is True,
         "unresolved_must_review_at_export": outcome.get("unresolved_must_review_at_export") is True,
         "manual_transcription_required": outcome.get("manual_transcription_required") is True,

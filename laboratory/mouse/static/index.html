@@ -5863,6 +5863,15 @@
         container.querySelector(".review-field-outcome-status")?.focus();
         return null;
       }
+      if (noteLineScoringScope === "scored_note_line" && !auditTaxonomyStatus) {
+        const message = container.querySelector(".review-resolution-message");
+        if (message) {
+          message.textContent = "Choose scoring taxonomy before resolving a scored note-line outcome.";
+          message.classList.add("warn");
+        }
+        container.querySelector(".review-audit-taxonomy-status")?.focus();
+        return null;
+      }
       const earLabelCode = container.querySelector(".ear-label-code")?.value || "";
       if (item?.issue === "Ear label needs review" && !earLabelCode) {
         resolvedValueInput.focus();
