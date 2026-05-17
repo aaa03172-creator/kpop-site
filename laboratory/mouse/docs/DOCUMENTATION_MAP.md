@@ -63,6 +63,7 @@ Default rule: if a document or artifact is ambiguous, treat it as non-canonical 
 | `docs/pilot_readiness_baseline_2026-05-13.md` | export or view / non-canonical baseline record | Captures the local pilot baseline, verification command set, runtime artifact classification, and copied/synthetic-data rule. |
 | `docs/real_photo_pilot_protocol_2026-05-13.md` | review item / non-canonical pilot protocol | Defines the copied-photo pilot dataset size, per-photo labels, expected values, and local-only safety rules for real-photo evaluation. |
 | `docs/private_real_photo_pilot_accuracy_pack_2026-05-14.md` | review item / non-canonical pilot and evaluation runbook | Defines the 20-30 copied-photo private manifest, accuracy-evaluation reuse, sanitized public metrics, failure taxonomy, reviewer workload, and go/no-go gates. |
+| `docs/apom_tgtg_private_accuracy_regression_runbook_2026-05-17.md` | review item / local operations runbook | Describes rerunning the ApoM tgtg 17-photo private field-level accuracy regression with the gated runner, including artifact boundaries, pass criteria, failure handling, and leak checks. |
 | `docs/copied_photo_pilot_go_no_go_2026-05-14.md` | review item / pilot readiness guide | Defines hard and soft go/no-go gates for the 20-30 copied-photo pilot, including manifest coverage, private data containment, traceability, and backup/restore evidence. |
 | `docs/local_backup_restore_2026-05-13.md` | export or view / local operational procedure | Documents local pilot backup and restore scripts for SQLite data, uploaded photos, exports, and generated artifacts. |
 | `docs/pilot_operator_checklist_2026-05-13.md` | review item / local pilot checklist | One-page operator checklist for copied-photo setup, review, canonical apply, export readiness, stop conditions, and backup. |
@@ -109,6 +110,7 @@ These are non-canonical specs or reviews unless explicitly adopted elsewhere.
 | `docs/superpowers/specs/2026-05-09-current-state-design-implementation-review.md` | review item / non-canonical project documentation | Current state, design alignment, and mismatch review. |
 | `docs/superpowers/specs/2026-05-09-labeling-rule-ui-design.md` | implementation planning / non-canonical project note | Labeling rule UI design. |
 | `docs/superpowers/specs/2026-05-09-low-fatigue-colony-ui-design.md` | design guidance / non-canonical product documentation | Low-fatigue UI design direction. |
+| `docs/superpowers/specs/2026-05-15-hybrid-note-line-extraction-evaluator-design.md` | parsed/intermediate workflow policy design | Hybrid local OCR, AI draft, ROI, and rule-context evaluator design for mouse ID and note-line extraction accuracy. |
 
 ## Superpowers Plans
 

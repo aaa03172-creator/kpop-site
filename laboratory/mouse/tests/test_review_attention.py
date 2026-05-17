@@ -462,6 +462,303 @@ def test_resolving_ear_label_review_updates_note_without_overwriting_raw(tmp_pat
         db.DB_PATH = old_db_path
 
 
+def test_resolving_review_preserves_scoring_audit_taxonomy_without_private_payloads(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "audit_taxonomy", [{"raw": "318 RWM", "strike": "single"}])
+        note_item_id = f"note_{parse_id}_1"
+
+        result = resolve_review_item(
+            f"review_ear_{note_item_id}",
+            ReviewResolutionCreate(
+                resolution_note="Checked source evidence; reviewer classified the extracted note-line candidate.",
+                resolved_value="R_PRIME",
+                note_item_id=note_item_id,
+                ear_label_code="R_PRIME",
+                correction_entity_type="card_note_item",
+                correction_entity_id=note_item_id,
+                correction_field_name="parsed_ear_label_code",
+                correction_before_value="RWM",
+                correction_after_value="R_PRIME",
+                audit_taxonomy_status="near_miss",
+                audit_taxonomy_note="Reviewer selected near miss from the bounded audit taxonomy.",
+            ),
+        )
+
+        with db.connection() as conn:
+            review_action = conn.execute(
+                """
+                SELECT after_value
+                FROM action_log
+                WHERE action_type = 'review_resolved'
+                  AND target_id = ?
+                """,
+                (f"review_ear_{note_item_id}",),
+            ).fetchone()
+            correction = conn.execute(
+                """
+                SELECT correction_context_json
+                FROM correction_log
+                WHERE review_id = ?
+                """,
+                (f"review_ear_{note_item_id}",),
+            ).fetchone()
+
+        assert result["scoring_audit"] == {
+            "status": "near_miss",
+            "note": "Reviewer selected near miss from the bounded audit taxonomy.",
+            "boundary": "review item / scoring audit metadata",
+            "provenance": "operator_selected_review_resolution",
+        }
+        after = json.loads(review_action["after_value"])
+        assert after["scoring_audit"] == result["scoring_audit"]
+        correction_context = json.loads(correction["correction_context_json"])
+        assert correction_context["scoring_audit_status"] == "near_miss"
+        encoded = json.dumps({"result": result, "after": after, "correction": correction_context}, ensure_ascii=False)
+        assert "SECRET_" not in encoded
+        assert str(tmp_path) not in encoded
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_resolving_review_preserves_private_accuracy_field_outcome_metadata(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "field_outcome", [{"raw": "6", "strike": "none"}])
+        note_item_id = f"note_{parse_id}_1"
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+
+        result = resolve_review_item(
+            review_id,
+            ReviewResolutionCreate(
+                resolution_note="Reviewed source evidence; no visible mouse note-line was scorable.",
+                resolved_value="reviewed non-scorable card",
+                note_item_id=note_item_id,
+                note_label_decision="reviewed_note",
+                note_line_scoring_scope="no_visible_note_line_for_evaluator_scoring",
+                field_review_outcome={
+                    "actual_review_level": "must_review",
+                    "export_blocked_until_resolved": True,
+                    "unresolved_must_review_at_export": False,
+                    "manual_transcription_required": True,
+                    "failure_labels": ["no_visible_note_line_for_evaluator_scoring", "SECRET_RAW_LABEL"],
+                    "field_scores": {
+                        "mouse_ids_or_note_lines": {
+                            "status": "not_applicable",
+                            "reviewed_before_apply": True,
+                            "traceable": True,
+                            "raw_private_note": "SECRET_RAW_NOTE",
+                        },
+                        "card_type_review_routing": {
+                            "status": "corrected",
+                            "reviewed_before_apply": True,
+                            "traceable": True,
+                        },
+                    },
+                },
+            ),
+        )
+
+        with db.connection() as conn:
+            review_action = conn.execute(
+                """
+                SELECT after_value
+                FROM action_log
+                WHERE action_type = 'review_resolved'
+                  AND target_id = ?
+                """,
+                (review_id,),
+            ).fetchone()
+
+        field_outcome = result["field_review_outcome"]
+        assert field_outcome["boundary"] == "review item / private accuracy field outcome"
+        assert field_outcome["note_line_scoring_scope"] == "no_visible_note_line_for_evaluator_scoring"
+        assert field_outcome["actual_review_level"] == "must_review"
+        assert field_outcome["export_blocked_until_resolved"] is True
+        assert field_outcome["field_scores"]["mouse_ids_or_note_lines"] == {
+            "status": "not_applicable",
+            "reviewed_before_apply": True,
+            "traceable": True,
+        }
+        assert field_outcome["failure_labels"] == ["no_visible_note_line_for_evaluator_scoring"]
+        after = json.loads(review_action["after_value"])
+        assert after["field_review_outcome"] == field_outcome
+        encoded = json.dumps({"result": result, "after": after}, ensure_ascii=False)
+        assert "SECRET_" not in encoded
+        assert str(tmp_path) not in encoded
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_resolving_review_requires_scope_for_field_accuracy_outcome(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "field_outcome_missing_scope", [{"raw": "6", "strike": "none"}])
+        note_item_id = f"note_{parse_id}_1"
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+
+        with pytest.raises(HTTPException) as exc:
+            resolve_review_item(
+                review_id,
+                ReviewResolutionCreate(
+                    resolution_note="Reviewed source evidence but forgot to choose the note-line scoring scope.",
+                    resolved_value="reviewed card",
+                    note_item_id=note_item_id,
+                    note_label_decision="reviewed_note",
+                    field_review_outcome={
+                        "actual_review_level": "must_review",
+                        "export_blocked_until_resolved": True,
+                        "field_scores": {
+                            "mouse_ids_or_note_lines": {
+                                "status": "corrected",
+                                "reviewed_before_apply": True,
+                                "traceable": True,
+                            },
+                        },
+                    },
+                ),
+            )
+
+        assert exc.value.status_code == 400
+        assert "Note-line scoring scope is required" in str(exc.value.detail)
+        with db.connection() as conn:
+            review = conn.execute(
+                "SELECT status, resolved_at FROM review_queue WHERE review_id = ?",
+                (review_id,),
+            ).fetchone()
+            action_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM action_log
+                WHERE action_type = 'review_resolved'
+                  AND target_id = ?
+                """,
+                (review_id,),
+            ).fetchone()["count"]
+        assert review["status"] == "open"
+        assert review["resolved_at"] is None
+        assert action_count == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_resolving_review_requires_field_scores_for_scoped_accuracy_outcome(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "field_outcome_empty_scores", [{"raw": "6", "strike": "none"}])
+        note_item_id = f"note_{parse_id}_1"
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+
+        with pytest.raises(HTTPException) as exc:
+            resolve_review_item(
+                review_id,
+                ReviewResolutionCreate(
+                    resolution_note="Reviewed source evidence but did not score any field family.",
+                    resolved_value="reviewed card",
+                    note_item_id=note_item_id,
+                    note_label_decision="reviewed_note",
+                    note_line_scoring_scope="scored_note_line",
+                    field_review_outcome={
+                        "actual_review_level": "must_review",
+                        "export_blocked_until_resolved": True,
+                    },
+                ),
+            )
+
+        assert exc.value.status_code == 400
+        assert "At least one field score or failure label is required" in str(exc.value.detail)
+        with db.connection() as conn:
+            review = conn.execute(
+                "SELECT status, resolved_at FROM review_queue WHERE review_id = ?",
+                (review_id,),
+            ).fetchone()
+            action_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM action_log
+                WHERE action_type = 'review_resolved'
+                  AND target_id = ?
+                """,
+                (review_id,),
+            ).fetchone()["count"]
+        assert review["status"] == "open"
+        assert review["resolved_at"] is None
+        assert action_count == 0
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_resolving_review_rejects_private_accuracy_review_level_free_text(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "field_outcome_bad_level", [{"raw": "6", "strike": "none"}])
+        note_item_id = f"note_{parse_id}_1"
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+
+        with pytest.raises(HTTPException) as exc:
+            resolve_review_item(
+                review_id,
+                ReviewResolutionCreate(
+                    resolution_note="Reviewed source evidence.",
+                    resolved_value="reviewed card",
+                    note_item_id=note_item_id,
+                    note_label_decision="reviewed_note",
+                    note_line_scoring_scope="scored_note_line",
+                    audit_taxonomy_status="exact",
+                    field_review_outcome={
+                        "actual_review_level": r"C:\Users\User\Documents\raw-photo-note",
+                        "field_scores": {
+                            "mouse_ids_or_note_lines": {
+                                "status": "exact",
+                                "reviewed_before_apply": True,
+                                "traceable": True,
+                            },
+                        },
+                    },
+                ),
+            )
+
+        assert exc.value.status_code == 400
+        assert "Actual review level must be" in str(exc.value.detail)
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_resolving_review_requires_taxonomy_for_scored_note_line_outcome(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    try:
+        parse_id, _ = seed_numeric_note_parse(tmp_path, "field_outcome_missing_taxonomy", [{"raw": "6", "strike": "none"}])
+        note_item_id = f"note_{parse_id}_1"
+        review_id = f"review_unlabeled_numeric_{parse_id}"
+
+        with pytest.raises(HTTPException) as exc:
+            resolve_review_item(
+                review_id,
+                ReviewResolutionCreate(
+                    resolution_note="Reviewed source evidence but omitted taxonomy.",
+                    resolved_value="reviewed card",
+                    note_item_id=note_item_id,
+                    note_label_decision="reviewed_note",
+                    note_line_scoring_scope="scored_note_line",
+                    field_review_outcome={
+                        "actual_review_level": "must_review",
+                        "field_scores": {
+                            "mouse_ids_or_note_lines": {
+                                "status": "exact",
+                                "reviewed_before_apply": True,
+                                "traceable": True,
+                            },
+                        },
+                    },
+                ),
+            )
+
+        assert exc.value.status_code == 400
+        assert "require scoring audit taxonomy status" in str(exc.value.detail)
+    finally:
+        db.DB_PATH = old_db_path
+
+
 def test_review_attention_focuses_missing_core_photo_fields() -> None:
     result = review_attention_level(
         {
@@ -1188,6 +1485,122 @@ def test_multi_label_numeric_note_line_uses_grouped_review_contract(tmp_path: Pa
         assert review["review_id"] == f"review_unlabeled_numeric_{parse_id}"
         assert review["current_value"] == "1, 2, 3"
         assert "numeric-only note lines" in review["review_reason"]
+    finally:
+        db.DB_PATH = old_db_path
+
+
+def test_review_items_expose_hybrid_note_line_evaluator_metadata(tmp_path: Path) -> None:
+    old_db_path = db.DB_PATH
+    db.DB_PATH = tmp_path / "mouse_lims.sqlite"
+    try:
+        db.init_db()
+        photo_id = "photo_review_hybrid"
+        parse_id = "parse_review_hybrid"
+        record = {
+            "type": "Separated",
+            "sourcePhotoId": photo_id,
+            "labelingRuleSetId": "label_rule_apom_tgtg_20260506",
+            "notes": [
+                {
+                    "raw": "101 L'",
+                    "ocrCandidate": {
+                        "raw_line_text": "101 L'",
+                        "parsed_mouse_display_id": "101",
+                        "parsed_ear_label_code": "L_PRIME",
+                        "confidence": 0.91,
+                    },
+                    "aiCandidate": {
+                        "raw_line_text": "101 R'",
+                        "parsed_mouse_display_id": "101",
+                        "parsed_ear_label_code": "R_PRIME",
+                        "confidence": 0.93,
+                    },
+                    "sourceQuality": {
+                        "source_image_quality": "acceptable",
+                        "roi_alignment_confidence": 0.9,
+                        "line_segmentation_confidence": 0.88,
+                    },
+                    "roiRef": "note_block:1",
+                }
+            ],
+        }
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO photo_log
+                    (photo_id, original_filename, stored_path, uploaded_at, status, raw_source_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    photo_id,
+                    "hybrid-review-card.jpg",
+                    "data/photos/test/hybrid-review-card.jpg",
+                    "2026-05-15T00:00:00Z",
+                    "review_pending",
+                    "cage_card_photo",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO parse_result
+                    (parse_id, photo_id, source_name, raw_payload, parsed_at, status, confidence, needs_review)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    parse_id,
+                    photo_id,
+                    "manual_photo_transcription",
+                    json.dumps(record, ensure_ascii=False),
+                    "2026-05-15T00:00:00Z",
+                    "review",
+                    90,
+                    1,
+                ),
+            )
+            snapshot_id = create_card_snapshot(conn, parse_id, photo_id, record, "2026-05-15T00:00:00Z")
+            write_note_items_and_mouse_candidates(
+                conn,
+                parse_id,
+                {**record, "cardSnapshotId": snapshot_id},
+                "review",
+            )
+            note_item_id = f"note_{parse_id}_1"
+            conn.execute(
+                """
+                INSERT INTO review_queue
+                    (review_id, parse_id, severity, issue, current_value, suggested_value,
+                     review_reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"review_ear_{note_item_id}",
+                    parse_id,
+                    "High",
+                    "Hybrid note-line evaluator conflict",
+                    "101 L'",
+                    "Review OCR, AI, and rule candidates",
+                    "Hybrid evaluator detected note-line candidate conflicts.",
+                    "open",
+                    "2026-05-15T00:00:01Z",
+                ),
+            )
+
+        [item] = [
+            review
+            for review in list_review_items()
+            if review["review_id"] == f"review_ear_{note_item_id}"
+        ]
+
+        evaluator = item["hybrid_note_line_evaluator"]
+        assert evaluator["candidate_kind"] == "hybrid_note_line"
+        assert evaluator["ocr_candidate"]["raw_line_text"] == "101 L'"
+        assert evaluator["ai_candidate"]["raw_line_text"] == "101 R'"
+        assert evaluator["hybrid_candidate"]["parsed_ear_label_code"] == "L_PRIME"
+        assert "ocr_ai_note_line_disagreement" in evaluator["conflicts"]
+        assert evaluator["source_quality"]["roi_alignment_confidence"] == 0.9
+        assert evaluator["source_quality"]["line_segmentation_confidence"] == 0.88
+        assert evaluator["rule_candidate"]["rule_snapshot"]["rule_hash"]
+        assert evaluator["rule_candidate"]["rule_interpretation_boundary"] == "review hint only"
     finally:
         db.DB_PATH = old_db_path
 

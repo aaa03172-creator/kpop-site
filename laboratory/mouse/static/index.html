@@ -653,6 +653,38 @@
     .review-actions select {
       margin: 0;
     }
+    .review-accuracy-outcome {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fbfa;
+      padding: 9px;
+    }
+    .review-accuracy-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .review-field-outcome-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+    }
+    .review-field-outcome-grid label {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .review-field-outcome-grid span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
     .review-queue-summary {
       display: flex;
       flex-wrap: wrap;
@@ -1062,6 +1094,48 @@
       margin-top: 2px;
       color: var(--ink);
       overflow-wrap: anywhere;
+    }
+    .hybrid-note-line-evaluator-panel {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+    .hybrid-note-line-evaluator-panel h4 {
+      margin: 0;
+      font-size: 13px;
+    }
+    .hybrid-candidate-grid {
+      display: grid;
+      gap: 8px;
+    }
+    .hybrid-candidate-block {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 9px;
+      font-size: 12px;
+    }
+    .hybrid-candidate-block strong,
+    .hybrid-candidate-block span {
+      display: block;
+    }
+    .hybrid-candidate-block span {
+      margin-top: 3px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    .hybrid-conflict-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .hybrid-conflict-list span {
+      border: 1px solid #f0c8a3;
+      border-radius: 999px;
+      background: #fff7ed;
+      color: #8a3f0b;
+      padding: 3px 7px;
+      text-transform: none;
+      font-size: 11px;
     }
     .apply-preview-panel {
       margin-top: 12px;
@@ -5494,6 +5568,15 @@
               : ""}
           </select>
           ${resolvedValueControl}
+          <select class="review-audit-taxonomy-status" aria-label="Scoring audit taxonomy">
+            <option value="">Scoring audit taxonomy</option>
+            <option value="exact">Exact</option>
+            <option value="partial_match">Partial match</option>
+            <option value="near_miss">Near miss</option>
+            <option value="unscorable_due_to_occlusion">Unscorable due to occlusion</option>
+          </select>
+          <input class="review-audit-taxonomy-note" type="text" placeholder="Audit note" aria-label="Scoring audit note">
+          ${reviewAccuracyOutcomeControls(item)}
           <input class="review-resolution-note" type="text" placeholder="Resolution note required" aria-label="Resolution note">
           ${strainApplyControls}
           ${noteLabelControls}
@@ -5743,6 +5826,52 @@
         return null;
       }
       const noteLabelCountValue = container.querySelector(".note-label-count")?.value || "";
+      const auditTaxonomyStatus = container.querySelector(".review-audit-taxonomy-status")?.value || "";
+      const auditTaxonomyNote = container.querySelector(".review-audit-taxonomy-note")?.value.trim() || "";
+      const noteLineScoringScope = container.querySelector(".review-note-line-scoring-scope")?.value || "";
+      const fieldScores = {};
+      container.querySelectorAll(".review-field-outcome-status").forEach((select) => {
+        const family = select.dataset.fieldFamily || "";
+        if (!family || !select.value) return;
+        fieldScores[family] = {
+          status: select.value,
+          reviewed_before_apply: true,
+          traceable: true
+        };
+      });
+      const failureLabels = noteLineScoringScope === "no_visible_note_line_for_evaluator_scoring"
+        ? ["no_visible_note_line_for_evaluator_scoring"]
+        : [];
+      const hasFieldReviewOutcome = Boolean(
+        noteLineScoringScope || failureLabels.length || Object.keys(fieldScores).length
+      );
+      if (hasFieldReviewOutcome && !noteLineScoringScope) {
+        const message = container.querySelector(".review-resolution-message");
+        if (message) {
+          message.textContent = "Choose note-line scope before resolving field accuracy outcome.";
+          message.classList.add("warn");
+        }
+        container.querySelector(".review-note-line-scoring-scope")?.focus();
+        return null;
+      }
+      if (noteLineScoringScope && !failureLabels.length && !Object.keys(fieldScores).length) {
+        const message = container.querySelector(".review-resolution-message");
+        if (message) {
+          message.textContent = "Select at least one field outcome before resolving scoring scope.";
+          message.classList.add("warn");
+        }
+        container.querySelector(".review-field-outcome-status")?.focus();
+        return null;
+      }
+      if (noteLineScoringScope === "scored_note_line" && !auditTaxonomyStatus) {
+        const message = container.querySelector(".review-resolution-message");
+        if (message) {
+          message.textContent = "Choose scoring taxonomy before resolving a scored note-line outcome.";
+          message.classList.add("warn");
+        }
+        container.querySelector(".review-audit-taxonomy-status")?.focus();
+        return null;
+      }
       const earLabelCode = container.querySelector(".ear-label-code")?.value || "";
       if (item?.issue === "Ear label needs review" && !earLabelCode) {
         resolvedValueInput.focus();
@@ -5770,7 +5899,7 @@
         container.dataset.canonicalMappingWarningAcknowledged = button.dataset.reviewId;
         return null;
       }
-      return {
+      const payload = {
         resolution_note: note,
         resolved_value: resolvedValue || "",
         legacy_decision: selectedLegacyDecision,
@@ -5788,8 +5917,22 @@
         note_label_decision: noteLabelDecision?.value || "",
         note_label_mouse_id: container.querySelector(".note-label-mouse-id")?.value || "",
         note_label_count: noteLabelCountValue ? Number(noteLabelCountValue) : null,
-        ear_label_code: earLabelCode
+        ear_label_code: earLabelCode,
+        audit_taxonomy_status: auditTaxonomyStatus,
+        audit_taxonomy_note: auditTaxonomyNote
       };
+      if (hasFieldReviewOutcome) {
+        payload.note_line_scoring_scope = noteLineScoringScope;
+        payload.field_review_outcome = {
+          actual_review_level: item?.attention_level || "quick_check",
+          export_blocked_until_resolved: container.querySelector(".review-export-blocked-until-resolved")?.checked === true,
+          unresolved_must_review_at_export: false,
+          manual_transcription_required: false,
+          failure_labels: failureLabels,
+          field_scores: fieldScores
+        };
+      }
+      return payload;
     }
 
     async function submitReviewResolution(button, item, allowAutoNote) {
@@ -5948,6 +6091,122 @@
       `;
     }
 
+    function reviewFieldOutcomeStatusOptions() {
+      return [
+        ["", "Field outcome"],
+        ["exact", "Exact"],
+        ["corrected", "Corrected"],
+        ["missed", "Missed"],
+        ["not_applicable", "Not applicable"]
+      ].map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("");
+    }
+
+    function reviewAccuracyOutcomeControls(item) {
+      const fieldFamilies = [
+        ["mouse_ids_or_note_lines", "Mouse IDs / note-line"],
+        ["card_type_review_routing", "Card type / routing"],
+        ["sex_count_dob", "Sex, count, DOB"],
+        ["mating_litter_context", "Mating / litter"],
+        ["export_provenance", "Export provenance"]
+      ];
+      return `
+        <div class="review-accuracy-outcome" aria-label="Field-level accuracy outcome">
+          <select class="review-note-line-scoring-scope" aria-label="Note-line scoring scope">
+            <option value="">Note-line scope</option>
+            <option value="scored_note_line">Scored note-line</option>
+            <option value="no_visible_note_line_for_evaluator_scoring">No visible note-line</option>
+          </select>
+          <label class="review-accuracy-checkbox">
+            <input class="review-export-blocked-until-resolved" type="checkbox" ${item?.attention_level === "must_review" ? "checked" : ""}>
+            <span>Export blocked until resolved</span>
+          </label>
+          <div class="review-field-outcome-grid">
+            ${fieldFamilies.map(([family, label]) => `
+              <label>
+                <span>${escapeHtml(label)}</span>
+                <select class="review-field-outcome-status" data-field-family="${escapeHtml(family)}" aria-label="${escapeHtml(label)} outcome">
+                  ${reviewFieldOutcomeStatusOptions()}
+                </select>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    }
+
+    function hybridEvaluatorConfidence(value) {
+      const numberValue = Number(value);
+      if (!Number.isFinite(numberValue)) return "";
+      return numberValue >= 0 && numberValue <= 1
+        ? `${Math.round(numberValue * 100)}%`
+        : `${Math.round(numberValue)}%`;
+    }
+
+    function hybridEvaluatorCandidateBlock(label, candidate) {
+      const source = candidate || {};
+      const details = [
+        ["Raw", source.raw_line_text],
+        ["Mouse", source.parsed_mouse_display_id],
+        ["Ear", source.parsed_ear_label_code],
+        ["Type", source.parsed_type],
+        ["Confidence", hybridEvaluatorConfidence(source.confidence)]
+      ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+      return `
+        <div class="hybrid-candidate-block">
+          <strong>${escapeHtml(label)}</strong>
+          ${details.length
+            ? details.map(([key, value]) => `<span>${escapeHtml(key)}: ${escapeHtml(value)}</span>`).join("")
+            : `<span>--</span>`}
+        </div>
+      `;
+    }
+
+    function reviewHybridNoteLineEvaluatorPanel(item) {
+      const evaluator = item?.hybrid_note_line_evaluator || {};
+      if (!Object.keys(evaluator).length) return "";
+      const routing = evaluator.review_routing || {};
+      const sourceQuality = evaluator.source_quality || {};
+      const ruleCandidate = evaluator.rule_candidate || {};
+      const ruleSnapshot = ruleCandidate.rule_snapshot || {};
+      const conflicts = Array.isArray(evaluator.conflicts) ? evaluator.conflicts : [];
+      const sourceQualityRows = [
+        ["Source image quality", sourceQuality.source_image_quality],
+        ["ROI alignment", hybridEvaluatorConfidence(sourceQuality.roi_alignment_confidence)],
+        ["Line segmentation", hybridEvaluatorConfidence(sourceQuality.line_segmentation_confidence)]
+      ];
+      const ruleSnapshotText = [
+        ruleSnapshot.display_name,
+        ruleSnapshot.rule_set_id,
+        ruleSnapshot.rule_hash
+      ].filter(Boolean).join(" / ") || "--";
+      const ruleBoundary = ruleCandidate.rule_interpretation_boundary || "review hint only";
+      return `
+        <div class="detail-stack hybrid-note-line-evaluator-panel">
+          <h4>Hybrid Note-Line Evaluator</h4>
+          <div class="detail-row"><span>Boundary</span><strong>review item / parsed intermediate result</strong></div>
+          <div class="detail-row"><span>Routing</span><strong>${escapeHtml([routing.attention_level, routing.must_review ? "must review" : ""].filter(Boolean).join(" / ") || "--")}</strong></div>
+          <div class="hybrid-candidate-grid">
+            ${hybridEvaluatorCandidateBlock("OCR candidate", evaluator.ocr_candidate)}
+            ${hybridEvaluatorCandidateBlock("AI candidate", evaluator.ai_candidate)}
+            ${hybridEvaluatorCandidateBlock("Hybrid candidate", evaluator.hybrid_candidate)}
+          </div>
+          <div class="detail-row">
+            <span>Conflicts</span>
+            <strong class="hybrid-conflict-list">
+              ${conflicts.length
+                ? conflicts.map((conflict) => `<span data-hybrid-conflict="${escapeHtml(conflict)}">${escapeHtml(conflict)}</span>`).join("")
+                : `<span>none</span>`}
+            </strong>
+          </div>
+          ${sourceQualityRows.map(([label, value]) => `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "--")}</strong></div>`).join("")}
+          <div class="detail-row"><span>Rule snapshot</span><strong>${escapeHtml(ruleSnapshotText)}</strong></div>
+          <div class="detail-row"><span>Rule expected</span><strong>${escapeHtml(ruleCandidate.expected_ear_label_code || "--")}</strong></div>
+          <div class="detail-row"><span>Rule state</span><strong>${escapeHtml(ruleCandidate.rule_interpretation_candidate || "--")}</strong></div>
+          <div class="detail-row" data-rule-boundary><span>Rule boundary</span><strong>${escapeHtml(ruleBoundary)}; source photo and raw note line remain primary evidence.</strong></div>
+        </div>
+      `;
+    }
+
     function renderCanonicalApplyPreview(result) {
       const panel = document.getElementById("canonicalApplyPreviewPanel");
       const blockers = result.blockers || [];
@@ -6018,6 +6277,7 @@
         </div>
         ${reviewPlausibilityPanel(item)}
         ${reviewEvidencePanel(item)}
+        ${reviewHybridNoteLineEvaluatorPanel(item)}
         <div class="detail-stack">
           <button class="audit-review-item" type="button" data-review-id="${escapeHtml(item.review_id)}">Load Audit Trace</button>
           <button class="assistant-review-draft" type="button" data-review-id="${escapeHtml(item.review_id)}">Load Assistant Draft</button>
@@ -6068,6 +6328,8 @@
       const noteLabelDecisionInput = actions.querySelector(".note-label-decision");
       const noteLabelMouseIdInput = actions.querySelector(".note-label-mouse-id");
       const noteLabelCountInput = actions.querySelector(".note-label-count");
+      const auditTaxonomyInput = actions.querySelector(".review-audit-taxonomy-status");
+      const auditTaxonomyNoteInput = actions.querySelector(".review-audit-taxonomy-note");
       actions.dataset.assistantReviewType = reviewType;
       actions.dataset.assistantFormFillPolicy = formFillPolicy;
       actions.dataset.assistantCorrectionEntityType = resolution.correction_entity_type || "review_item";
@@ -6088,6 +6350,8 @@
         if (noteLabelMouseIdInput) noteLabelMouseIdInput.value = resolution.note_label_mouse_id || "";
         if (noteLabelCountInput) noteLabelCountInput.value = resolution.note_label_count ?? "";
       }
+      if (auditTaxonomyInput) auditTaxonomyInput.value = resolution.audit_taxonomy_status || "";
+      if (auditTaxonomyNoteInput) auditTaxonomyNoteInput.value = resolution.audit_taxonomy_note || "";
       const message = actions.querySelector(".review-resolution-message");
       if (message) {
         message.textContent = `Assistant draft copied into the form (${reviewType.replaceAll("_", " ")}). Review source evidence before resolving.`;

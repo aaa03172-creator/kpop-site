@@ -31,6 +31,7 @@ from . import db as app_db
 from .db import ROOT, connection, init_db
 from .breeding_rules import DEFAULT_BREEDING_RULE_SET
 from .labeling_rules import interpret_crossed_out_status, match_samples_to_mice
+from .hybrid_note_line_evaluator import build_rule_snapshot, evaluate_note_line_candidate
 from .matching import MatchCandidate, match_candidate
 from .storage import new_id, save_legacy_workbook, save_upload, utc_now
 from scripts.parse_legacy_workbooks import parse_workbook
@@ -116,6 +117,8 @@ class CorrectionCreate(BaseModel):
     reason: str = ""
     source_record_id: str | None = None
     review_id: str | None = None
+    scoring_audit_status: str = ""
+    scoring_audit_note: str = ""
 
 
 class MouseEventCreate(BaseModel):
@@ -150,6 +153,10 @@ class ReviewResolutionCreate(BaseModel):
     note_label_count: int | None = Field(default=None, ge=0)
     note_label_interpreted_status: str = ""
     ear_label_code: str = ""
+    audit_taxonomy_status: str = ""
+    audit_taxonomy_note: str = ""
+    note_line_scoring_scope: str = ""
+    field_review_outcome: dict[str, Any] = Field(default_factory=dict)
 
 
 class PhotoManualTranscriptionCreate(BaseModel):
@@ -3880,17 +3887,18 @@ def correction_evidence_reference_json(source_record_id: str | None, review_id: 
 
 
 def correction_context_json(payload: CorrectionCreate) -> str:
-    return json.dumps(
-        {
-            "entity_type": payload.entity_type,
-            "entity_id": payload.entity_id,
-            "field_name": payload.field_name,
-            "before_value": payload.before_value,
-            "after_value": payload.after_value,
-            "reason": payload.reason,
-        },
-        ensure_ascii=False,
-    )
+    context = {
+        "entity_type": payload.entity_type,
+        "entity_id": payload.entity_id,
+        "field_name": payload.field_name,
+        "before_value": payload.before_value,
+        "after_value": payload.after_value,
+        "reason": payload.reason,
+    }
+    if payload.scoring_audit_status:
+        context["scoring_audit_status"] = payload.scoring_audit_status
+        context["scoring_audit_note"] = payload.scoring_audit_note
+    return json.dumps(context, ensure_ascii=False)
 
 
 def record_correction(conn: Any, payload: CorrectionCreate, corrected_at: str) -> str:
@@ -6784,6 +6792,32 @@ def load_labeling_rule_sample_mapping(conn: Any, rule_set_id: str) -> str:
     return str(row["sample_mapping"] or "").strip() if row else ""
 
 
+def load_labeling_rule_context(conn: Any, rule_set_id: str) -> dict[str, Any]:
+    rule_id = str(rule_set_id or "").strip()
+    if not rule_id:
+        return {}
+    row = conn.execute(
+        """
+        SELECT rule_set_id, display_name, session_date, crossed_out_handling,
+               sample_mapping, genotyping_target
+        FROM labeling_rule_set
+        WHERE rule_set_id = ?
+        """,
+        (rule_id,),
+    ).fetchone()
+    if not row:
+        return {}
+    return {
+        "rule_set_id": row["rule_set_id"],
+        "display_name": row["display_name"],
+        "session_date": row["session_date"],
+        "crossed_out_handling": row["crossed_out_handling"],
+        "ear_label_sequence": load_labeling_rule_ear_sequence(conn, rule_id),
+        "sample_mapping": row["sample_mapping"],
+        "genotyping_target": row["genotyping_target"],
+    }
+
+
 @app.get("/api/labeling-rule-sets")
 def list_labeling_rule_sets() -> list[dict[str, Any]]:
     with connection() as conn:
@@ -7459,11 +7493,13 @@ def write_note_items_and_mouse_candidates(
     crossed_out_handling = (
         load_labeling_rule_crossed_out_handling(conn, labeling_rule_set_id) if labeling_rule_set_id else ""
     )
+    labeling_rule_context = load_labeling_rule_context(conn, labeling_rule_set_id) if labeling_rule_set_id else {}
     ear_sequence_index = 0
 
     for index, note in enumerate(notes, start=1):
         raw_line = str(note.get("raw") if isinstance(note, dict) else note)
         strike_status = str(note.get("strike") or "none") if isinstance(note, dict) else "none"
+        note_item_id = f"note_{parse_id}_{index}"
         parsed = parse_note_line(raw_line, card_type)
         status_from_strike = interpreted_status(card_type, strike_status)
         interpreted = (
@@ -7472,6 +7508,7 @@ def write_note_items_and_mouse_candidates(
             else status_from_strike if parsed["parsed_type"] != "unknown" else "unknown"
         )
         parsed_metadata = dict(parsed.get("parsed_metadata") or {})
+        note_needs_review = int(parsed["needs_review"] or 0)
         if parsed["parsed_type"] == "mouse_item" and labeling_rule_set_id:
             expected_ear_label_code = None
             label_status = (
@@ -7484,7 +7521,41 @@ def write_note_items_and_mouse_candidates(
                 ear_sequence_index += 1
             parsed_metadata["expected_ear_label_code"] = expected_ear_label_code
             parsed_metadata["labeling_rule_set_id"] = labeling_rule_set_id
-        note_item_id = f"note_{parse_id}_{index}"
+            if labeling_rule_context:
+                parsed_metadata["labeling_rule_snapshot_hash"] = build_rule_snapshot(
+                    {**labeling_rule_context, "expected_ear_label_code": expected_ear_label_code}
+                )["rule_hash"]
+        has_hybrid_candidate_input = isinstance(note, dict) and (
+            note.get("ocrCandidate")
+            or note.get("ocr_candidate")
+            or note.get("aiCandidate")
+            or note.get("ai_candidate")
+        )
+        if has_hybrid_candidate_input:
+            rule_context = dict(labeling_rule_context)
+            if "expected_ear_label_code" in parsed_metadata:
+                rule_context["expected_ear_label_code"] = parsed_metadata["expected_ear_label_code"]
+            evaluator_result = evaluate_note_line_candidate(
+                ocr_candidate=note.get("ocrCandidate") or note.get("ocr_candidate"),
+                ai_candidate=note.get("aiCandidate") or note.get("ai_candidate"),
+                parsed_note_row={
+                    **parsed,
+                    "raw_line_text": raw_line,
+                    "photo_id": photo_id or None,
+                    "parse_id": parse_id,
+                    "note_item_id": note_item_id,
+                    "line_number": index,
+                    "card_snapshot_id": snapshot_id or None,
+                    "roi_ref": note.get("roiRef") or note.get("roi_ref"),
+                    "strike_status": strike_status,
+                    "interpreted_status": interpreted,
+                },
+                source_quality=note.get("sourceQuality") or note.get("source_quality"),
+                rule_context=rule_context or None,
+            )
+            parsed_metadata["hybrid_note_line_evaluator"] = evaluator_result
+            if evaluator_result["review_routing"]["must_review"]:
+                note_needs_review = 1
         conn.execute(
             """
             INSERT OR REPLACE INTO card_note_item_log
@@ -7514,7 +7585,7 @@ def write_note_items_and_mouse_candidates(
                 parsed["parsed_count"],
                 json.dumps(parsed_metadata, ensure_ascii=False),
                 parsed["confidence"],
-                parsed["needs_review"],
+                note_needs_review,
             ),
         )
         note_count += 1
@@ -8650,6 +8721,7 @@ def list_review_items() -> list[dict[str, Any]]:
                    review_note.interpreted_status AS review_note_interpreted_status,
                    review_note.parsed_mouse_display_id AS review_note_mouse_display_id,
                    review_note.parsed_count AS review_note_count,
+                   review_note.parsed_metadata_json AS review_note_parsed_metadata_json,
                    review_snapshot.card_snapshot_id,
                    review_snapshot.card_type AS review_card_type,
                    review_snapshot.card_id_raw AS review_card_id_raw,
@@ -8728,6 +8800,8 @@ def list_review_items() -> list[dict[str, Any]]:
         payload["confidence"] = payload.get("parse_confidence")
         payload["image_url"] = f"/api/photos/{quote(payload['photo_id'])}/image" if payload.get("photo_id") else ""
         payload["review_note_summary"] = json_object(payload.pop("review_note_summary_json", "{}"))
+        review_note_metadata = json_object(payload.pop("review_note_parsed_metadata_json", "{}"))
+        payload["hybrid_note_line_evaluator"] = review_note_metadata.get("hybrid_note_line_evaluator", {})
         parse_payload = json_object(payload.pop("parse_raw_payload", "{}"))
         payload["review_plausibility_findings"] = parse_payload_plausibility_findings(parse_payload)
         payload.update(review_attention_level(payload, parse_payload))
@@ -9846,9 +9920,127 @@ def assistant_draft_review_item(review_id: str) -> dict[str, Any]:
     return assistant_review_draft_from_audit(audit)
 
 
+SCORING_AUDIT_TAXONOMY_STATUSES = {
+    "exact",
+    "partial_match",
+    "near_miss",
+    "unscorable_due_to_occlusion",
+}
+PRIVATE_ACCURACY_FIELD_FAMILIES = {
+    "mouse_ids_or_note_lines",
+    "card_type_review_routing",
+    "sex_count_dob",
+    "mating_litter_context",
+    "export_provenance",
+}
+PRIVATE_ACCURACY_FIELD_STATUSES = {"exact", "corrected", "missed", "not_applicable"}
+NOTE_LINE_SCORING_SCOPES = {
+    "scored_note_line",
+    "no_visible_note_line_for_evaluator_scoring",
+}
+PRIVATE_ACCURACY_REVIEW_LEVELS = {"must_review", "quick_check", "trace_only", "hidden_default"}
+PRIVATE_ACCURACY_FAILURE_LABELS = {
+    "no_visible_note_line_for_evaluator_scoring",
+    "partial_match",
+    "near_miss",
+    "unscorable_due_to_occlusion",
+}
+
+
+def review_scoring_audit_metadata(payload: ReviewResolutionCreate) -> dict[str, str]:
+    status = payload.audit_taxonomy_status.strip()
+    if not status:
+        return {}
+    if status not in SCORING_AUDIT_TAXONOMY_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="Audit taxonomy status must be exact, partial_match, near_miss, or unscorable_due_to_occlusion.",
+        )
+    note = payload.audit_taxonomy_note.strip()
+    if len(note) > 200 or re.search(r"([A-Za-z]:\\|\\\\|/Users/|/home/|SECRET_)", note):
+        note = "sanitized_review_note"
+    return {
+        "status": status,
+        "note": note,
+        "boundary": "review item / scoring audit metadata",
+        "provenance": "operator_selected_review_resolution",
+    }
+
+
+def review_private_accuracy_field_outcome(payload: ReviewResolutionCreate) -> dict[str, Any]:
+    outcome = payload.field_review_outcome if isinstance(payload.field_review_outcome, dict) else {}
+    scope = str(payload.note_line_scoring_scope or outcome.get("note_line_scoring_scope") or "").strip()
+    if scope and scope not in NOTE_LINE_SCORING_SCOPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Note-line scoring scope must be scored_note_line or no_visible_note_line_for_evaluator_scoring.",
+        )
+    field_scores_input = outcome.get("field_scores")
+    field_scores = {}
+    if isinstance(field_scores_input, dict):
+        for family, score in field_scores_input.items():
+            family_key = str(family or "").strip()
+            if family_key not in PRIVATE_ACCURACY_FIELD_FAMILIES or not isinstance(score, dict):
+                continue
+            status = str(score.get("status") or "").strip()
+            if status not in PRIVATE_ACCURACY_FIELD_STATUSES:
+                continue
+            field_scores[family_key] = {
+                "status": status,
+                "reviewed_before_apply": score.get("reviewed_before_apply") is True,
+                "traceable": score.get("traceable") is not False,
+            }
+    labels = []
+    raw_labels = outcome.get("failure_labels")
+    if isinstance(raw_labels, list):
+        for label in raw_labels:
+            label_key = str(label or "").strip()
+            if label_key in PRIVATE_ACCURACY_FAILURE_LABELS and label_key not in labels:
+                labels.append(label_key)
+    if not scope and (field_scores or labels):
+        raise HTTPException(
+            status_code=400,
+            detail="Note-line scoring scope is required when recording private accuracy field outcomes.",
+        )
+    if scope and not field_scores and not labels:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one field score or failure label is required when recording private accuracy field outcomes.",
+        )
+    if not scope and not field_scores and not labels:
+        return {}
+    actual_review_level = str(outcome.get("actual_review_level") or "").strip()
+    if actual_review_level and actual_review_level not in PRIVATE_ACCURACY_REVIEW_LEVELS:
+        raise HTTPException(
+            status_code=400,
+            detail="Actual review level must be must_review, quick_check, trace_only, or hidden_default.",
+        )
+    return {
+        "boundary": "review item / private accuracy field outcome",
+        "provenance": "operator_selected_review_resolution",
+        "note_line_scoring_scope": scope,
+        "actual_review_level": actual_review_level,
+        "export_blocked_until_resolved": outcome.get("export_blocked_until_resolved") is True,
+        "unresolved_must_review_at_export": outcome.get("unresolved_must_review_at_export") is True,
+        "manual_transcription_required": outcome.get("manual_transcription_required") is True,
+        "failure_labels": labels,
+        "field_scores": field_scores,
+    }
+
+
 @app.post("/api/review-items/{review_id}/resolve")
 def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict[str, Any]:
     resolved_at = utc_now()
+    scoring_audit = review_scoring_audit_metadata(payload)
+    field_review_outcome = review_private_accuracy_field_outcome(payload)
+    if (
+        field_review_outcome.get("note_line_scoring_scope") == "scored_note_line"
+        and not scoring_audit.get("status")
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Scored note-line field outcomes require scoring audit taxonomy status.",
+        )
     allowed_legacy_decisions = {
         "resolve",
         "accept_legacy_candidate",
@@ -9917,6 +10109,8 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
             "reviewed_strain_name": payload.reviewed_strain_name,
             "reviewed_gene_symbol": payload.reviewed_gene_symbol,
             "reviewed_allele_name": payload.reviewed_allele_name,
+            "scoring_audit": scoring_audit,
+            "field_review_outcome": field_review_outcome,
         }
         conn.execute(
             """
@@ -10004,6 +10198,8 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
                     reason=payload.resolution_note,
                     source_record_id=payload.correction_source_record_id,
                     review_id=review_id,
+                    scoring_audit_status=scoring_audit.get("status", ""),
+                    scoring_audit_note=scoring_audit.get("note", ""),
                 ),
                 resolved_at,
             )
@@ -10052,6 +10248,8 @@ def resolve_review_item(review_id: str, payload: ReviewResolutionCreate) -> dict
         "correction_id": correction_id,
         "note_label_update": note_label_update,
         "ear_label_update": ear_label_update,
+        "scoring_audit": scoring_audit,
+        "field_review_outcome": field_review_outcome,
         "review_action_id": review_action_id,
         "audit_url": f"/api/review-items/{quote(review_id)}/audit",
     }

@@ -120,7 +120,7 @@ The pilot should contain 20-30 cases total. If the available private photo set c
 12. Apply only reviewed, source-backed canonical candidates. Do not silently overwrite high-risk data.
 13. Generate XLSX export only when no unresolved `must_review` blocker remains.
 14. Run a post-session backup and restore into a separate probe location before declaring go/no-go confidence.
-15. Score accuracy locally from the same private manifest expected fields. Commit only aggregate counts, rates, failure taxonomy labels, workload metrics, and go/no-go status.
+15. Score accuracy locally from the same private manifest expected fields with `python scripts/report-private-accuracy.py --manifest <private manifest> --results <private scoring results> --output-report docs/pilot_runs/YYYY-MM-DD-<label>-accuracy.md --json`. Commit only aggregate counts, rates, failure taxonomy labels, workload metrics, and go/no-go status.
 
 ## Accuracy Evaluation Reuse
 
@@ -135,6 +135,8 @@ Use each manifest case as the local scoring row:
 | `expected_export_blocking` | Whether export was blocked until review cleared the case. | Export safety pass/fail and unresolved blocker count. |
 
 Never publish case-level raw text from the manifest. If a public example is needed, write a synthetic example that is clearly not copied from a real photo.
+
+The private scoring results file is a local-only review item. It should use `layer: "review item / private accuracy scoring input"` and `canonical: false`, then record sanitized `case_id` values, field-family scoring statuses, review timing, export blocking, traceability, and failure taxonomy labels. The reporter output is a sanitized aggregate report, not canonical colony state.
 
 ## Sanitized Public Summary
 
