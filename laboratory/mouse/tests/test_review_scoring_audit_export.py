@@ -6,6 +6,8 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from app import db
 
 
@@ -518,6 +520,31 @@ def test_export_field_outcomes_drops_untrusted_review_level_text(tmp_path: Path)
     encoded = json.dumps(payload, ensure_ascii=False)
     assert "SECRET_RAW_LEVEL" not in encoded
     assert str(tmp_path) not in encoded
+
+
+def test_sanitized_payload_validation_blocks_private_markers_without_echoing_values() -> None:
+    exporter = load_export_module()
+    payload = {
+        "layer": "review item / private accuracy scoring input",
+        "canonical": False,
+        "cases": [
+            {
+                "case_id": "apom_001",
+                "raw_payload": {"rawText": r"C:\Users\User\Documents\SECRET_RAW_NOTE"},
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError) as exc:
+        exporter.validate_sanitized_payload(payload)
+
+    message = str(exc.value)
+    assert "sanitized payload validation failed" in message
+    assert "blocked_key:raw_payload" in message
+    assert "blocked_value_marker:windows_path" in message
+    assert "blocked_value_marker:secret_marker" in message
+    assert "SECRET_RAW_NOTE" not in message
+    assert r"C:\Users\User" not in message
 
 
 def test_review_scoring_audit_export_cli_and_package_script_redact_paths(tmp_path: Path) -> None:

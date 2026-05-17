@@ -61,6 +61,7 @@ Treat the run as passing only when all of these are true:
 | `regression_gate.status` | `passed` |
 | `regression_gate.field_outcome_integrity_status` | `passed` |
 | `regression_gate.comparison_all_key_metrics_match` | `true` |
+| Sanitized payload validation | No blocked private keys, path markers, raw OCR markers, or secret markers |
 
 Latest checked ApoM tgtg result on 2026-05-17:
 
@@ -81,6 +82,8 @@ If `field_outcome_integrity.scored_scope_missing_scored_cases` is non-empty, a r
 If `comparison.all_key_metrics_match` is false, inspect the comparison JSON. A metric mismatch can be legitimate only when the baseline intentionally changed. Otherwise, treat it as a regression and investigate the exporter, reporter, or audit DB before publishing results.
 
 If `decision` is not `go`, do not treat the run as ready. Check failed hard gates first, especially traceability, review blocking, silent_overwrite prevention, and accuracy thresholds.
+
+If the exporter reports `sanitized payload validation failed`, treat the generated scoring input as unsafe to share. Fix the exporter or review audit mapping before rerunning; the error intentionally names only violation categories, not private values.
 
 ## Leak Check
 
