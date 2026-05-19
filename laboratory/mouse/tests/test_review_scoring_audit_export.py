@@ -33,6 +33,14 @@ def load_reporter_module():
     return module
 
 
+def load_regression_runner_module():
+    spec = importlib.util.spec_from_file_location("run_private_accuracy_regression", REGRESSION_RUNNER_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def write_manifest(tmp_path: Path) -> Path:
     private_source = tmp_path / "private-source"
     private_source.mkdir()
@@ -699,6 +707,254 @@ def test_private_accuracy_regression_runner_exports_reports_and_compares_metrics
     )
 
 
+def test_private_accuracy_regression_runner_writes_sanitized_history_index(tmp_path: Path) -> None:
+    exporter = load_export_module()
+    manifest_path = write_manifest(tmp_path)
+    db_path = seed_full_field_review_outcome_db(tmp_path)
+    baseline_path = tmp_path / "baseline-private-input.json"
+    run_dir = tmp_path / "private-regression-run"
+    history_path = run_dir / "private-accuracy-regression-history.json"
+
+    exporter.export_review_scoring_audit_input(
+        db_path=db_path,
+        manifest_path=manifest_path,
+        output_path=baseline_path,
+        run_label="baseline field outcomes",
+    )
+
+    result = subprocess.run(
+        [
+            "python",
+            str(REGRESSION_RUNNER_PATH),
+            "--db-path",
+            str(db_path),
+            "--manifest",
+            str(manifest_path),
+            "--run-dir",
+            str(run_dir),
+            "--run-label",
+            "field outcome regression",
+            "--suffix",
+            "field-outcomes-history-test",
+            "--baseline-results",
+            str(baseline_path),
+            "--history-index",
+            str(history_path),
+            "--json",
+        ],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["history_update_status"] == "updated"
+    assert summary["history_index_path"] == "private output path omitted"
+    assert summary["baseline_promotion"] == {
+        "eligible": True,
+        "status": "ready_for_operator_promotion",
+        "recommended_action": "operator_may_promote_current_results_to_baseline_after_review",
+        "candidate_results_filename": "review-scoring-audit-export-input-field-outcomes-history-test.json",
+        "current_baseline_filename": "baseline-private-input.json",
+        "blocked_reasons": [],
+    }
+    assert str(tmp_path) not in result.stdout
+
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    assert history["layer"] == "review item / private accuracy regression history"
+    assert history["canonical"] is False
+    assert history["run_count"] == 1
+    assert history["latest_run_label"] == "field-outcomes-history-test"
+    assert history["baseline"]["current_filename"] == "baseline-private-input.json"
+    assert history["runs"][0]["artifacts"] == {
+        "results_filename": "review-scoring-audit-export-input-field-outcomes-history-test.json",
+        "report_filename": "sanitized-private-accuracy-field-outcomes-history-test.md",
+        "comparison_filename": "field-outcomes-regression-comparison-field-outcomes-history-test.json",
+    }
+    assert history["runs"][0]["baseline_promotion"]["eligible"] is True
+    encoded = json.dumps(history, ensure_ascii=False)
+    assert str(tmp_path) not in encoded
+    assert "SECRET_" not in encoded
+    assert "source_photo_path" not in encoded
+
+
+def test_private_accuracy_regression_history_sanitizes_existing_entries(tmp_path: Path) -> None:
+    exporter = load_export_module()
+    manifest_path = write_manifest(tmp_path)
+    db_path = seed_full_field_review_outcome_db(tmp_path)
+    baseline_path = tmp_path / "baseline-private-input.json"
+    run_dir = tmp_path / "private-regression-existing-history"
+    history_path = run_dir / "private-accuracy-regression-history.json"
+    run_dir.mkdir()
+
+    exporter.export_review_scoring_audit_input(
+        db_path=db_path,
+        manifest_path=manifest_path,
+        output_path=baseline_path,
+        run_label="baseline field outcomes",
+    )
+    history_path.write_text(
+        json.dumps(
+            {
+                "runs": [
+                    {
+                        "run_id": "legacy-safe-run",
+                        "recorded_at": "2026-05-18T00:00:00Z",
+                        "boundary": "review item / private accuracy regression history",
+                        "canonical": False,
+                        "run_label": "operator reviewed free text",
+                        "status": {"full_private_payload": "operator reviewed free text"},
+                        "decision": "go",
+                        "report_hard_gate_failures": [
+                            "manifest_validation",
+                            {"full_private_payload": "operator reviewed free text"},
+                        ],
+                        "private_path": str(tmp_path / "private-photo.jpg"),
+                        "raw_payload": {"rawText": "SECRET_RAW_NOTE"},
+                        "comparison": {
+                            "all_key_metrics_match": True,
+                            "matches": {
+                                "decision": True,
+                                "cases": [{"full_private_payload": "operator reviewed free text"}],
+                            },
+                            "old": {"cases": [{"full_private_payload": "operator reviewed free text"}]},
+                            "new": {"cases": [{"full_private_payload": "operator reviewed free text"}]},
+                        },
+                        "field_outcome_integrity": {
+                            "case_count": 17,
+                            "missing_scope": ["operator reviewed free text"],
+                        },
+                        "regression_gate": {
+                            "status": "operator reviewed free text",
+                            "report_status": "failed",
+                            "field_outcome_integrity_status": "passed",
+                            "comparison_all_key_metrics_match": True,
+                        },
+                        "baseline_promotion": {
+                            "eligible": False,
+                            "status": "operator reviewed free text",
+                            "recommended_action": "operator reviewed free text",
+                            "blocked_reasons": [
+                                "manifest_validation_failed",
+                                {"full_private_payload": "operator reviewed free text"},
+                            ],
+                        },
+                        "artifacts": {
+                            "results_filename": "operator reviewed free text",
+                            "source_photo_path": str(tmp_path / "private-photo.jpg"),
+                        },
+                    },
+                    {
+                        "run_id": "field-outcomes-existing-history-test",
+                        "private_path": str(tmp_path / "stale-run.json"),
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "python",
+            str(REGRESSION_RUNNER_PATH),
+            "--db-path",
+            str(db_path),
+            "--manifest",
+            str(manifest_path),
+            "--run-dir",
+            str(run_dir),
+            "--run-label",
+            "field outcome regression",
+            "--suffix",
+            "field-outcomes-existing-history-test",
+            "--baseline-results",
+            str(baseline_path),
+            "--history-index",
+            str(history_path),
+            "--json",
+        ],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    assert history["run_count"] == 2
+    run_ids = {run["run_id"] for run in history["runs"]}
+    assert run_ids == {"legacy-safe-run", "field-outcomes-existing-history-test"}
+    encoded = json.dumps(history, ensure_ascii=False)
+    assert str(tmp_path) not in encoded
+    assert "private_path" not in encoded
+    assert "raw_payload" not in encoded
+    assert "rawText" not in encoded
+    assert "SECRET_" not in encoded
+    assert "source_photo_path" not in encoded
+    assert "full_private_payload" not in encoded
+    assert "operator reviewed free text" not in encoded
+    assert "old" not in history["runs"][0]["comparison"]
+    assert "new" not in history["runs"][0]["comparison"]
+    assert history["runs"][0]["comparison"]["matches"] == {"decision": True}
+    assert history["runs"][0]["field_outcome_integrity"]["missing_scope"] == []
+    assert "status" not in history["runs"][0]["regression_gate"]
+    assert history["runs"][0]["regression_gate"]["report_status"] == "failed"
+    assert history["runs"][0]["baseline_promotion"]["blocked_reasons"] == ["manifest_validation_failed"]
+    assert "status" not in history["runs"][0]["baseline_promotion"]
+    assert "recommended_action" not in history["runs"][0]["baseline_promotion"]
+    assert "results_filename" not in history["runs"][0]["artifacts"]
+
+
+def test_baseline_promotion_status_blocks_each_operator_safety_gate() -> None:
+    runner = load_regression_runner_module()
+    base_kwargs = {
+        "gate": {
+            "status": "passed",
+            "report_status": "passed",
+            "field_outcome_integrity_status": "passed",
+            "comparison_all_key_metrics_match": True,
+        },
+        "decision": "go",
+        "matched_case_count": 2,
+        "unmatched_audit_count": 0,
+        "missing_result_case_count": 0,
+        "extra_result_case_count": 0,
+        "result_validation_failures": 0,
+        "comparison": {"all_key_metrics_match": True},
+        "report_hard_gate_failures": [],
+        "results_path": Path("candidate-results.json"),
+        "baseline_results_path": Path("baseline-results.json"),
+    }
+
+    checks = [
+        ({"baseline_results_path": None}, "baseline_results_required"),
+        ({"decision": "no_go"}, "decision_not_go"),
+        ({"matched_case_count": 0}, "no_matched_cases"),
+        ({"unmatched_audit_count": 1}, "unmatched_audit"),
+        ({"missing_result_case_count": 1}, "result_case_mismatch"),
+        ({"extra_result_case_count": 1}, "result_case_mismatch"),
+        ({"result_validation_failures": 1}, "result_validation_failures"),
+        ({"comparison": {"all_key_metrics_match": False}}, "baseline_comparison_mismatch"),
+        ({"report_hard_gate_failures": ["manifest_validation"]}, "manifest_validation_failed"),
+        ({"gate": {**base_kwargs["gate"], "status": "failed"}}, "regression_gate_failed"),
+    ]
+    for override, expected_reason in checks:
+        kwargs = {**base_kwargs, **override}
+        status = runner.baseline_promotion_status(**kwargs)
+        assert status["eligible"] is False
+        assert status["status"] == "blocked"
+        assert status["recommended_action"] == "do_not_promote_baseline"
+        assert expected_reason in status["blocked_reasons"]
+
+
 def test_private_accuracy_regression_runner_fails_on_baseline_metric_mismatch(tmp_path: Path) -> None:
     exporter = load_export_module()
     manifest_path = write_manifest(tmp_path)
@@ -750,6 +1006,69 @@ def test_private_accuracy_regression_runner_fails_on_baseline_metric_mismatch(tm
     assert "field_family_scores" in summary["comparison"]["matches"]
     assert summary["comparison"]["matches"]["field_family_scores"] is False
     assert str(tmp_path) not in result.stdout
+
+
+def test_private_accuracy_regression_history_blocks_baseline_promotion_on_metric_mismatch(tmp_path: Path) -> None:
+    exporter = load_export_module()
+    manifest_path = write_manifest(tmp_path)
+    db_path = seed_full_field_review_outcome_db(tmp_path)
+    baseline_path = tmp_path / "baseline-private-input.json"
+    run_dir = tmp_path / "private-regression-mismatch"
+    history_path = run_dir / "private-accuracy-regression-history.json"
+
+    exporter.export_review_scoring_audit_input(
+        db_path=db_path,
+        manifest_path=manifest_path,
+        output_path=baseline_path,
+        run_label="baseline field outcomes",
+    )
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline["cases"][0]["field_scores"]["mouse_ids_or_note_lines"]["status"] = "missed"
+    baseline_path.write_text(json.dumps(baseline, ensure_ascii=False), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            "python",
+            str(REGRESSION_RUNNER_PATH),
+            "--db-path",
+            str(db_path),
+            "--manifest",
+            str(manifest_path),
+            "--run-dir",
+            str(run_dir),
+            "--run-label",
+            "field outcome regression",
+            "--suffix",
+            "field-outcomes-history-mismatch",
+            "--baseline-results",
+            str(baseline_path),
+            "--history-index",
+            str(history_path),
+            "--json",
+        ],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["status"] == "failed"
+    assert summary["baseline_promotion"]["eligible"] is False
+    assert "regression_gate_failed" in summary["baseline_promotion"]["blocked_reasons"]
+    assert "baseline_comparison_mismatch" in summary["baseline_promotion"]["blocked_reasons"]
+    assert summary["history_update_status"] == "updated"
+    assert str(tmp_path) not in result.stdout
+
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    assert history["run_count"] == 1
+    assert history["runs"][0]["baseline_promotion"]["eligible"] is False
+    assert "baseline_comparison_mismatch" in history["runs"][0]["baseline_promotion"]["blocked_reasons"]
+    encoded = json.dumps(history, ensure_ascii=False)
+    assert str(tmp_path) not in encoded
 
 
 def test_private_accuracy_regression_runner_fails_on_field_outcome_integrity_violation(tmp_path: Path) -> None:
