@@ -85,6 +85,12 @@ def test_private_accuracy_regression_runbook_documents_safe_operator_loop() -> N
     assert "--baseline-results" in runbook
     assert "regression_gate" in runbook
     assert "field_outcome_integrity" in runbook
+    assert "--history-index" in runbook
+    assert "private-accuracy-regression-history.json" in runbook
+    assert "baseline promotion" in runbook
+    assert "operator_may_promote_current_results_to_baseline_after_review" in runbook
+    assert "report_hard_gate_failures" in runbook
+    assert "manifest_validation" in runbook
     assert "review-scoring-audit-with-field-outcomes.sqlite" in runbook
     assert "review-scoring-audit-export-input-with-field-outcomes.json" in runbook
     assert "raw photos" in runbook
